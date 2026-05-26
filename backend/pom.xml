@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+  Bee Academy Backend - Maven Project Configuration
+  ============================================================================
+  - Spring Boot 3.2 + Java 17
+  - Postgres driver (kết nối Supabase Postgres qua JDBC)
+  - Spring Security + java-jwt (verify JWT do Supabase phát hành)
+  - Lombok (giảm boilerplate)
+  - Validation (Jakarta Bean Validation cho DTO @Valid)
+  ============================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Kế thừa cấu hình mặc định từ Spring Boot Parent (quản lý version dependencies) -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.beeacademy</groupId>
+    <artifactId>backend</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>bee-academy-backend</name>
+    <description>Bee Academy REST API - Spring Boot + Supabase</description>
+
+    <properties>
+        <java.version>17</java.version>
+        <java-jwt.version>4.4.0</java-jwt.version>
+        <spring-dotenv.version>4.0.0</spring-dotenv.version>
+    </properties>
+
+    <dependencies>
+        <!-- ===== Web layer: REST controllers, JSON, embedded Tomcat ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- ===== Data layer: JPA + Hibernate (map entity ↔ table Postgres) ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- ===== Security layer: Spring Security filter chain ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!-- ===== Validation layer: Jakarta Bean Validation cho @Valid trên DTO ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- ===== Postgres JDBC driver: kết nối Supabase Postgres ===== -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ===== spring-dotenv: tự động đọc file backend/.env khi khởi động =====
+             Bind giá trị trong .env thành System property → Spring resolve được
+             ${SUPABASE_*} trong application.yml mà KHÔNG cần set env ở IDE.
+             Chạy được trên mọi máy chỉ với: mvn spring-boot:run
+        -->
+        <dependency>
+            <groupId>me.paulschwarz</groupId>
+            <artifactId>spring-dotenv</artifactId>
+            <version>${spring-dotenv.version}</version>
+        </dependency>
+
+        <!-- ===== JWT library: verify chữ ký HS256 của token Supabase phát hành ===== -->
+        <dependency>
+            <groupId>com.auth0</groupId>
+            <artifactId>java-jwt</artifactId>
+            <version>${java-jwt.version}</version>
+        </dependency>
+
+        <!-- ===== Lombok: giảm boilerplate (@Getter, @Setter, @Builder, @Slf4j) ===== -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- ===== Mail: gửi OTP qua Gmail SMTP ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
+        <!-- ===== Test ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Plugin Spring Boot: package thành JAR chạy được + chạy mvn spring-boot:run -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

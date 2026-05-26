@@ -21,21 +21,25 @@
 //   - ScoreCircle:   vòng tròn SVG hiển thị điểm số
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft, Star, Users, PlayCircle, FileText, CheckCircle2,
   Lock, ShoppingCart, Video, Menu, X, MessageSquare, BookOpen,
   ClipboardList, XCircle, Award, RotateCcw, ChevronLeft, ChevronRight,
-  Trophy,
+  Trophy, Loader2,
 } from 'lucide-react';
 import DashboardHeader from '../../components/DashboardHeader';
-import { MOCK_COURSES, Course, Lesson, QuizQuestion } from '../../data/mockCourses';
+import type { Course, Lesson, QuizQuestion } from '../../data/mockCourses';
 import { notify } from '../../lib/toast';
 import { useCartStore } from '../../store/useCartStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useCourseStore } from '../../store/useCourseStore';
+// API integration (Giai đoạn 1C) - thay MOCK_COURSES bằng call BE thật
+import { getCourseDetail as courseServiceGetDetail } from '../../api/courseService';
+import { adaptCourseDetail } from '../../api/adapter';
+import { isApiError } from '../../api/client';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COMPONENT: ScoreCircle
@@ -1103,37 +1107,76 @@ function LearningView({ course }: { course: Course }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXPORT DEFAULT: CourseDetailPage
 //
-// Entry point duy nhất — đọc :id từ URL, kiểm tra enrollment, phân nhánh render.
+// Entry point duy nhất — đọc :id từ URL, fetch chi tiết từ BE (UC07),
+// phân nhánh render Marketing/Learning view.
+//
+// GIAI ĐOẠN 1C:
+//   - MarketingView render chi tiết từ API thật (mô tả + curriculum 2 cấp
+//     được flatten bởi adapter.flattenChaptersToLessons).
+//   - LearningView vẫn dùng dữ liệu Course đã adapt, nhưng logic enrollment
+//     tạm thời check qua purchasedIds (Zustand local) - sẽ refactor ở
+//     Module 3 khi có API enrollment thật.
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function CourseDetailPage() {
-  // Đọc :id từ URL /courses/:id
+  // Đọc :id từ URL /courses/:id — id là UUID của BE
   const { id } = useParams<{ id: string }>();
+  const purchasedIds = useCourseStore((state) => state.purchasedIds);
 
-  // Tìm course trong MOCK_COURSES theo id
-  const course = MOCK_COURSES.find(c => c.id === id);
+  // ── State fetch từ API ──────────────────────────────────────────────────
+  const [course, setCourse] = useState<Course | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [notFound, setNotFound] = useState<boolean>(false);
 
-  // purchasedIds: danh sách khóa học user đã mua qua CheckoutPage trong session này
-  const purchasedIds = useCourseStore(state => state.purchasedIds);
+  // ── Fetch course detail mỗi khi id thay đổi ─────────────────────────────
+  useEffect(() => {
+    if (!id) return;
+    setLoading(true);
+    setNotFound(false);
 
-  // Không tìm thấy course → 404
-  if (!course) {
+    courseServiceGetDetail(id)
+      .then((detail) => setCourse(adaptCourseDetail(detail)))
+      .catch((err) => {
+        // 404 từ BE → hiển thị empty state. Lỗi khác → toast.
+        if (isApiError(err) && err.status === 404) {
+          setNotFound(true);
+        } else {
+          const message = isApiError(err) ? err.message : 'Không thể tải khóa học';
+          notify.error(message);
+          setNotFound(true);
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  // ── Loading state ────────────────────────────────────────────────────────
+  if (loading) {
     return (
       <div className="min-h-screen bg-surface flex flex-col items-center justify-center">
-        <h1 className="text-2xl font-bold text-on-surface mb-4">Không tìm thấy khóa học</h1>
-        <Link to="/courses" className="text-primary hover:underline font-bold">Quay lại danh sách</Link>
+        <Loader2 className="w-10 h-10 text-primary animate-spin mb-4" />
+        <p className="text-on-surface-variant">Đang tải khóa học...</p>
       </div>
     );
   }
 
-  // Kiểm tra quyền truy cập học:
-  //   course.isEnrolled — được gán sẵn trong mock data (dành cho demo)
-  //   purchasedIds.includes — user vừa mua trong session này
-  const isEnrolled = course.isEnrolled || purchasedIds.includes(course.id);
+  // ── Not found state ─────────────────────────────────────────────────────
+  if (notFound || !course) {
+    return (
+      <div className="min-h-screen bg-surface flex flex-col items-center justify-center">
+        <h1 className="text-2xl font-bold text-on-surface mb-4">Không tìm thấy khóa học</h1>
+        <Link to="/courses" className="text-primary hover:underline font-bold">
+          Quay lại danh sách
+        </Link>
+      </div>
+    );
+  }
 
-  // Phân nhánh render:
-  //   isEnrolled=true  → LearningView (giao diện học bài + quiz)
-  //   isEnrolled=false → MarketingView (trang giới thiệu + mua)
-  return isEnrolled
-    ? <LearningView course={course} />
-    : <MarketingView course={{ ...course, isEnrolled }} />;
+  // Kiểm tra quyền truy cập học - tạm thời chỉ check purchasedIds local
+  // (Module 3 sẽ check enrollments thật qua /api/my-courses)
+  const isEnrolled = purchasedIds.includes(course.id);
+
+  return isEnrolled ? (
+    <LearningView course={course} />
+  ) : (
+    <MarketingView course={{ ...course, isEnrolled }} />
+  );
 }

@@ -1,9 +1,10 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import LandingPage from './pages/common/LandingPage';
-import QuizPage from './pages/QuizPage';
+import QuizPage from './pages/teacher/QuizPage';
 import Login from './pages/common/Login';
 import Register from './pages/common/Register';
+import ForgotPassword from './pages/common/ForgotPassword';
 import CoursesPage from './pages/student/CoursesPage';
 import CourseDetailPage from './pages/student/CourseDetailPage';
 import CheckoutPage from './pages/student/CheckoutPage';
@@ -14,8 +15,20 @@ import MessagesPage from './pages/student/MessagesPage';
 import ProfilePage from './pages/student/ProfilePage';
 import FavoritesPage from './pages/student/FavoritesPage';
 import AccountPage from './pages/student/AccountPage';
+import AvatarPage from './pages/student/AvatarPage';
+import ComplaintsPage from './pages/student/ComplaintsPage';
 import DashboardAdmin from './pages/admin/DashboardAdmin';
 import DashboardTeacher from './pages/teacher/DashboardTeacher';
+import TeacherCoursesPage from './pages/teacher/CoursesPage';
+import TeacherContentPage from './pages/teacher/ContentPage';
+import TeacherQuizChapterPage from './pages/teacher/QuizChapterPage';
+import TeacherExamPage from './pages/teacher/ExamPage';
+import TeacherGradesPage from './pages/teacher/GradesPage';
+import TeacherQAPage from './pages/teacher/QAPage';
+import TeacherRevenuePage from './pages/teacher/RevenuePage';
+import TeacherBankPage from './pages/teacher/BankPage';
+import TeacherComplaintsPage from './pages/teacher/ComplaintsPage';
+import OAuthCallbackPage from './pages/common/OAuthCallbackPage';
 
 export default function App() {
   return (
@@ -26,6 +39,9 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/auth/callback" element={<OAuthCallbackPage />} />
+
 
         {/* ── Student ── */}
         <Route path="/quiz" element={<QuizPage />} />
@@ -38,18 +54,21 @@ export default function App() {
         <Route path="/messages"      element={<MessagesPage />} />
         <Route path="/profile"       element={<ProfilePage />} />
         <Route path="/account/type"  element={<ComingSoonPage title="Loại tài khoản"        subtitle="Quản lý gói đăng ký của bạn" />} />
-        <Route path="/account/photo" element={<ComingSoonPage title="Ảnh đại diện"          subtitle="Cập nhật ảnh đại diện" />} />
+        <Route path="/account/photo" element={<AvatarPage />} />
         <Route path="/account"       element={<AccountPage />} />
+        <Route path="/complaints"    element={<ComplaintsPage />} />
 
         {/* ── Teacher ── */}
         <Route path="/teacher"          element={<DashboardTeacher />} />
-        <Route path="/teacher/courses"  element={<ComingSoonPage title="Khóa học của tôi"   subtitle="Tạo và quản lý khóa học, submit duyệt" />} />
-        <Route path="/teacher/content"  element={<ComingSoonPage title="Bài giảng"           subtitle="Cập nhật bài giảng và tài liệu" />} />
-        <Route path="/teacher/quiz"     element={<ComingSoonPage title="Quiz & Kiểm tra"     subtitle="Tạo quiz chương và bài kiểm tra" />} />
-        <Route path="/teacher/grades"   element={<ComingSoonPage title="Chấm điểm"            subtitle="Chấm điểm bài tập học sinh" />} />
-        <Route path="/teacher/qa"       element={<ComingSoonPage title="Hỏi & Đáp"            subtitle="Trả lời câu hỏi học sinh" />} />
-        <Route path="/teacher/stripe"   element={<ComingSoonPage title="Kết nối Stripe"       subtitle="Kết nối tài khoản Stripe để nhận hoa hồng" />} />
-        <Route path="/teacher/revenue"  element={<ComingSoonPage title="Doanh thu"             subtitle="Báo cáo doanh thu và hoa hồng" />} />
+        <Route path="/teacher/courses"  element={<TeacherCoursesPage />} />
+        <Route path="/teacher/content"  element={<TeacherContentPage />} />
+        <Route path="/teacher/quiz"     element={<TeacherQuizChapterPage />} />
+        <Route path="/teacher/exam"     element={<TeacherExamPage />} />
+        <Route path="/teacher/grades"   element={<TeacherGradesPage />} />
+        <Route path="/teacher/qa"       element={<TeacherQAPage />} />
+        <Route path="/teacher/complaints" element={<TeacherComplaintsPage />} />
+        <Route path="/teacher/revenue"  element={<TeacherRevenuePage />} />
+        <Route path="/teacher/bank"     element={<TeacherBankPage />} />
 
         {/* ── Admin ── */}
         <Route path="/admin"          element={<DashboardAdmin />} />

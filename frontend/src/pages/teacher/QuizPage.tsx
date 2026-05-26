@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import Header from '../components/Header';
-import Sidebar from '../components/Sidebar';
-import QuestionArea from '../components/QuestionArea';
-import Footer from '../components/Footer';
-import { Question } from '../types';
+import Header from '../../components/Header';
+import Sidebar from '../../components/Sidebar';
+import QuestionArea from '../../components/QuestionArea';
+import Footer from '../../components/Footer';
+import { Question } from '../../types';
 
 const MOCK_QUESTIONS: Question[] = [
   {

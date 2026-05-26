@@ -24,7 +24,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   BookOpen, CreditCard, Heart, MessageSquare,
-  ShoppingBag, UserCircle, Camera, LogOut, Lock,
+  ShoppingBag, UserCircle, Camera, LogOut, Lock, Megaphone,
 } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -37,6 +37,7 @@ const MENU_ITEMS = [
   { icon: ShoppingBag,   label: 'Lịch sử mua hàng',     path: '/orders'        },
   { icon: UserCircle,    label: 'Hồ sơ',                 path: '/profile'       },
   { icon: Lock,          label: 'Tài khoản',             path: '/account'       },
+  { icon: Megaphone,     label: 'Khiếu nại',              path: '/complaints'    },
   { icon: Camera,        label: 'Ảnh',                   path: '/account/photo' },
 ] as const;
 

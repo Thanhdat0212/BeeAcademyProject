@@ -7,7 +7,8 @@ import {
   TrendingUp, TrendingDown, DollarSign, Users,
   Star, ChevronRight, Bell, LogOut, Menu, X,
   CheckCircle2, Clock, XCircle, PlusCircle,
-  PenSquare, CreditCard, BarChart2, ClipboardList,
+  PenSquare, Landmark, BarChart2, ClipboardList,
+  GraduationCap, Megaphone,
 } from 'lucide-react';
 import { MOCK_COURSES } from '../../data/mockCourses';
 
@@ -33,11 +34,11 @@ interface StatCardData {
 const MY_COURSES = MOCK_COURSES.slice(0, 4);
 
 const MOCK_SALES: Sale[] = [
-  { id: 'S-001', student: 'Nguyễn Văn An',  course: MY_COURSES[0]?.title ?? 'Toán Đại Số', amount: 499000, commission: 349300, date: '19/05/2026', status: 'success' },
-  { id: 'S-002', student: 'Trần Thị Bích',  course: MY_COURSES[1]?.title ?? 'Vật Lý',      amount: 550000, commission: 385000, date: '19/05/2026', status: 'success' },
-  { id: 'S-003', student: 'Lê Minh Cường',  course: MY_COURSES[0]?.title ?? 'Toán Đại Số', amount: 499000, commission: 349300, date: '18/05/2026', status: 'pending' },
-  { id: 'S-004', student: 'Phạm Thị Dung',  course: MY_COURSES[2]?.title ?? 'Hóa Học',     amount: 400000, commission: 280000, date: '17/05/2026', status: 'success' },
-  { id: 'S-005', student: 'Hoàng Quốc Đạt', course: MY_COURSES[3]?.title ?? 'Ngữ Văn',     amount: 350000, commission: 245000, date: '16/05/2026', status: 'failed'  },
+  { id: 'S-001', student: 'Nguyễn Văn An', course: MY_COURSES[0]?.title ?? 'Toán Đại Số', amount: 499000, commission: 349300, date: '19/05/2026', status: 'success' },
+  { id: 'S-002', student: 'Trần Thị Bích', course: MY_COURSES[1]?.title ?? 'Vật Lý', amount: 550000, commission: 385000, date: '19/05/2026', status: 'success' },
+  { id: 'S-003', student: 'Lê Minh Cường', course: MY_COURSES[0]?.title ?? 'Toán Đại Số', amount: 499000, commission: 349300, date: '18/05/2026', status: 'pending' },
+  { id: 'S-004', student: 'Phạm Thị Dung', course: MY_COURSES[2]?.title ?? 'Hóa Học', amount: 400000, commission: 280000, date: '17/05/2026', status: 'success' },
+  { id: 'S-005', student: 'Hoàng Quốc Đạt', course: MY_COURSES[3]?.title ?? 'Ngữ Văn', amount: 350000, commission: 245000, date: '16/05/2026', status: 'failed' },
 ];
 
 const totalCommission = MOCK_SALES
@@ -47,14 +48,16 @@ const totalCommission = MOCK_SALES
 const totalStudents = MY_COURSES.reduce((sum, c) => sum + c.students, 0);
 
 const NAV_ITEMS = [
-  { icon: LayoutDashboard, label: 'Tổng quan',         path: '/teacher',          },
-  { icon: BookOpen,        label: 'Khóa học của tôi',  path: '/teacher/courses',  },
-  { icon: FileText,        label: 'Bài giảng',          path: '/teacher/content',  },
-  { icon: PenSquare,       label: 'Quiz & Kiểm tra',   path: '/teacher/quiz',     },
-  { icon: ClipboardList,   label: 'Chấm điểm',          path: '/teacher/grades',   },
-  { icon: HelpCircle,      label: 'Hỏi & Đáp',          path: '/teacher/qa',       },
-  { icon: CreditCard,      label: 'Kết nối Stripe',     path: '/teacher/stripe',   },
-  { icon: BarChart2,       label: 'Doanh thu',           path: '/teacher/revenue',  },
+  { icon: LayoutDashboard, label: 'Tổng quan', path: '/teacher', },
+  { icon: BookOpen, label: 'Khóa học của tôi', path: '/teacher/courses', },
+  { icon: FileText, label: 'Bài giảng', path: '/teacher/content', },
+  { icon: PenSquare, label: 'Quiz chương', path: '/teacher/quiz', },
+  { icon: GraduationCap, label: 'Bài kiểm tra', path: '/teacher/exam', },
+  { icon: ClipboardList, label: 'Chấm điểm', path: '/teacher/grades', },
+  { icon: HelpCircle, label: 'Hỏi & Đáp', path: '/teacher/qa', },
+  { icon: Megaphone, label: 'Khiếu nại', path: '/teacher/complaints', },
+  { icon: BarChart2, label: 'Doanh thu', path: '/teacher/revenue', },
+  { icon: Landmark, label: 'TK ngân hàng', path: '/teacher/bank', },
 ];
 
 interface StatCardProps { data: StatCardData; delay: number }
@@ -86,8 +89,8 @@ function StatCard({ data, delay }: StatCardProps) {
 function SaleStatusBadge({ status }: { status: Sale['status'] }) {
   const config = {
     success: { icon: <CheckCircle2 className="w-3.5 h-3.5" />, label: 'Thành công', className: 'bg-green-500/10 text-green-600' },
-    pending:  { icon: <Clock       className="w-3.5 h-3.5" />, label: 'Đang chờ',   className: 'bg-amber-500/10 text-amber-600' },
-    failed:   { icon: <XCircle     className="w-3.5 h-3.5" />, label: 'Thất bại',   className: 'bg-red-500/10   text-red-600'   },
+    pending: { icon: <Clock className="w-3.5 h-3.5" />, label: 'Đang chờ', className: 'bg-amber-500/10 text-amber-600' },
+    failed: { icon: <XCircle className="w-3.5 h-3.5" />, label: 'Thất bại', className: 'bg-red-500/10   text-red-600' },
   };
   const { icon, label, className } = config[status];
   return (
@@ -131,10 +134,10 @@ function MyCoursesList() {
 
 export default function DashboardTeacher() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const navigate  = useNavigate();
-  const location  = useLocation();
-  const logout    = useAuthStore(state => state.logout);
-  const user      = useAuthStore(state => state.user);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const logout = useAuthStore(state => state.logout);
+  const user = useAuthStore(state => state.user);
 
   function handleLogout() {
     logout();
@@ -143,7 +146,7 @@ export default function DashboardTeacher() {
 
   const statCards: StatCardData[] = [
     {
-      title: 'Hoa hồng tháng này',
+      title: 'Doanh thu kỳ này',
       value: `${totalCommission.toLocaleString('vi-VN')}đ`,
       change: 14.3,
       icon: <DollarSign className="w-5 h-5" />,
@@ -216,11 +219,10 @@ export default function DashboardTeacher() {
                 key={item.path}
                 to={item.path}
                 onClick={() => setIsSidebarOpen(false)}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm transition-all ${
-                  isActive
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm transition-all ${isActive
                     ? 'bg-primary/10 text-primary'
                     : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
-                }`}
+                  }`}
               >
                 <item.icon className="w-5 h-5 flex-shrink-0" />
                 {item.label}
@@ -230,12 +232,12 @@ export default function DashboardTeacher() {
           })}
         </nav>
 
-        {/* Stripe connect banner */}
+        {/* Bank account banner — UC45: bắt buộc trước khi Admin xuất Excel chuyển khoản */}
         <div className="mx-4 mb-3 p-3 bg-amber-500/10 rounded-xl border border-amber-500/20">
-          <p className="text-xs font-bold text-amber-600 mb-1">Chưa kết nối Stripe</p>
-          <p className="text-xs text-amber-600/80">Kết nối để nhận hoa hồng tự động</p>
-          <Link to="/teacher/stripe" className="mt-2 block text-xs font-bold text-amber-600 hover:underline">
-            Kết nối ngay →
+          <p className="text-xs font-bold text-amber-600 mb-1">Chưa nhập TK ngân hàng</p>
+          <p className="text-xs text-amber-600/80">Bắt buộc để Admin chuyển tiền cuối kỳ</p>
+          <Link to="/teacher/bank" className="mt-2 block text-xs font-bold text-amber-600 hover:underline">
+            Nhập ngay →
           </Link>
         </div>
 
@@ -334,9 +336,8 @@ export default function DashboardTeacher() {
                     {MOCK_SALES.map((sale, idx) => (
                       <tr
                         key={sale.id}
-                        className={`border-b border-outline-variant/10 hover:bg-surface-container/30 transition-colors ${
-                          idx % 2 !== 0 ? 'bg-surface-container/20' : ''
-                        }`}
+                        className={`border-b border-outline-variant/10 hover:bg-surface-container/30 transition-colors ${idx % 2 !== 0 ? 'bg-surface-container/20' : ''
+                          }`}
                       >
                         <td className="px-6 py-3.5">
                           <div className="flex items-center gap-3">
@@ -394,10 +395,10 @@ export default function DashboardTeacher() {
             <h3 className="font-extrabold text-on-surface mb-4">Thao tác nhanh</h3>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { icon: <PlusCircle  className="w-6 h-6" />, label: 'Tạo khóa học',   desc: 'Thêm khóa học mới',         path: '/teacher/courses', color: 'bg-primary/10 text-primary hover:bg-primary/20'       },
-                { icon: <FileText    className="w-6 h-6" />, label: 'Cập nhật bài',   desc: 'Sửa bài giảng & tài liệu', path: '/teacher/content', color: 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20'    },
-                { icon: <HelpCircle  className="w-6 h-6" />, label: 'Hỏi & Đáp',      desc: 'Trả lời học sinh',          path: '/teacher/qa',      color: 'bg-green-500/10 text-green-600 hover:bg-green-500/20' },
-                { icon: <CreditCard  className="w-6 h-6" />, label: 'Kết nối Stripe', desc: 'Nhận hoa hồng tự động',     path: '/teacher/stripe',  color: 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20' },
+                { icon: <PlusCircle className="w-6 h-6" />, label: 'Tạo khóa học', desc: 'Thêm khóa học mới', path: '/teacher/courses', color: 'bg-primary/10 text-primary hover:bg-primary/20' },
+                { icon: <FileText className="w-6 h-6" />, label: 'Cập nhật bài', desc: 'Sửa bài giảng & tài liệu', path: '/teacher/content', color: 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20' },
+                { icon: <HelpCircle className="w-6 h-6" />, label: 'Hỏi & Đáp', desc: 'Trả lời học sinh', path: '/teacher/qa', color: 'bg-green-500/10 text-green-600 hover:bg-green-500/20' },
+                { icon: <Landmark className="w-6 h-6" />, label: 'TK ngân hàng', desc: 'Để Admin chuyển tiền cuối kỳ', path: '/teacher/bank', color: 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20' },
               ].map(action => (
                 <Link
                   key={action.path}
