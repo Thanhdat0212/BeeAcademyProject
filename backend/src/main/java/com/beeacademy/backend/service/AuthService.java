@@ -167,7 +167,7 @@ public class AuthService {
         ProviderTokenResponse tokens = authProviderClient.signInWithPassword(
                 request.email(), request.password());
         log.info("User {} đăng nhập thành công", request.email());
-        return AuthTokenResponse.fromProvider(tokens);
+        return enrichAuthTokenResponse(tokens);
     }
 
     // ========================================================================
@@ -193,7 +193,36 @@ public class AuthService {
      */
     public AuthTokenResponse refresh(String refreshToken) {
         ProviderTokenResponse tokens = authProviderClient.refreshToken(refreshToken);
-        return AuthTokenResponse.fromProvider(tokens);
+        return enrichAuthTokenResponse(tokens);
+    }
+
+    /**
+     * Bổ sung thông tin từ bảng profiles (avatarUrl, fullName, role) vào token response.
+     * Supabase GoTrue không lưu avatarUrl nên ta cần map từ DB local.
+     */
+    private AuthTokenResponse enrichAuthTokenResponse(ProviderTokenResponse tokens) {
+        AuthTokenResponse base = AuthTokenResponse.fromProvider(tokens);
+        if (base.user() != null) {
+            var profileOpt = profileRepository.findById(base.user().id());
+            if (profileOpt.isPresent()) {
+                var profile = profileOpt.get();
+                var enrichedUser = new UserSummaryResponse(
+                        base.user().id(),
+                        base.user().email(),
+                        profile.getRole() != null ? profile.getRole().toDbValue() : base.user().role(),
+                        profile.getFullName() != null ? profile.getFullName() : base.user().fullName(),
+                        profile.getAvatarUrl()
+                );
+                return new AuthTokenResponse(
+                        base.accessToken(),
+                        base.refreshToken(),
+                        base.expiresIn(),
+                        base.tokenType(),
+                        enrichedUser
+                );
+            }
+        }
+        return base;
     }
 
     // ========================================================================

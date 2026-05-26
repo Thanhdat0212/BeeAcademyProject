@@ -28,6 +28,8 @@ import DashboardHeader from '../../components/DashboardHeader';
 import PageBanner from '../../components/PageBanner';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
+import { changePassword as changePasswordApi } from '../../api/authService';
+import { isApiError } from '../../api/client';
 
 export default function AccountPage() {
   // ── Đọc email từ store — chỉ để hiển thị, không cho sửa ─────────────────────
@@ -38,10 +40,10 @@ export default function AccountPage() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword,     setNewPassword]     = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [submitting,      setSubmitting]      = useState(false);
 
-  // ── Xử lý lưu — validate rồi mock thành công ─────────────────────────────────
-  // Thực tế sẽ gọi API PATCH /users/me/password với { currentPassword, newPassword }
-  function handleSave() {
+  // ── Xử lý lưu mật khẩu qua backend API ───────────────────────────────────────
+  async function handleSave() {
     // Bước 1: kiểm tra mật khẩu hiện tại không trống
     if (!currentPassword.trim()) {
       notify.error('Vui lòng nhập mật khẩu hiện tại');
@@ -60,11 +62,24 @@ export default function AccountPage() {
       return;
     }
 
-    // Tất cả hợp lệ → thông báo thành công + xóa các field nhạy cảm
-    notify.success('Đã cập nhật mật khẩu thành công!');
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
+    if (submitting) return;
+    setSubmitting(true);
+    const toastId = notify.loading('Đang cập nhật mật khẩu...');
+
+    try {
+      await changePasswordApi(currentPassword, newPassword);
+      notify.dismiss(toastId);
+      notify.success('Đã cập nhật mật khẩu thành công!');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      notify.dismiss(toastId);
+      const message = isApiError(err) ? err.message : 'Đổi mật khẩu thất bại. Vui lòng thử lại.';
+      notify.error(message);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -178,11 +193,12 @@ export default function AccountPage() {
 
             </div>
 
-            {/* ── Footer card: nút Lưu thay đổi ──────────────────────────── */}
+             {/* ── Footer card: nút Lưu thay đổi ──────────────────────────── */}
             <div className="px-6 py-4 border-t border-outline-variant/20 flex justify-end">
               <button
                 onClick={handleSave}
-                className="flex items-center gap-2 px-6 py-2.5 bg-teal-500 text-white rounded-xl text-sm font-bold hover:bg-teal-600 active:bg-teal-700 transition-colors shadow-sm shadow-teal-500/25"
+                disabled={submitting}
+                className="flex items-center gap-2 px-6 py-2.5 bg-teal-500 text-white rounded-xl text-sm font-bold hover:bg-teal-600 active:bg-teal-700 transition-colors shadow-sm shadow-teal-500/25 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <Save className="w-4 h-4" />
                 Lưu thay đổi
