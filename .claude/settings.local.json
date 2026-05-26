@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "PowerShell(netstat -ano)",
+      "Bash(rm -f backend/src/main/java/com/beeacademy/backend/controller/UserController.java backend/src/main/java/com/beeacademy/backend/dto/request/ChangePasswordRequest.java backend/src/main/java/com/beeacademy/backend/dto/request/ForgotPasswordRequest.java backend/src/main/java/com/beeacademy/backend/dto/request/ResetPasswordRequest.java backend/src/main/java/com/beeacademy/backend/dto/request/UpdateProfileRequest.java backend/src/main/java/com/beeacademy/backend/model/PasswordResetToken.java backend/src/main/java/com/beeacademy/backend/repository/PasswordResetTokenRepository.java backend/src/main/java/com/beeacademy/backend/service/UserService.java backend/src/main/java/com/beeacademy/backend/service/impl/UserServiceImpl.java frontend/.env frontend/src/vite-env.d.ts frontend/src/lib/api.ts frontend/src/services/authService.ts frontend/src/services/userService.ts frontend/src/pages/common/ForgotPasswordPage.tsx frontend/src/pages/common/ResetPasswordPage.tsx)",
+      "Bash(rmdir frontend/src/services)",
+      "Bash(mvn -q -DskipTests clean compile)",
+      "mcp__claude_ai_Supabase__get_project_url",
+      "Bash(curl -s -X POST http://localhost:8080/api/auth/register -H 'Content-Type: application/json' -d '{\"fullName\":\"Nguyen Van Test\",\"email\":\"testok__CMDSUB_OUTPUT__@gmail.com\",\"password\":\"Test1234\",\"role\":\"student\"}')"
+    ]
+  }
+}

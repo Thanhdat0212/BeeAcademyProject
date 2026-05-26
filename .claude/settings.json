@@ -1,0 +1,124 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Add-Type -AssemblyName DocumentFormat.OpenXml -ErrorAction SilentlyContinue; $null)",
+      "PowerShell(python3 --version 2>$null)",
+      "PowerShell(py --version 2>$null)",
+      "PowerShell(node --version 2>$null)",
+      "PowerShell(Start-Process \"d:\\\\Vo_Van_Thanh_Dat\\\\HocAI\\\\Lab1_DE190211_VoVanThanhDat.docx\")",
+      "Bash(Get-ChildItem -Path 'd:\\\\Vo_Van_Thanh_Dat\\\\HocAI\\\\Lab1_extracted\\\\' -File)",
+      "Bash(Select-Object Name, FullName)",
+      "Bash(Format-List)",
+      "Bash(cd /d)",
+      "Bash(unzip -q \"d:\\\\Vo_Van_Thanh_Dat\\\\HocAI\\\\Lab1_DE190211_VoVanThanhDat.docx\" -d /d/temp_docx_extract3)",
+      "Read(//d/temp_docx_extract3/word/**)",
+      "Read(//d//**)",
+      "Bash(powershell -Command ' *)",
+      "Bash(Select-Object -First 300)",
+      "Bash(cd /d \"d:\\\\Vo_Van_Thanh_Dat\\\\HocAI\")",
+      "Bash(python -c ' *)",
+      "Bash(node generate_usecase.mjs)",
+      "Bash(dir /B /O:-D)",
+      "Bash(Get-ChildItem \"d:\\\\Vo_Van_Thanh_Dat\\\\HocAI\")",
+      "Bash(Sort-Object LastWriteTime -Descending)",
+      "Bash(Select-Object Name, LastWriteTime)",
+      "Bash(start \"\" \"d:\\\\Vo_Van_Thanh_Dat\\\\HocAI\\\\UseCase_v2_Final.docx\")",
+      "Bash(start \"\" \"d:\\\\Vo_Van_Thanh_Dat\\\\HocAI\\\\BeeAcademy_DatabasePlan.docx\")",
+      "Bash(npx prisma *)",
+      "Bash(npm install *)",
+      "Bash(ls \"C:/Users/ADMIN/Documents/\" | grep -i \"demo\\\\|screenshot\\\\|png\" 2>/dev/null)",
+      "Read(//c/Users/ADMIN/Documents/**)",
+      "PowerShell(Get-ChildItem -Path \"d:\\\\Vo_Van_Thanh_Dat\\\\HocAI\\\\backend\" -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object -ExpandProperty FullName | ForEach-Object { $_.Replace\\(\"d:\\\\Vo_Van_Thanh_Dat\\\\HocAI\\\\\", \"\"\\) })",
+      "Bash(Get-ChildItem -Path \"d:\\\\Vo_Van_Thanh_Dat\\\\HocAI\\\\frontend\" -Recurse -Force)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)"
+    ],
+    "additionalDirectories": [
+      "d:\\Vo_Van_Thanh_Dat\\HocAI\\Lab1_extracted"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[Hook] Chuẩn bị chạy lệnh Bash...\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "copy \"%CLAUDE_TOOL_INPUT_FILE%\" \"%CLAUDE_TOOL_INPUT_FILE%.bak\" 2>$null; exit 0"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[Hook] File đã được chỉnh sửa.\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[Hook] File mới đã được tạo.\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx prettier --write \"%CLAUDE_TOOL_OUTPUT_FILE%\" 2>$null; exit 0"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[Hook] Thông báo từ Claude: $CLAUDE_NOTIFICATION\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[Hook] Claude đã dừng phiên làm việc.\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[Hook] Subagent đã hoàn thành.\""
+          }
+        ]
+      }
+    ]
+  }
+}
