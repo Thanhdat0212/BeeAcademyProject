@@ -1,0 +1,17 @@
+# ============================================================================
+# Override cho môi trường DEV (chạy local).
+# Kích hoạt bằng: SPRING_PROFILES_ACTIVE=dev hoặc mvn spring-boot:run -Dspring-boot.run.profiles=dev
+# ============================================================================
+spring:
+  jpa:
+    show-sql: true                  # In SQL ra console - tiện debug
+    properties:
+      hibernate:
+        format_sql: true            # Format SQL cho dễ đọc
+
+logging:
+  level:
+    com.beeacademy: DEBUG
+    org.hibernate.SQL: DEBUG
+    # Bật dòng dưới nếu cần xem tham số bind vào SQL (rất verbose)
+    # org.hibernate.orm.jdbc.bind: TRACE
