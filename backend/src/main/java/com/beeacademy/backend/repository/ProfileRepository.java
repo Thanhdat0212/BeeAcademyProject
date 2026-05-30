@@ -37,4 +37,5 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
      */
     @Query(value = "SELECT id FROM auth.users WHERE email = :email", nativeQuery = true)
     Optional<UUID> findUserIdByEmail(@Param("email") String email);
+
 }

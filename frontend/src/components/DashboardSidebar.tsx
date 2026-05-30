@@ -25,7 +25,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   BookOpen, CreditCard, Heart, MessageSquare,
   ShoppingBag, UserCircle, Camera, LogOut, Lock, Megaphone,
-  DollarSign, BarChart2, Settings
+  DollarSign, BarChart2, Settings, Calendar, TrendingUp
 } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -40,6 +40,15 @@ const STUDENT_MENU_ITEMS = [
   { icon: Lock,          label: 'Tài khoản',             path: '/account'       },
   { icon: Megaphone,     label: 'Khiếu nại',              path: '/complaints'    },
   { icon: Camera,        label: 'Ảnh',                   path: '/account/photo' },
+] as const;
+
+const PARENT_MENU_ITEMS = [
+  { icon: BarChart2,     label: 'Tổng quan báo cáo',    path: '/parent'          },
+  { icon: BookOpen,      label: 'Khóa học của con',     path: '/parent/courses'  },
+  { icon: TrendingUp,    label: 'Tiến độ & Điểm số',    path: '/parent/progress' },
+  { icon: MessageSquare, label: 'Tin nhắn giáo viên',    path: '/parent/messages' },
+  { icon: Settings,      label: 'Liên kết tài khoản con',path: '/parent/link'     },
+  { icon: Camera,        label: 'Ảnh đại diện phụ huynh',path: '/account/photo'   },
 ] as const;
 
 const TEACHER_MENU_ITEMS = [
@@ -129,7 +138,9 @@ export default function DashboardSidebar({
           ? TEACHER_MENU_ITEMS
           : user?.role === 'admin'
             ? ADMIN_MENU_ITEMS
-            : STUDENT_MENU_ITEMS
+            : user?.role === 'parent'
+              ? PARENT_MENU_ITEMS
+              : STUDENT_MENU_ITEMS
         ).map(item => {
           // exact match: '/account' không active khi ở '/account/type'
           const isActive = pathname === item.path;
@@ -157,6 +168,24 @@ export default function DashboardSidebar({
           );
         })}
       </nav>
+
+      {/* Banner quảng cáo Nâng cấp tài khoản dành riêng cho Phụ huynh */}
+      {user?.role === 'parent' && (
+        <div className="m-3 p-4 bg-gradient-to-br from-secondary-container/20 to-primary/10 border border-outline-variant/30 rounded-2xl">
+          <p className="text-xs font-extrabold text-primary uppercase tracking-wider mb-1">
+            Gói Premium Phụ huynh
+          </p>
+          <p className="text-[11px] text-on-surface-variant leading-normal mb-3">
+            Theo dõi phân tích học tập nâng cao bằng AI và nhận báo cáo tự động.
+          </p>
+          <button 
+            onClick={() => navigate('/account/type')}
+            className="w-full py-2 bg-primary text-on-primary rounded-xl font-bold text-[11px] hover:bg-primary/90 transition-colors shadow-sm"
+          >
+            Nâng cấp ngay
+          </button>
+        </div>
+      )}
 
       {/* ── Phần dưới: Nút Đăng xuất ─────────────────────────────────────────
           Chỉ hiển thị khi onLogout được truyền (chế độ floating dropdown)

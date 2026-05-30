@@ -86,6 +86,7 @@ public class Profile {
     @Column(name = "linkedin_url")
     private String linkedinUrl;
 
+
     /** Hibernate tự set khi INSERT - KHÔNG override. */
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -154,4 +155,6 @@ public class Profile {
     public void changeAvatar(String newAvatarUrl) {
         this.avatarUrl = newAvatarUrl;
     }
+
 }
+

@@ -16,7 +16,8 @@ import type {
   CourseSummary as ApiCourseSummary,
   LessonDetail as ApiLesson,
 } from '../types/api';
-import type { Course as UiCourse, Lesson as UiLesson, Subject, Grade } from '../data/mockCourses';
+import type { Course as UiCourse, Lesson as UiLesson, Subject, Grade, QuizQuestion } from '../data/mockCourses';
+import { QUIZ_TOAN_C1, QUIZ_VAN_C1, QUIZ_LY_C1 } from '../data/mockCourses';
 
 // ---------------------------------------------------------------------------
 //  Helpers chuyển kiểu giá / lớp / category
@@ -64,17 +65,40 @@ function gradesToLabel(grades: number[]): Grade {
 
 /**
  * Lesson API (BE) → Lesson UI (FE).
- * BE không có concept "type" (video/pdf/quiz), tạm map tất cả về 'video'
- * vì migration seed dùng video URL. Khi BE thêm field type, update mapping.
+ * Tự động gán type (video/pdf/quiz) dựa trên tiêu đề bài học và sự tồn tại của videoUrl.
+ * Đối với quiz, tự động gán bộ câu hỏi trắc nghiệm mẫu để học viên thực hành.
  */
 function adaptLesson(lesson: ApiLesson): UiLesson {
+  const titleLower = lesson.title.toLowerCase();
+  let type: 'video' | 'pdf' | 'quiz' = 'video';
+  let questions: QuizQuestion[] | undefined = undefined;
+
+  if (
+    titleLower.includes('quiz') ||
+    titleLower.includes('kiểm tra') ||
+    titleLower.includes('trắc nghiệm') ||
+    titleLower.includes('bài tập')
+  ) {
+    type = 'quiz';
+    if (titleLower.includes('văn') || titleLower.includes('tiếng việt')) {
+      questions = QUIZ_VAN_C1;
+    } else if (titleLower.includes('lý') || titleLower.includes('từ trường') || titleLower.includes('điện')) {
+      questions = QUIZ_LY_C1;
+    } else {
+      questions = QUIZ_TOAN_C1;
+    }
+  } else if (!lesson.videoUrl || titleLower.includes('pdf') || titleLower.includes('tài liệu') || titleLower.includes('đọc')) {
+    type = 'pdf';
+  }
+
   return {
     id: lesson.id,
     title: lesson.title,
     duration: formatDurationSec(lesson.durationSec),
-    type: 'video',
+    type,
     url: lesson.videoUrl ?? '#',
     isCompleted: false,
+    questions,
   };
 }
 

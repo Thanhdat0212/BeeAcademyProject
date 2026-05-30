@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import {
-  Bell, Search, ShoppingCart, X, BookOpen, TrendingUp, ChevronDown,
+  Bell, Search, ShoppingCart, X, BookOpen, TrendingUp, ChevronDown, LogOut
 } from 'lucide-react';
 import DashboardSidebar from './DashboardSidebar';
 import { motion, AnimatePresence } from 'motion/react';
@@ -315,6 +315,17 @@ export default function DashboardHeader() {
               )}
             </AnimatePresence>
           </Link>
+
+          {/* Nút Đăng xuất trực tiếp trên Header cho Phụ huynh */}
+          {user?.role === 'parent' && (
+            <button 
+              onClick={handleLogout}
+              className="text-on-surface-variant hover:text-red-500 transition-colors p-1.5 rounded-xl hover:bg-surface-container flex items-center justify-center"
+              title="Đăng xuất"
+            >
+              <LogOut className="w-5.5 h-5.5" />
+            </button>
+          )}
 
           {/* ── Avatar + Dropdown Menu ─────────────────────────────────────
               menuRef bao toàn bộ vùng trigger + dropdown để click-outside hoạt động đúng

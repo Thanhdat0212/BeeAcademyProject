@@ -37,7 +37,7 @@ export interface Course {
 }
 
 // ─── Quiz: Toán Đại Số – Chương 1 (Hằng đẳng thức) ──────────────────────────
-const QUIZ_TOAN_C1: QuizQuestion[] = [
+export const QUIZ_TOAN_C1: QuizQuestion[] = [
   {
     id: 'tc1q1',
     text: 'Hằng đẳng thức (a + b)² bằng biểu thức nào sau đây?',
@@ -115,7 +115,7 @@ const QUIZ_TOAN_C2: QuizQuestion[] = [
 ];
 
 // ─── Quiz: Văn học dân gian – Chương 1 ───────────────────────────────────────
-const QUIZ_VAN_C1: QuizQuestion[] = [
+export const QUIZ_VAN_C1: QuizQuestion[] = [
   {
     id: 'vc1q1',
     text: 'Ca dao thuộc thể loại nào của văn học dân gian?',
@@ -169,7 +169,7 @@ const QUIZ_VAN_C1: QuizQuestion[] = [
 ];
 
 // ─── Quiz: Vật lý Điện từ – Chương 1 (Từ trường) ─────────────────────────────
-const QUIZ_LY_C1: QuizQuestion[] = [
+export const QUIZ_LY_C1: QuizQuestion[] = [
   {
     id: 'lc1q1',
     text: 'Nam châm tự nhiên có bao nhiêu cực từ?',

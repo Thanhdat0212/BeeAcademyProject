@@ -23,8 +23,8 @@ import PageBanner from '../../components/PageBanner';
 import { MOCK_COURSES } from '../../data/mockCourses';
 import type { Course as UiCourse } from '../../data/mockCourses';
 import { useCourseStore } from '../../store/useCourseStore';
-import { listCategories, searchCourses } from '../../api/courseService';
-import { adaptCourseSummary } from '../../api/adapter';
+import { listCategories, searchCourses, getCourseDetail } from '../../api/courseService';
+import { adaptCourseSummary, adaptCourseDetail } from '../../api/adapter';
 import { isApiError } from '../../api/client';
 import type { Category } from '../../types/api';
 
@@ -63,11 +63,58 @@ export default function CoursesPage() {
   const purchasedIds = useCourseStore((state) => state.purchasedIds);
   const favoritedIds = useCourseStore((state) => state.favoritedIds);
   const toggleFavorite = useCourseStore((state) => state.toggleFavorite);
+  const completedLessons = useCourseStore((state) => state.completedLessons);
 
-  // ── Khóa học đã tham gia (TẠM thời từ MOCK, Module 3 sẽ thay) ───────────
-  const enrolledCourses = useMemo(() => {
-    return MOCK_COURSES.filter((c) => c.isEnrolled || purchasedIds.includes(c.id));
+  // ── State lưu các khóa học thực tế đã mua từ backend ──────────────────────
+  const [purchasedRealCourses, setPurchasedRealCourses] = useState<UiCourse[]>([]);
+
+  // ── Effect: fetch các khóa học thực tế đã mua (BE chưa có API my-courses) ──
+  useEffect(() => {
+    // Lọc ra các ID thật (UUID, thường có độ dài 36 ký tự hoặc không thuộc mock 'c1'-'c9')
+    const realPurchasedIds = purchasedIds.filter(id => id.length > 5);
+    
+    if (realPurchasedIds.length === 0) {
+      setPurchasedRealCourses([]);
+      return;
+    }
+
+    // Fetch song song chi tiết của từng khóa học thật
+    Promise.all(
+      realPurchasedIds.map(id =>
+        getCourseDetail(id)
+          .then(adaptCourseDetail)
+          .catch(err => {
+            console.error(`Không thể tải khóa học đã mua ${id}:`, err);
+            return null;
+          })
+      )
+    ).then(details => {
+      const validDetails = details.filter((d): d is UiCourse => d !== null);
+      setPurchasedRealCourses(validDetails);
+    });
   }, [purchasedIds]);
+
+  // ── Khóa học đã tham gia (kết hợp Mock + Real từ Backend) ───────────
+  const enrolledCourses = useMemo(() => {
+    const mockEnrolled = MOCK_COURSES.filter((c) => c.isEnrolled || purchasedIds.includes(c.id));
+    const allEnrolled = [...mockEnrolled, ...purchasedRealCourses];
+
+    // Tính toán động phần trăm tiến độ dựa trên completedLessons lưu ở Zustand
+    return allEnrolled.map(course => {
+      const completedList = completedLessons[course.id] ?? [];
+      const totalLessons = course.lessons?.length ?? 0;
+      const dynamicProgress = totalLessons > 0 ? Math.round((completedList.length / totalLessons) * 100) : 0;
+      
+      const progress = completedLessons[course.id] !== undefined
+        ? dynamicProgress
+        : (course.progress ?? 0);
+
+      return {
+        ...course,
+        progress
+      };
+    });
+  }, [purchasedIds, purchasedRealCourses, completedLessons]);
 
   // ── Effect: fetch categories 1 lần khi mount ─────────────────────────────
   useEffect(() => {

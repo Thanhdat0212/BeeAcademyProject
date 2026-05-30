@@ -17,6 +17,7 @@
 //   Chức năng soạn tin nhắn đã chuyển sang MessagesPage (/messages)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { PlayCircle, BookOpen, ShoppingBag } from 'lucide-react';
@@ -24,6 +25,8 @@ import DashboardHeader from '../../components/DashboardHeader';
 import PageBanner from '../../components/PageBanner';
 import { MOCK_COURSES } from '../../data/mockCourses';
 import { useCourseStore } from '../../store/useCourseStore';
+import { getCourseDetail } from '../../api/courseService';
+import { adaptCourseDetail } from '../../api/adapter';
 
 // ─── Empty State: chưa có khóa học nào ────────────────────────────────────────
 function EmptyState() {
@@ -56,10 +59,40 @@ export default function OrdersPage() {
   // purchasedIds: các khóa học mua qua CheckoutPage trong session này
   const purchasedIds = useCourseStore(state => state.purchasedIds);
 
+  // State lưu các khóa học thực tế đã mua từ backend
+  const [purchasedRealCourses, setPurchasedRealCourses] = useState<(typeof MOCK_COURSES)[0][]>([]);
+
+  // ── Effect: fetch các khóa học thực tế đã mua (BE chưa có API my-courses) ──
+  useEffect(() => {
+    // Lọc ra các ID thật (UUID, thường có độ dài 36 ký tự hoặc không thuộc mock 'c1'-'c9')
+    const realPurchasedIds = purchasedIds.filter(id => id.length > 5);
+    
+    if (realPurchasedIds.length === 0) {
+      setPurchasedRealCourses([]);
+      return;
+    }
+
+    // Fetch song song chi tiết của từng khóa học thật
+    Promise.all(
+      realPurchasedIds.map(id =>
+        getCourseDetail(id)
+          .then(adaptCourseDetail)
+          .catch(err => {
+            console.error(`Không thể tải khóa học đã mua ${id}:`, err);
+            return null;
+          })
+      )
+    ).then(details => {
+      const validDetails = details.filter((d): d is (typeof MOCK_COURSES)[0] => d !== null);
+      setPurchasedRealCourses(validDetails);
+    });
+  }, [purchasedIds]);
+
   // Ghép 2 nguồn: isEnrolled (mock data) + purchasedIds (Zustand)
-  const purchasedCourses = MOCK_COURSES.filter(
-    c => c.isEnrolled || purchasedIds.includes(c.id)
-  );
+  const purchasedCourses = useMemo(() => {
+    const mockEnrolled = MOCK_COURSES.filter(c => c.isEnrolled || purchasedIds.includes(c.id));
+    return [...mockEnrolled, ...purchasedRealCourses];
+  }, [purchasedIds, purchasedRealCourses]);
 
   return (
     <div className="min-h-screen bg-surface flex flex-col font-sans">

@@ -48,7 +48,8 @@ public record ProfileResponse(
         String facebookUrl,
         String linkedinUrl,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String parentLinkCode
 ) {
 
     /**
@@ -73,7 +74,8 @@ public record ProfileResponse(
                 profile.getFacebookUrl(),
                 profile.getLinkedinUrl(),
                 profile.getCreatedAt(),
-                profile.getUpdatedAt()
+                profile.getUpdatedAt(),
+                null
         );
     }
 }

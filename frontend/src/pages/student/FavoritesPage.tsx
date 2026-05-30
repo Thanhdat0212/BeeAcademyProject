@@ -13,6 +13,7 @@
 //   Chưa yêu thích khóa học nào → empty state + nút "Khám phá ngay"
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { Heart, BookOpen, PlayCircle, ShoppingCart } from 'lucide-react';
@@ -22,6 +23,8 @@ import { MOCK_COURSES } from '../../data/mockCourses';
 import { useCourseStore } from '../../store/useCourseStore';
 import { useCartStore } from '../../store/useCartStore';
 import { notify } from '../../lib/toast';
+import { getCourseDetail } from '../../api/courseService';
+import { adaptCourseDetail } from '../../api/adapter';
 
 export default function FavoritesPage() {
   const navigate = useNavigate();
@@ -32,8 +35,39 @@ export default function FavoritesPage() {
   const purchasedIds   = useCourseStore(state => state.purchasedIds);
   const addToCart      = useCartStore(state => state.addToCart);
 
-  // Lọc MOCK_COURSES theo favoritedIds — giữ nguyên thứ tự yêu thích
-  const favoritedCourses = MOCK_COURSES.filter(c => favoritedIds.includes(c.id));
+  // State lưu các khóa học thực tế đã yêu thích từ backend
+  const [favoritedRealCourses, setFavoritedRealCourses] = useState<(typeof MOCK_COURSES)[0][]>([]);
+
+  // ── Effect: fetch các khóa học thực tế đã yêu thích ──
+  useEffect(() => {
+    // Lọc ra các ID thật (thường là UUID của backend, có độ dài lớn hơn 5 ký tự)
+    const realFavoritedIds = favoritedIds.filter(id => id.length > 5);
+    
+    if (realFavoritedIds.length === 0) {
+      setFavoritedRealCourses([]);
+      return;
+    }
+
+    Promise.all(
+      realFavoritedIds.map(id =>
+        getCourseDetail(id)
+          .then(adaptCourseDetail)
+          .catch(err => {
+            console.error(`Không thể tải khóa học yêu thích ${id}:`, err);
+            return null;
+          })
+      )
+    ).then(details => {
+      const validDetails = details.filter((d): d is (typeof MOCK_COURSES)[0] => d !== null);
+      setFavoritedRealCourses(validDetails);
+    });
+  }, [favoritedIds]);
+
+  // Gộp cả 2 nguồn: Mock và Real từ Backend
+  const favoritedCourses = useMemo(() => {
+    const mockFav = MOCK_COURSES.filter(c => favoritedIds.includes(c.id));
+    return [...mockFav, ...favoritedRealCourses];
+  }, [favoritedIds, favoritedRealCourses]);
 
   function handleAddToCart(course: (typeof MOCK_COURSES)[0]) {
     addToCart(course);

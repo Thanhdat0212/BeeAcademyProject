@@ -29,6 +29,9 @@ import { getMyProfile, updateMyProfile } from '../../api/authService';
 import { isApiError } from '../../api/client';
 
 export default function ProfilePage() {
+  const { user, updateUser } = useAuthStore();
+  const isStudent = user?.role === 'student';
+
   // ── State form ────────────────────────────────────────────────────────────
   const [firstName, setFirstName]   = useState('');
   const [lastName,  setLastName]    = useState('');
@@ -36,14 +39,14 @@ export default function ProfilePage() {
   const [twitter,   setTwitter]     = useState('');
   const [facebook,  setFacebook]    = useState('');
   const [linkedin,  setLinkedin]    = useState('');
+
   const [loading,   setLoading]     = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // updateUser: cập nhật tên mới vào store → Header re-render ngay với tên mới
-  const updateUser = useAuthStore(state => state.updateUser);
-
   // ref đến <textarea> tiểu sử — dùng để đọc/đặt lại vị trí con trỏ sau khi format
   const bioRef = useRef<HTMLTextAreaElement>(null);
+
+
 
   // ── Tải thông tin hồ sơ từ backend ─────────────────────────────────────────
   useEffect(() => {
@@ -65,6 +68,7 @@ export default function ProfilePage() {
         setTwitter(profile.twitterUrl ?? '');
         setFacebook(profile.facebookUrl ?? '');
         setLinkedin(profile.linkedinUrl ?? '');
+
       } catch (err) {
         const msg = isApiError(err) ? err.message : 'Không thể tải thông tin hồ sơ.';
         notify.error(msg);
@@ -152,6 +156,8 @@ export default function ProfilePage() {
       {/* Nội dung full-width */}
       <div className="flex-grow max-w-[1600px] mx-auto w-full px-4 md:px-10 py-8">
         <main className="max-w-2xl">
+
+
 
           {/* ── Card form ───────────────────────────────────────────────────── */}
           <motion.div

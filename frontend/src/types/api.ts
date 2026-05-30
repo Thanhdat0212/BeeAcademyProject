@@ -73,6 +73,7 @@ export interface ProfileDetail {
   linkedinUrl: string | null;
   createdAt: string;
   updatedAt: string;
+  parentLinkCode?: string | null;
 }
 
 // ============================================================================
@@ -191,3 +192,31 @@ export interface SearchCoursesParams {
   /** Cú pháp Spring: "field,asc" | "field,desc". */
   sort?: string;
 }
+
+// ============================================================================
+//  Parent Portal
+// ============================================================================
+
+export interface LinkedStudentResponse {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  code: string;
+  grade: string;
+}
+
+export interface LinkStudentRequest {
+  code: string;
+}
+
+export interface ChildOverviewResponse {
+  studentName: string;
+  grade: string;
+  avgProgress: number;
+  activeCourses: number;
+  completedCourses: number;
+  latestQuizScore: number;
+  latestExamScore: number;
+  weeklyActivityHours: number[];
+}
+

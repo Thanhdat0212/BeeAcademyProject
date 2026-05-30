@@ -28,7 +28,7 @@ import {
   ArrowLeft, Star, Users, PlayCircle, FileText, CheckCircle2,
   Lock, ShoppingCart, Video, Menu, X, MessageSquare, BookOpen,
   ClipboardList, XCircle, Award, RotateCcw, ChevronLeft, ChevronRight,
-  Trophy, Loader2,
+  Trophy, Loader2, Send,
 } from 'lucide-react';
 import DashboardHeader from '../../components/DashboardHeader';
 import type { Course, Lesson, QuizQuestion } from '../../data/mockCourses';
@@ -793,10 +793,76 @@ function LearningView({ course }: { course: Course }) {
   // activeQuiz: null = không hiện modal, Lesson = hiện QuizModal cho bài đó
   const [activeQuiz, setActiveQuiz] = useState<Lesson | null>(null);
 
-  // quizScores: lưu điểm quiz trong session hiện tại
-  // Key = lessonId, Value = điểm % (0-100)
-  // Dùng để hiển thị điểm cũ trong sidebar và truyền vào QuizModal làm prevScore
-  const [quizScores, setQuizScores] = useState<Record<string, number>>({});
+  // Lấy dữ liệu và actions từ Zustand store
+  const completedLessons = useCourseStore((state) => state.completedLessons);
+  const toggleLessonCompleted = useCourseStore((state) => state.toggleLessonCompleted);
+  const quizScores = useCourseStore((state) => state.quizScores);
+  const saveQuizScore = useCourseStore((state) => state.saveQuizScore);
+  const lessonNotes = useCourseStore((state) => state.lessonNotes);
+  const saveLessonNote = useCourseStore((state) => state.saveLessonNote);
+  const courseQA = useCourseStore((state) => state.courseQA);
+  const addQAQuestion = useCourseStore((state) => state.addQAQuestion);
+  const addQAReply = useCourseStore((state) => state.addQAReply);
+
+  // Lấy thông tin user đăng nhập
+  const user = useAuthStore((state) => state.user);
+  const studentName = user?.name ?? 'Học viên Bee';
+
+  // State cục bộ cho ghi chú
+  const [noteText, setNoteText] = useState('');
+
+  // State cục bộ cho Q&A
+  const [qaInput, setQaInput] = useState('');
+  const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
+
+  // Cập nhật nội dung ghi chú khi chuyển bài học
+  useEffect(() => {
+    if (activeLesson) {
+      const savedNote = lessonNotes[course.id]?.[activeLesson.id] ?? '';
+      setNoteText(savedNote);
+    }
+  }, [activeLesson, course.id, lessonNotes]);
+
+  // Khởi tạo Q&A thảo luận mẫu khi chưa có dữ liệu câu hỏi cho khóa học này
+  useEffect(() => {
+    if (!courseQA[course.id]) {
+      const initialQuestions = [
+        {
+          author: 'Nguyễn Văn Hùng (Học viên)',
+          content: 'Thành phần cấu trúc hằng đẳng thức đáng nhớ số 3 (Hiệu hai bình phương), có mẹo nào giúp nhớ nhanh không bị nhầm với bình phương của một hiệu không ạ?'
+        },
+        {
+          author: 'Lê Minh Tuấn (Học viên)',
+          content: 'Thầy cô cho em hỏi bài tập tự luyện của Chương 1 có lời giải chi tiết từng bước không ạ? Có vài câu em chưa hiểu cách biến đổi.'
+        }
+      ];
+
+      initialQuestions.forEach((q) => {
+        useCourseStore.getState().addQAQuestion(course.id, q.author, q.content);
+      });
+
+      // Thêm phản hồi mẫu cho câu hỏi đầu tiên
+      setTimeout(() => {
+        const updatedList = useCourseStore.getState().courseQA[course.id] ?? [];
+        if (updatedList.length > 0) {
+          const firstQuestionId = updatedList[updatedList.length - 1].id;
+          useCourseStore.getState().addQAReply(
+            course.id,
+            firstQuestionId,
+            'Cô Trần Lan (Giảng viên)',
+            'Chào Hùng! Mẹo nhỏ là: "Hiệu hai bình phương" là hiệu của hai số mũ 2 riêng biệt: a² - b² = (a-b)(a+b). Còn "Bình phương của một hiệu" là bình phương toàn bộ biểu thức phép trừ: (a-b)². Hãy nhớ viết ra nháp vài lần để quen tay em nhé!'
+          );
+        }
+      }, 100);
+    }
+  }, [course.id, courseQA]);
+
+  // Tính toán tiến độ học tập thực tế dựa trên completedLessons
+  const completedList = completedLessons[course.id] ?? [];
+  const totalLessons = course.lessons?.length ?? 0;
+  const progressPercent = totalLessons > 0 ? Math.round((completedList.length / totalLessons) * 100) : 0;
+
+  const isCurrentLessonCompleted = completedList.includes(activeLesson?.id);
 
   // Router điều hướng click trong sidebar
   function handleLessonClick(lesson: Lesson) {
@@ -810,10 +876,31 @@ function LearningView({ course }: { course: Course }) {
   }
 
   // Callback từ QuizModal khi user nộp bài
-  // Ghi điểm vào quizScores: { ...prev, [lessonId]: score }
   function handleQuizComplete(lessonId: string, score: number) {
-    setQuizScores((prev: Record<string, number>) => ({ ...prev, [lessonId]: score }));
+    saveQuizScore(course.id, lessonId, score);
   }
+
+  const handleSaveNote = () => {
+    saveLessonNote(course.id, activeLesson.id, noteText);
+    notify.success('Đã lưu ghi chú thành công!');
+  };
+
+  const handleAddQuestion = () => {
+    if (!qaInput.trim()) return;
+    addQAQuestion(course.id, `${studentName} (Học viên)`, qaInput.trim());
+    setQaInput('');
+    notify.success('Đã đăng câu hỏi thảo luận thành công!');
+  };
+
+  const handleAddReply = (questionId: string) => {
+    const text = replyInputs[questionId] ?? '';
+    if (!text.trim()) return;
+    addQAReply(course.id, questionId, `${studentName} (Học viên)`, text.trim());
+    setReplyInputs((prev) => ({ ...prev, [questionId]: '' }));
+    notify.success('Đã gửi phản hồi thành công!');
+  };
+
+  const questionsList = courseQA[course.id] ?? [];
 
   return (
     <div className="h-screen bg-surface flex flex-col font-sans overflow-hidden">
@@ -831,11 +918,11 @@ function LearningView({ course }: { course: Course }) {
           </h1>
         </div>
         <div className="flex items-center gap-4">
-          {/* Thanh tiến độ tổng — từ course.progress (dữ liệu mock, chưa tính động) */}
+          {/* Thanh tiến độ tổng — Tính toán động từ store */}
           <div className="hidden sm:flex items-center gap-3">
-            <span className="text-sm font-semibold text-primary">{course.progress}%</span>
+            <span className="text-sm font-semibold text-primary">{progressPercent}%</span>
             <div className="w-32 h-2 bg-surface-container-high rounded-full overflow-hidden">
-              <div className="h-full bg-primary rounded-full" style={{ width: `${course.progress}%` }} />
+              <div className="h-full bg-primary rounded-full" style={{ width: `${progressPercent}%` }} />
             </div>
           </div>
           {/* Toggle sidebar mục lục */}
@@ -853,7 +940,6 @@ function LearningView({ course }: { course: Course }) {
       <div className="flex-grow flex relative overflow-hidden bg-surface-container-lowest">
 
         {/* Cột nội dung: player + tabs thông tin bài học */}
-        {/* lg:pr-[380px] khi sidebar mở: đẩy nội dung sang trái để không bị sidebar che */}
         <div className={`flex flex-col flex-grow transition-all duration-300 overflow-y-auto ${isSidebarOpen ? 'lg:pr-[380px]' : ''}`}>
 
           {/* Video / PDF player (giả lập) */}
@@ -904,15 +990,27 @@ function LearningView({ course }: { course: Course }) {
               <div>
                 <h2 className="text-3xl font-extrabold text-on-surface mb-2">{activeLesson?.title}</h2>
                 <div className="text-on-surface-variant font-medium flex items-center gap-2">
-                  <span>Chương 1</span> ·
-                  <span className="text-primary">{activeLesson?.type === 'video' ? 'Video' : 'Tài liệu'}</span>
+                  <span>Bài học</span> ·
+                  <span className="text-primary">{activeLesson?.type === 'video' ? 'Video giảng' : 'Tài liệu lý thuyết'}</span>
                 </div>
               </div>
+              {/* Nút đánh dấu hoàn thành bài học kết nối Zustand */}
               <button
-                onClick={() => notify.success('Đã đánh dấu hoàn thành!')}
-                className="px-6 py-3 bg-surface-container border border-outline-variant hover:border-primary hover:text-primary rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap"
+                onClick={() => {
+                  toggleLessonCompleted(course.id, activeLesson.id);
+                  if (!isCurrentLessonCompleted) {
+                    notify.success('Đã đánh dấu hoàn thành bài học!');
+                  } else {
+                    notify.success('Đã hủy hoàn thành bài học!');
+                  }
+                }}
+                className={`px-6 py-3 border rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap ${
+                  isCurrentLessonCompleted
+                    ? 'bg-green-600 text-white border-green-600 hover:bg-green-700 shadow-md shadow-green-600/25'
+                    : 'bg-surface-container border-outline-variant hover:border-primary hover:text-primary'
+                }`}
               >
-                <CheckCircle2 className="w-5 h-5" /> Đánh dấu xong
+                <CheckCircle2 className="w-5 h-5" /> {isCurrentLessonCompleted ? 'Đã hoàn thành' : 'Đánh dấu xong'}
               </button>
             </div>
 
@@ -931,7 +1029,6 @@ function LearningView({ course }: { course: Course }) {
                   }`}
                 >
                   {tab.label}
-                  {/* layoutId="learningTabIndicator": Framer Motion chia sẻ animation giữa các tab */}
                   {activeTab === tab.id && (
                     <motion.div layoutId="learningTabIndicator" className="absolute bottom-0 inset-x-0 h-1 bg-primary rounded-t-full" />
                   )}
@@ -949,18 +1046,123 @@ function LearningView({ course }: { course: Course }) {
                   </motion.div>
                 )}
                 {activeTab === 'qa' && (
-                  <motion.div key="qa" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center py-10 opacity-60">
-                    <MessageSquare className="w-12 h-12 mb-4 text-on-surface-variant" />
-                    <p className="font-semibold text-on-surface">Chưa có câu hỏi nào.</p>
-                    <button className="text-primary font-bold mt-2">Đặt câu hỏi đầu tiên</button>
+                  <motion.div key="qa" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
+                    {/* Form câu hỏi mới */}
+                    <div className="bg-surface-container p-5 rounded-2xl border border-outline-variant/30 space-y-3">
+                      <h4 className="font-bold text-sm text-on-surface">Đặt câu hỏi thảo luận</h4>
+                      <div className="flex gap-3">
+                        <textarea
+                          value={qaInput}
+                          onChange={(e) => setQaInput(e.target.value)}
+                          placeholder="Viết câu hỏi thắc mắc của bạn tại đây để giảng viên hỗ trợ..."
+                          className="flex-grow min-h-[90px] p-4 text-sm rounded-2xl bg-surface border border-outline-variant/40 focus:border-primary outline-none resize-none text-on-surface transition-all placeholder:text-on-surface-variant/40"
+                        />
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          onClick={handleAddQuestion}
+                          className="px-5 py-2.5 bg-primary hover:bg-primary/95 text-on-primary rounded-xl font-bold text-xs shadow-md transition-colors flex items-center gap-1.5"
+                        >
+                          <Send className="w-3.5 h-3.5" /> Gửi câu hỏi
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Danh sách các câu hỏi Q&A */}
+                    <div className="space-y-4">
+                      {questionsList.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-10 opacity-60">
+                          <MessageSquare className="w-12 h-12 mb-4 text-on-surface-variant" />
+                          <p className="font-semibold text-on-surface text-sm">Chưa có câu hỏi nào.</p>
+                        </div>
+                      ) : (
+                        questionsList.map((qa) => (
+                          <div key={qa.id} className="bg-surface border border-outline-variant/20 p-5 rounded-2xl space-y-4 shadow-sm">
+                            <div className="flex gap-3 items-start">
+                              <img
+                                src={`https://ui-avatars.com/api/?name=${encodeURIComponent(qa.authorName)}&background=random&size=40`}
+                                alt={qa.authorName}
+                                className="w-10 h-10 rounded-full flex-shrink-0 shadow-sm"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-sm text-on-surface">{qa.authorName}</span>
+                                  <span className="text-[10px] text-on-surface-variant/60">{qa.date}</span>
+                                </div>
+                                <p className="text-on-surface text-sm mt-2 leading-relaxed font-semibold">
+                                  {qa.content}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Replies List */}
+                            {qa.replies && qa.replies.length > 0 && (
+                              <div className="pl-6 border-l-2 border-outline-variant/40 space-y-3 mt-3">
+                                {qa.replies.map((reply) => (
+                                  <div key={reply.id} className="flex gap-2.5 items-start">
+                                    <img
+                                      src={`https://ui-avatars.com/api/?name=${encodeURIComponent(reply.authorName)}&background=random&size=32`}
+                                      alt={reply.authorName}
+                                      className="w-8 h-8 rounded-full flex-shrink-0"
+                                    />
+                                    <div className="min-w-0 flex-1 bg-surface-container/20 p-3 rounded-xl">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-bold text-xs text-on-surface">{reply.authorName}</span>
+                                        <span className="text-[9px] text-on-surface-variant/50">{reply.date}</span>
+                                      </div>
+                                      <p className="text-xs text-on-surface-variant mt-1 leading-relaxed font-medium">
+                                        {reply.content}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Reply Input Form */}
+                            <div className="flex gap-2 items-center pl-6 pt-2">
+                              <input
+                                type="text"
+                                placeholder="Viết phản hồi thảo luận..."
+                                value={replyInputs[qa.id] ?? ''}
+                                onChange={(e) => setReplyInputs((prev) => ({ ...prev, [qa.id]: e.target.value }))}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handleAddReply(qa.id);
+                                  }
+                                }}
+                                className="flex-grow px-3 py-2 text-xs rounded-xl bg-surface-container/50 border border-outline-variant/30 focus:border-primary focus:bg-surface outline-none text-on-surface placeholder:text-on-surface-variant/40 transition-colors"
+                              />
+                              <button
+                                onClick={() => handleAddReply(qa.id)}
+                                className="px-3.5 py-2 bg-secondary-container hover:bg-secondary-container/95 text-on-secondary-container rounded-xl font-bold text-xs transition-colors whitespace-nowrap"
+                              >
+                                Phản hồi
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </motion.div>
                 )}
                 {activeTab === 'notes' && (
-                  <motion.div key="notes" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <motion.div key="notes" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
                     <textarea
-                      placeholder="Ghi chú của bạn cho bài học này..."
-                      className="w-full min-h-[160px] p-4 rounded-2xl bg-surface-container border border-outline-variant/40 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none resize-none text-on-surface placeholder:text-on-surface-variant/50 transition-all"
+                      value={noteText}
+                      onChange={(e) => setNoteText(e.target.value)}
+                      onBlur={() => saveLessonNote(course.id, activeLesson.id, noteText)}
+                      placeholder="Ghi chú các kiến thức quan trọng của bài học này... (hệ thống sẽ tự động lưu khi bạn thoát nhấp chuột)"
+                      className="w-full min-h-[160px] p-4 rounded-2xl bg-surface-container border border-outline-variant/40 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none resize-none text-on-surface placeholder:text-on-surface-variant/50 transition-all font-medium"
                     />
+                    <div className="flex justify-end">
+                      <button
+                        onClick={handleSaveNote}
+                        className="px-5 py-2.5 bg-primary text-on-primary rounded-xl font-bold text-sm shadow-md hover:bg-primary/90 transition-all"
+                      >
+                        Lưu ghi chú
+                      </button>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -980,7 +1182,7 @@ function LearningView({ course }: { course: Course }) {
             >
               <div className="p-4 border-b border-outline-variant/30 flex items-center justify-between bg-surface sticky top-0 z-10">
                 <h3 className="text-base font-bold text-on-surface">Mục lục khóa học</h3>
-                {/* Nút đóng sidebar — chỉ hiện trên mobile (desktop toggle qua topbar button) */}
+                {/* Nút đóng sidebar — chỉ hiện trên mobile */}
                 <button onClick={() => setIsSidebarOpen(false)} className="p-2 hover:bg-surface-container rounded-lg lg:hidden">
                   <X className="w-5 h-5" />
                 </button>
@@ -989,12 +1191,11 @@ function LearningView({ course }: { course: Course }) {
               <div className="flex-grow overflow-y-auto p-3 space-y-1.5">
                 {course.lessons?.map(lesson => {
                   const isActive = activeLesson?.id === lesson.id;
-                  const quizScore = quizScores[lesson.id]; // undefined nếu chưa làm
+                  const courseScores = quizScores[course.id] ?? {};
+                  const quizScore = courseScores[lesson.id]; // undefined nếu chưa làm
                   const isQuiz = lesson.type === 'quiz';
 
                   // ── Quiz item trong sidebar ──────────────────────────────
-                  // Hiển thị badge "Quiz" + điểm % nếu đã làm (quizScore !== undefined)
-                  // Nền vàng nhạt khi đã làm, nền trắng khi chưa
                   if (isQuiz) {
                     const hasScore = quizScore !== undefined;
                     return (
@@ -1021,7 +1222,6 @@ function LearningView({ course }: { course: Course }) {
                           <div className="flex items-center gap-2">
                             {hasScore ? (
                               <>
-                                {/* Màu xanh nếu ≥70%, đỏ nếu <70% */}
                                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
                                   quizScore >= 70 ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'
                                 }`}>
@@ -1044,8 +1244,7 @@ function LearningView({ course }: { course: Course }) {
                   }
 
                   // ── Video/PDF item trong sidebar ─────────────────────────
-                  // Highlight màu primary khi đang xem (isActive)
-                  // Dấu tích xanh khi lesson.isCompleted = true
+                  const isCompleted = completedList.includes(lesson.id);
                   return (
                     <button
                       key={lesson.id}
@@ -1057,7 +1256,7 @@ function LearningView({ course }: { course: Course }) {
                       }`}
                     >
                       <div className="mt-0.5 flex-shrink-0">
-                        {lesson.isCompleted
+                        {isCompleted
                           ? <CheckCircle2 className="w-5 h-5 text-green-500" />
                           : lesson.type === 'video'
                           ? <PlayCircle className={`w-5 h-5 ${isActive ? 'text-primary' : 'text-on-surface-variant'}`} />
@@ -1088,13 +1287,12 @@ function LearningView({ course }: { course: Course }) {
         </AnimatePresence>
       </div>
 
-      {/* QuizModal — render bên ngoài DOM flow để overlay toàn màn hình
-          AnimatePresence để animate fade in/out khi activeQuiz thay đổi */}
+      {/* QuizModal */}
       <AnimatePresence>
         {activeQuiz && (
           <QuizModal
             lesson={activeQuiz}
-            prevScore={quizScores[activeQuiz.id]} // truyền điểm cũ nếu đã làm trước
+            prevScore={quizScores[course.id]?.[activeQuiz.id]}
             onClose={() => setActiveQuiz(null)}
             onComplete={handleQuizComplete}
           />

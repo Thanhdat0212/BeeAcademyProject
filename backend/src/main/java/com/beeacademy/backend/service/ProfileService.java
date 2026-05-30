@@ -68,10 +68,22 @@ public class ProfileService {
      * @throws ResourceNotFoundException nếu profile chưa tồn tại (lỗi sync
      *         hiếm gặp - auth user có nhưng profile chưa được tạo)
      */
+    /**
+     * Trả về profile của user đang đăng nhập.
+     *
+     * <p>Đã thêm @Transactional vì có thể tự động sinh và lưu mã liên kết phụ huynh (lazy initialization).
+     *
+     * @param me user từ JWT context
+     * @return ProfileResponse đầy đủ thông tin
+     * @throws ResourceNotFoundException nếu profile chưa tồn tại (lỗi sync
+     *         hiếm gặp - auth user có nhưng profile chưa được tạo)
+     */
+    @Transactional
     public ProfileResponse getCurrentProfile(AuthenticatedUser me) {
         Profile profile = loadProfileOrThrow(me.userId());
         return ProfileResponse.fromEntity(profile, me.email());
     }
+
 
     // ========================================================================
     // PUT /api/me - cập nhật hồ sơ (UC05)

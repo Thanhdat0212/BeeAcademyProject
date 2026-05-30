@@ -29,6 +29,12 @@ import TeacherRevenuePage from './pages/teacher/RevenuePage';
 import TeacherBankPage from './pages/teacher/BankPage';
 import TeacherComplaintsPage from './pages/teacher/ComplaintsPage';
 import OAuthCallbackPage from './pages/common/OAuthCallbackPage';
+import ParentDashboard from './pages/parents/ParentDashboard';
+import ParentCourses from './pages/parents/ParentCourses';
+
+import ParentProgress from './pages/parents/ParentProgress';
+import ParentMessages from './pages/parents/ParentMessages';
+import ParentStudentLink from './pages/parents/ParentStudentLink';
 
 export default function App() {
   return (
@@ -57,6 +63,14 @@ export default function App() {
         <Route path="/account/photo" element={<AvatarPage />} />
         <Route path="/account"       element={<AccountPage />} />
         <Route path="/complaints"    element={<ComplaintsPage />} />
+
+        {/* ── Parent ── */}
+        <Route path="/parent" element={<ParentDashboard />} />
+        <Route path="/parent/courses" element={<ParentCourses />} />
+
+        <Route path="/parent/progress" element={<ParentProgress />} />
+        <Route path="/parent/messages" element={<ParentMessages />} />
+        <Route path="/parent/link" element={<ParentStudentLink />} />
 
         {/* ── Teacher ── */}
         <Route path="/teacher"          element={<DashboardTeacher />} />

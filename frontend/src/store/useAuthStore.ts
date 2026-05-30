@@ -18,10 +18,26 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { AuthTokenPayload, UserSummary } from '../types/api';
+import * as parentService from '../api/parentService';
+
 
 // ---------------------------------------------------------------------------
 //  Type
 // ---------------------------------------------------------------------------
+
+/**
+ * Cấu trúc thông tin học sinh (con cái) liên kết với tài khoản Phụ huynh
+ */
+export interface LinkedStudent {
+  id: string;
+  name: string;
+  avatar?: string;
+  grade: string;
+  avgProgress?: number;
+  coursesCount?: { active: number; completed: number };
+  recentScores?: { quiz: number; exam: number };
+  weeklyActivity?: number[]; // Số giờ học từ Thứ 2 đến Chủ nhật (mảng 7 phần tử)
+}
 
 /**
  * Type User dùng nội bộ UI (Header dropdown, ProfilePage...).
@@ -41,7 +57,8 @@ interface AuthState {
   user: User | null;
   accessToken: string | null;
   refreshToken: string | null;
- 
+  linkedStudents: LinkedStudent[]; // Danh sách các con đã liên kết
+
   // ----- Actions -----
   /**
    * Lưu token + user sau khi gọi authService.login() / register() thành công.
@@ -54,6 +71,12 @@ interface AuthState {
  
   /** Xoá toàn bộ state - gọi sau khi authService.logout(). */
   logout: () => void;
+
+  /** Tải danh sách học sinh đã liên kết từ backend API */
+  fetchLinkedStudents: () => Promise<void>;
+
+  /** Gỡ liên kết học sinh */
+  unlinkStudent: (studentId: string) => Promise<boolean | string>;
 }
  
 // ---------------------------------------------------------------------------
@@ -70,6 +93,8 @@ function toUiUser(summary: UserSummary | null): User | null {
   };
 }
 
+
+
 // ---------------------------------------------------------------------------
 //  Store
 // ---------------------------------------------------------------------------
@@ -82,6 +107,9 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       accessToken: null,
       refreshToken: null,
+
+      // Ban đầu danh sách con trống, sẽ được tải qua API fetchLinkedStudents
+      linkedStudents: [],
 
       loginWithTokens: (payload) =>
         set({
@@ -102,18 +130,55 @@ export const useAuthStore = create<AuthState>()(
           user: null,
           accessToken: null,
           refreshToken: null,
+          linkedStudents: [],
         }),
+
+      fetchLinkedStudents: async () => {
+        try {
+          const list = await parentService.getLinkedChildren();
+          const mapped = list.map((item) => ({
+            id: item.id.toString(),
+            name: item.name,
+            avatar: item.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=feb700&color=1a1b1e&bold=true&size=128`,
+            grade: item.grade,
+            // Fallbacks cho tương thích ngược
+            avgProgress: 0,
+            coursesCount: { active: 0, completed: 0 },
+            recentScores: { quiz: 0, exam: 0 },
+            weeklyActivity: [0, 0, 0, 0, 0, 0, 0]
+          }));
+          set({ linkedStudents: mapped });
+        } catch (error) {
+          console.error('Lỗi khi tải danh sách con đã liên kết:', error);
+        }
+      },
+
+
+
+      unlinkStudent: async (studentId) => {
+        try {
+          await parentService.unlinkStudent(studentId);
+          // Xóa local
+          set((state) => ({
+            linkedStudents: state.linkedStudents.filter((s) => s.id !== studentId),
+          }));
+          return true;
+        } catch (error: any) {
+          return error?.message || 'Không thể gỡ liên kết tài khoản con.';
+        }
+      }
     }),
     {
       // Key trong localStorage - đặt prefix bee-academy để tránh đụng app khác
       name: 'bee-academy-auth',
       storage: createJSONStorage(() => localStorage),
-      // Chỉ persist field cần thiết, không bao gồm các action
+      // Chỉ persist field cần thiết, bao gồm cả linkedStudents của phụ huynh
       partialize: (state) => ({
         isLoggedIn: state.isLoggedIn,
         user: state.user,
         accessToken: state.accessToken,
         refreshToken: state.refreshToken,
+        linkedStudents: state.linkedStudents,
       }),
     },
   ),
