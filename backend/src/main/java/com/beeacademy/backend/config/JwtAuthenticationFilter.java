@@ -5,7 +5,6 @@ import com.auth0.jwt.JWTVerifier;
 import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.exceptions.JWTVerificationException;
 import com.auth0.jwt.interfaces.DecodedJWT;
-import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -39,18 +38,13 @@ import java.security.spec.ECPublicKeySpec;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Filter verify JWT Supabase, hỗ trợ hai thuật toán:
- * <ul>
- *   <li><b>ES256</b> (ECDSA P-256) — Supabase phiên bản mới mặc định dùng.
- *       Public key lấy từ JWKS endpoint khi khởi động.</li>
- *   <li><b>HS256</b> (HMAC-SHA256) — Supabase phiên bản cũ hoặc self-hosted.
- *       Dùng SUPABASE_JWT_SECRET đã base64-decode.</li>
- * </ul>
+ * Filter verify JWT Supabase, hỗ trợ ES256 và HS256.
  *
- * <p>Thuật toán được chọn tự động theo claim {@code alg} trong JWT header.
- * Nếu không hỗ trợ thuật toán → skip (không set SecurityContext).
+ * ES256 verifier được build khi khởi động. Nếu thất bại (mạng chưa sẵn sàng),
+ * filter tự retry lazy mỗi khi nhận JWT ES256 cho đến khi thành công.
  */
 @Slf4j
 @Component
@@ -58,14 +52,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "Bearer ";
 
-    private final JWTVerifier      es256Verifier;  // nullable nếu JWKS fetch thất bại
+    // AtomicReference để hỗ trợ lazy retry thread-safe (không dùng synchronized trên mọi request)
+    private final AtomicReference<JWTVerifier> es256VerifierRef = new AtomicReference<>(null);
     private final JWTVerifier      hs256Verifier;
     private final ProfileRepository profileRepository;
+    private final String           supabaseUrl;
 
     public JwtAuthenticationFilter(SupabaseProperties props, ProfileRepository profileRepository) {
-        this.es256Verifier    = buildEs256Verifier(props.url());
-        this.hs256Verifier    = buildHs256Verifier(props.jwtSecret());
+        this.supabaseUrl      = props.url();
         this.profileRepository = profileRepository;
+        this.hs256Verifier    = buildHs256Verifier(props.jwtSecret());
+
+        // Thử build ES256 verifier ngay khi khởi động
+        JWTVerifier v = buildEs256Verifier(supabaseUrl);
+        if (v != null) {
+            es256VerifierRef.set(v);
+        }
+        // Nếu null → sẽ retry lazy ở lần request đầu tiên dùng ES256
     }
 
     // ========================================================================
@@ -81,15 +84,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         if (token != null) {
             try {
-                // Đọc alg từ header trước khi verify để chọn đúng verifier
                 DecodedJWT unverified = JWT.decode(token);
-                JWTVerifier verifier = selectVerifier(unverified.getAlgorithm());
+                JWTVerifier verifier  = selectVerifier(unverified.getAlgorithm());
 
                 if (verifier != null) {
                     DecodedJWT decoded = verifier.verify(token);
                     AuthenticatedUser user = buildAuthenticatedUser(decoded);
                     setSecurityContext(user, request);
-                    log.debug("Authenticated {} (alg={} role={})", user.userId(), unverified.getAlgorithm(), user.role());
+                    log.debug("Authenticated {} (alg={} role={})",
+                            user.userId(), unverified.getAlgorithm(), user.role());
                 } else {
                     log.warn("Không có verifier cho JWT alg={}", unverified.getAlgorithm());
                 }
@@ -103,8 +106,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
+    /**
+     * Chọn verifier theo alg.
+     * Nếu ES256 verifier chưa sẵn sàng → thử build lại (lazy retry).
+     */
     private JWTVerifier selectVerifier(String alg) {
-        if ("ES256".equals(alg)) return es256Verifier;
+        if ("ES256".equals(alg)) {
+            JWTVerifier current = es256VerifierRef.get();
+            if (current != null) return current;
+
+            // Verifier chưa sẵn sàng → thử lại
+            log.info("ES256 verifier chưa sẵn sàng, thử fetch JWKS lại...");
+            JWTVerifier retried = buildEs256Verifier(supabaseUrl);
+            if (retried != null) {
+                es256VerifierRef.compareAndSet(null, retried);
+                log.info("ES256 verifier đã được khởi tạo thành công (lazy retry).");
+                return retried;
+            }
+            log.warn("Retry JWKS thất bại, JWT ES256 sẽ không được xác thực lần này.");
+            return null;
+        }
         if ("HS256".equals(alg)) return hs256Verifier;
         return null;
     }
@@ -113,15 +134,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     // BUILD VERIFIERS
     // ========================================================================
 
-    /**
-     * Lấy public key EC P-256 từ JWKS endpoint của Supabase và build verifier ES256.
-     * Được gọi một lần khi khởi động. Trả null nếu không lấy được (không crash app).
-     */
-    private JWTVerifier buildEs256Verifier(String supabaseUrl) {
+    private JWTVerifier buildEs256Verifier(String url) {
         try {
-            String jwksUrl = supabaseUrl + "/auth/v1/.well-known/jwks.json";
+            String jwksUrl = url + "/auth/v1/.well-known/jwks.json";
             HttpClient http = HttpClient.newHttpClient();
-            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(jwksUrl)).GET().build();
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(jwksUrl))
+                    .timeout(java.time.Duration.ofSeconds(5))
+                    .GET().build();
             HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
 
             JsonNode root = new ObjectMapper().readTree(resp.body());
@@ -142,7 +162,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             log.warn("Không tìm thấy EC P-256 key trong JWKS của Supabase");
         } catch (Exception e) {
-            log.warn("Không thể tải JWKS từ Supabase ({}). ES256 bị tắt.", e.getMessage());
+            log.warn("Không thể tải JWKS từ Supabase ({}). ES256 chưa khả dụng.", e.getMessage());
         }
         return null;
     }
@@ -157,7 +177,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             Algorithm algorithm = Algorithm.HMAC256(secretBytes);
             return JWT.require(algorithm).build();
         } catch (Exception e) {
-            // Nếu decode base64 thất bại, thử dùng raw string bytes
             log.debug("Base64 decode JWT secret thất bại, thử raw bytes: {}", e.getMessage());
             Algorithm algorithm = Algorithm.HMAC256(jwtSecret);
             return JWT.require(algorithm).build();
@@ -175,7 +194,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         BigInteger x = new BigInteger(1, xBytes);
         BigInteger y = new BigInteger(1, yBytes);
 
-        // P-256 = secp256r1
         AlgorithmParameters params = AlgorithmParameters.getInstance("EC");
         params.init(new ECGenParameterSpec("secp256r1"));
         ECParameterSpec ecSpec = params.getParameterSpec(ECParameterSpec.class);
@@ -199,8 +217,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         UUID userId = UUID.fromString(decoded.getSubject());
         String email = safeClaim(decoded, "email");
 
-        // Lấy role từ DB profiles (nguồn sự thật) thay vì JWT metadata.
-        // Wrap try/catch riêng để lỗi DB không làm silent-fail toàn bộ JWT filter.
         String role;
         try {
             role = profileRepository.findById(userId)
