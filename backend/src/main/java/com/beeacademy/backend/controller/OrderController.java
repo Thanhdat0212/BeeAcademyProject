@@ -54,4 +54,16 @@ public class OrderController {
         UUID userId = CurrentUser.required().userId();
         return ResponseEntity.ok(ApiResponse.ok(orderService.listOrders(userId)));
     }
+
+    /**
+     * Gọi PayOS API kiểm tra trạng thái thanh toán và tạo enrollment nếu đã paid.
+     * Dùng khi webhook không đến được server (local dev, firewall).
+     */
+    @PostMapping("/{orderId}/verify")
+    public ResponseEntity<ApiResponse<OrderResponse>> verifyPayment(
+            @PathVariable UUID orderId) {
+        UUID userId = CurrentUser.required().userId();
+        OrderResponse order = orderService.verifyPayment(orderId, userId);
+        return ResponseEntity.ok(ApiResponse.ok(order));
+    }
 }

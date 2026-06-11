@@ -34,3 +34,8 @@ export async function listOrders(): Promise<OrderResponse[]> {
   const res = await apiClient.get('/api/orders');
   return res.data.data;
 }
+
+export async function verifyPayment(orderId: string): Promise<OrderResponse> {
+  const res = await apiClient.post(`/api/orders/${orderId}/verify`);
+  return res.data.data;
+}

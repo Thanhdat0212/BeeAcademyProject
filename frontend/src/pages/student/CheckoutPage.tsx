@@ -7,6 +7,7 @@ import { useCartStore } from '../../store/useCartStore';
 import { notify } from '../../lib/toast';
 import { createOrder } from '../../api/orderService';
 import { getCourseDetail } from '../../api/courseService';
+import { isApiError } from '../../api/client';
 
 export default function CheckoutPage() {
   const { items, removeFromCart } = useCartStore();
@@ -53,9 +54,7 @@ export default function CheckoutPage() {
       window.location.href = order.checkoutUrl;
 
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        ?? 'Không thể tạo đơn hàng. Vui lòng thử lại.';
-      notify.error(msg);
+      notify.error(isApiError(err) ? err.message : 'Không thể tạo đơn hàng. Vui lòng thử lại.');
     } finally {
       setIsCreating(false);
     }

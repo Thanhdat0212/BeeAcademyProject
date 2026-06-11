@@ -160,6 +160,53 @@ public class OrderService {
         }
     }
 
+    /**
+     * Gọi PayOS API kiểm tra trạng thái thanh toán, nếu đã thanh toán thì
+     * trigger handlePayOSWebhook để tạo enrollment + đánh dấu order PAID.
+     *
+     * Dùng khi webhook không đến được (localhost dev, firewall,...).
+     * Idempotent — gọi nhiều lần cùng orderId đều an toàn.
+     */
+    @Transactional
+    public OrderResponse verifyPayment(UUID orderId, UUID userId) {
+        Order order = orderRepository.findById(orderId)
+            .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
+
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException("FORBIDDEN", "Bạn không có quyền xem đơn hàng này");
+        }
+
+        if (order.getStatus() == OrderStatus.PAID) {
+            return OrderResponse.from(order, null);
+        }
+
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://api-merchant.payos.vn/v2/payment-requests/" + order.getOrderCode()))
+                .header("x-client-id", payosClientId)
+                .header("x-api-key", payosApiKey)
+                .GET()
+                .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root = mapper.readTree(response.body());
+
+            String payosStatus = root.path("data").path("status").asText("");
+            log.info("PayOS verify orderCode={} status={}", order.getOrderCode(), payosStatus);
+
+            if ("PAID".equals(payosStatus)) {
+                handlePayOSWebhook(order.getOrderCode());
+            }
+        } catch (Exception e) {
+            log.warn("PayOS verify thất bại cho order {}: {}", orderId, e.getMessage());
+        }
+
+        Order refreshed = orderRepository.findById(orderId).orElse(order);
+        return OrderResponse.from(refreshed, null);
+    }
+
     @Transactional(readOnly = true)
     public OrderResponse getOrder(UUID orderId, UUID userId) {
         Order order = orderRepository.findById(orderId)

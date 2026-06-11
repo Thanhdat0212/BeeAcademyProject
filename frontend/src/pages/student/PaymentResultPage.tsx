@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { CheckCircle2, XCircle, Clock, ArrowRight, RotateCcw, BookOpen } from 'lucide-react';
-import { getOrderStatus, type OrderResponse } from '../../api/orderService';
+import { getOrderStatus, verifyPayment, type OrderResponse } from '../../api/orderService';
 import { useCartStore } from '../../store/useCartStore';
 
 type ResultStatus = 'success' | 'expired' | 'cancelled' | 'loading';
@@ -37,16 +37,40 @@ export default function PaymentResultPage() {
     if (initialStatus === null) { navigate('/courses'); return; }
     if (!orderId) { setStatus(initialStatus); return; }
 
+    const handlePaidOrder = (o: OrderResponse) => {
+      setOrder(o);
+      clearCart();
+      sessionStorage.removeItem('pendingOrderId');
+      setStatus('success');
+    };
+
     getOrderStatus(orderId)
-      .then(o => {
-        setOrder(o);
+      .then(async o => {
         if (o.status === 'PAID') {
-          clearCart();
-          sessionStorage.removeItem('pendingOrderId');
-          setStatus('success');
-        } else if (o.status === 'EXPIRED') setStatus('expired');
-        else if (o.status === 'CANCELLED') setStatus('cancelled');
-        else setStatus(initialStatus);
+          handlePaidOrder(o);
+        } else if (o.status === 'EXPIRED') {
+          setStatus('expired');
+        } else if (o.status === 'CANCELLED') {
+          setStatus('cancelled');
+        } else if (initialStatus === 'success') {
+          // PayOS redirect với code=00 nhưng webhook chưa đến (local dev, firewall).
+          // Gọi verify để backend tự check PayOS API và tạo enrollment nếu đã paid.
+          try {
+            const verified = await verifyPayment(orderId);
+            if (verified.status === 'PAID') {
+              handlePaidOrder(verified);
+            } else {
+              setOrder(o);
+              setStatus(initialStatus);
+            }
+          } catch {
+            setOrder(o);
+            setStatus(initialStatus);
+          }
+        } else {
+          setOrder(o);
+          setStatus(initialStatus);
+        }
       })
       .catch(() => setStatus(initialStatus));
   }, [orderId, navigate, clearCart]); // eslint-disable-line react-hooks/exhaustive-deps
