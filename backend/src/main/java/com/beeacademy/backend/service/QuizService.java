@@ -229,6 +229,14 @@ public class QuizService {
         }
 
         int total = snapshot.size();
+
+        // Công thức tính điểm theo thang 10 (không phải 100):
+        //   correct/total * 100  → phần trăm đúng (0–100)
+        //   Math.round(...)      → làm tròn đến số nguyên gần nhất (long)
+        //   / 10.0               → chuyển về thang 10, giữ 1 chữ số thập phân
+        // Ví dụ: 7/10 đúng → round(70.0) / 10.0 = 7.0
+        //         7/8  đúng → round(87.5) / 10.0 = 8.8
+        // passingScore trong QuizConfig cũng theo thang 10 (ví dụ: 5.0 = đạt 50%).
         double score = total > 0 ? Math.round((double) correct / total * 100.0) / 10.0 : 0.0;
         double passingScore = attempt.getQuizConfig().getPassingScore().doubleValue();
         boolean passed = score >= passingScore;

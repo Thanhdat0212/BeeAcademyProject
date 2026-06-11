@@ -608,6 +608,9 @@ export default function QuestionBankPage() {
 
   // ── Data ──────────────────────────────────────────────────────
   const [questions,   setQuestions]   = useState<QuestionResponse[]>([]);
+  // totalItems: tổng số câu hỏi từ BE (bao gồm những câu ngoài giới hạn fetch).
+  // Dùng để cảnh báo GV khi danh sách bị cắt (fetch size 200 < totalItems).
+  const [totalItems,  setTotalItems]  = useState(0);
   const [categories,  setCategories]  = useState<Category[]>([]);
   const [courses,     setCourses]     = useState<TeacherCourseResponse[]>([]);
   const [allChapters, setAllChapters] = useState<TeacherChapterResponse[]>([]);
@@ -634,17 +637,22 @@ export default function QuestionBankPage() {
   const [selectedIds,    setSelectedIds]    = useState<string[]>([]);
 
   // ── Load metadata (categories + courses) once ─────────────────
+  // cancelled flag ngăn StrictMode double-invoke: lần mount đầu bị unmount trước
+  // khi Promise.all xong → cancelled=true → setState bị bỏ qua → không spam toast.
   useEffect(() => {
+    let cancelled = false;
     Promise.all([
       listCategories(),
       listMyCourses(0, 100).then(p => p.items),
     ])
       .then(([cats, crs]) => {
+        if (cancelled) return;
         setCategories(cats);
         setCourses(crs);
       })
-      .catch(() => notify.error('Không tải được danh sách môn học / khóa học'))
-      .finally(() => setLoadingMeta(false));
+      .catch(() => { if (!cancelled) notify.error('Không tải được danh sách môn học / khóa học'); })
+      .finally(() => { if (!cancelled) setLoadingMeta(false); });
+    return () => { cancelled = true; };
   }, []);
 
   // ── Load chapters khi chọn course filter ──────────────────────
@@ -656,25 +664,45 @@ export default function QuestionBankPage() {
     setChapterFilter('');
   }, [courseFilter]);
 
-  // ── Load questions ────────────────────────────────────────────
-  const loadQuestions = useCallback(async () => {
-    setLoadingQ(true);
-    try {
-      const params: questionService.ListQuestionsParams = { page: 0, size: 200 };
-      if (diffFilter    !== 'all') params.difficulty = diffFilter;
-      if (statusFilter  !== 'all') params.status     = statusFilter;
-      if (chapterFilter)           params.chapterId  = chapterFilter;
-      const page = await questionService.listQuestions(params);
-      setQuestions(page.items);
-      setSelectedIds(prev => prev.filter(id => page.items.some(q => q.id === id)));
-    } catch {
-      notify.error('Không tải được danh sách câu hỏi');
-    } finally {
-      setLoadingQ(false);
-    }
-  }, [diffFilter, statusFilter, chapterFilter]);
+  // Giới hạn fetch một lần — nếu ngân hàng vượt quá con số này thì hiện cảnh báo.
+  const FETCH_LIMIT = 200;
 
-  useEffect(() => { loadQuestions(); }, [loadQuestions]);
+  // refreshKey: tăng lên 1 để trigger reload thủ công (sau delete/save).
+  // Tách riêng khỏi logic fetch để không tạo vòng lặp phụ thuộc.
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // ── Load questions ────────────────────────────────────────────
+  // Dùng useEffect với cleanup (cancelled flag) thay vì useCallback + useEffect.
+  // Lý do: useCallback + useEffect(() => { fn() }, [fn]) vẫn double-fire trong
+  // StrictMode vì cleanup chỉ cancel fn reference cũ, không cancel in-flight request.
+  // cancelled flag đảm bảo chỉ lần mount cuối cùng (lần thứ 2 trong StrictMode)
+  // mới setState và show toast — lần mount đầu bị cleanup trước khi Promise resolve.
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingQ(true);
+
+    const params: questionService.ListQuestionsParams = { page: 0, size: FETCH_LIMIT };
+    if (diffFilter    !== 'all') params.difficulty = diffFilter;
+    if (statusFilter  !== 'all') params.status     = statusFilter;
+    if (chapterFilter)           params.chapterId  = chapterFilter;
+
+    questionService.listQuestions(params)
+      .then(pageResult => {
+        if (cancelled) return;
+        setQuestions(pageResult.items);
+        setSelectedIds(prev => prev.filter(id => pageResult.items.some(q => q.id === id)));
+        // Lưu tổng số thật từ BE để phát hiện trường hợp bị cắt ngầm
+        setTotalItems(pageResult.totalItems);
+      })
+      .catch(() => { if (!cancelled) notify.error('Không tải được danh sách câu hỏi'); })
+      .finally(() => { if (!cancelled) setLoadingQ(false); });
+
+    return () => { cancelled = true; };
+  }, [diffFilter, statusFilter, chapterFilter, refreshKey]);
+
+  // Dùng useCallback để các event handler (delete, save) có thể gọi reload.
+  // Không chứa logic fetch — chỉ trigger lại useEffect bên trên qua refreshKey.
+  const loadQuestions = useCallback(() => setRefreshKey(k => k + 1), []);
 
   // ── Actions ───────────────────────────────────────────────────
   function openAdd()  { setEditingQ(null); setPanelOpen(true); }
@@ -826,7 +854,10 @@ export default function QuestionBankPage() {
               <h2 className="text-2xl font-extrabold text-on-surface">Ngân hàng câu hỏi</h2>
               {!loadingQ && (
                 <p className="text-on-surface-variant mt-1 text-sm">
-                  <span className="font-bold text-on-surface">{stats.total}</span> câu hỏi
+                  {/* Nếu totalItems > FETCH_LIMIT: hiển thị số thật để GV biết đang bị cắt */}
+                  <span className="font-bold text-on-surface">
+                    {totalItems > FETCH_LIMIT ? `${stats.total}/${totalItems}` : stats.total}
+                  </span> câu hỏi
                   {stats.total > 0 && (
                     <span className="ml-2 text-on-surface-variant/60">
                       · {stats.easy} dễ · {stats.medium} trung bình · {stats.hard} khó
@@ -941,6 +972,18 @@ export default function QuestionBankPage() {
               </button>
             )}
           </motion.div>
+
+          {/* Cảnh báo khi ngân hàng vượt giới hạn fetch — GV cần dùng filter để thu hẹp */}
+          {!loadingQ && totalItems > FETCH_LIMIT && (
+            <div className="mb-4 flex items-start gap-2 px-4 py-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-sm text-amber-700">
+              <span className="font-bold whitespace-nowrap">⚠ Lưu ý:</span>
+              <span>
+                Ngân hàng có <strong>{totalItems}</strong> câu hỏi nhưng chỉ hiển thị{' '}
+                <strong>{FETCH_LIMIT}</strong> câu đầu tiên.
+                Dùng bộ lọc Khóa học / Chương để thu hẹp kết quả và xem đầy đủ.
+              </span>
+            </div>
+          )}
 
           {/* Loading */}
           {loadingQ && (

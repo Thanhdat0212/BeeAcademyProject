@@ -12,6 +12,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { isApiError } from '../../api/client';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
 import * as teacherCourseService from '../../api/teacherCourseService';
@@ -162,20 +163,25 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
   useEffect(() => {
     if (!open) return;
     if (editing) {
-      // FIX: TeacherCourseResponse giờ đã có categoryId → không cần gọi getCourseDetail() thêm.
-      // Chỉ gọi thêm nếu cần description (chưa có trong list response).
+      // TeacherCourseResponse đã có categoryId → set form ngay không cần đợi API
       setForm({
         title:        editing.title,
         description:  '',
-        categoryId:   editing.categoryId ?? '',  // lấy thẳng từ list response
+        categoryId:   editing.categoryId ?? '',
         grades:       editing.grades ?? [],
         priceVnd:     editing.priceVnd.toString(),
         salePriceVnd: editing.salePriceVnd?.toString() ?? '',
       });
-      // Chỉ cần gọi thêm để lấy description (field này không có trong list response)
+
+      // Gọi thêm chỉ để lấy description (không có trong list response).
+      // Dùng cờ isMounted để tránh setForm sau khi panel đã đóng/unmount.
+      // Không dùng useState vì setState không ngăn được double-invoke trong StrictMode —
+      // useRef ghi nhận ngay, không qua render cycle.
+      let isMounted = true;
       teacherCourseService.getCourseDetail(editing.id).then(d => {
-        setForm(f => ({ ...f, description: d.description ?? '' }));
+        if (isMounted) setForm(f => ({ ...f, description: d.description ?? '' }));
       }).catch(() => {});
+      return () => { isMounted = false; };
     } else {
       setForm(EMPTY_FORM);
     }
@@ -402,6 +408,9 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
 export default function TeacherCoursesPage() {
   // ── State ───────────────────────────────────────────────────────
   const [courses,     setCourses]     = useState<TeacherCourseResponse[]>([]);
+  // totalCourses: tổng số khóa học từ BE (bao gồm những khóa ngoài fetch limit 50).
+  // Hiển thị cảnh báo nếu GV có >50 khóa học mà không thấy đủ.
+  const [totalCourses, setTotalCourses] = useState(0);
   const [categories,  setCategories]  = useState<Category[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
@@ -420,13 +429,18 @@ export default function TeacherCoursesPage() {
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
 
+  // Giới hạn fetch một lần — nếu GV có nhiều hơn thì hiện cảnh báo.
+  const COURSE_FETCH_LIMIT = 50;
+
   // ── Load danh sách khóa học ────────────────────────────────────
   // Gọi API thật, không dùng mock data.
   async function loadCourses() {
     setLoading(true);
     try {
-      const page = await teacherCourseService.listMyCourses(0, 50);
-      setCourses(page.items);
+      const pageResult = await teacherCourseService.listMyCourses(0, COURSE_FETCH_LIMIT);
+      setCourses(pageResult.items);
+      // Lưu totalItems để phát hiện trường hợp GV có >50 khóa học bị cắt ngầm
+      setTotalCourses(pageResult.totalItems);
     } catch {
       // apiClient interceptor đã toast lỗi network/5xx; bắt thêm để set loading=false
       notify.error('Không tải được danh sách khóa học');
@@ -486,9 +500,11 @@ export default function TeacherCoursesPage() {
       const updated = await teacherCourseService.submitForReview(courseId);
       setCourses(prev => prev.map(c => c.id === updated.id ? updated : c));
       notify.success(`Đã nộp "${courseTitle}" để Admin duyệt`);
-    } catch (err: any) {
-      // Hiển thị lý do thực tế từ backend (vd: "Khóa học phải có ít nhất 1 chương")
-      notify.error(err?.message || `Không thể nộp duyệt "${courseTitle}"`);
+    } catch (err: unknown) {
+      // apiClient interceptor đã bóc message từ body vào err.message (ApiError extends Error).
+      // isApiError() kiểm tra có phải lỗi từ backend không (có .code và .status).
+      // Ví dụ backend trả: "Khóa học phải có ít nhất 1 chương trước khi nộp duyệt"
+      notify.error(isApiError(err) ? err.message : `Không thể nộp duyệt "${courseTitle}"`);
     } finally {
       setSubmittingId(null);
     }
@@ -664,6 +680,18 @@ export default function TeacherCoursesPage() {
               </svg>
               <p className="text-on-surface-variant font-medium">Đang tải danh sách khóa học...</p>
             </motion.div>
+          )}
+
+          {/* Cảnh báo khi GV có >50 khóa học — phần còn lại bị cắt ngầm */}
+          {!loading && totalCourses > COURSE_FETCH_LIMIT && (
+            <div className="mb-4 flex items-start gap-2 px-4 py-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-sm text-amber-700">
+              <span className="font-bold whitespace-nowrap">⚠ Lưu ý:</span>
+              <span>
+                Bạn có <strong>{totalCourses}</strong> khóa học nhưng chỉ hiển thị{' '}
+                <strong>{COURSE_FETCH_LIMIT}</strong> khóa gần nhất.
+                Hãy liên hệ Admin nếu cần xem toàn bộ danh sách.
+              </span>
+            </div>
           )}
 
           {/* Bảng khóa học */}

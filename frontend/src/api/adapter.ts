@@ -16,8 +16,7 @@ import type {
   CourseSummary as ApiCourseSummary,
   LessonDetail as ApiLesson,
 } from '../types/api';
-import type { Course as UiCourse, Lesson as UiLesson, Subject, Grade, QuizQuestion } from '../data/mockCourses';
-import { QUIZ_TOAN_C1, QUIZ_VAN_C1, QUIZ_LY_C1 } from '../data/mockCourses';
+import type { Course as UiCourse, Lesson as UiLesson, Subject, Grade } from '../data/mockCourses';
 
 // ---------------------------------------------------------------------------
 //  Helpers chuyển kiểu giá / lớp / category
@@ -66,13 +65,16 @@ function gradesToLabel(grades: number[]): Grade {
 /**
  * Lesson API (BE) → Lesson UI (FE).
  * Tự động gán type (video/pdf/quiz) dựa trên tiêu đề bài học và sự tồn tại của videoUrl.
- * Đối với quiz, tự động gán bộ câu hỏi trắc nghiệm mẫu để học viên thực hành.
+ *
+ * Với bài quiz: chỉ đặt type='quiz' để UI hiển thị icon/nhãn đúng.
+ * Câu hỏi thật được load qua StudentQuizPage (/courses/:id/chapters/:chId/quiz).
+ * TODO: khi CourseDetailPage được wire vào StudentQuizPage, có thể loại bỏ
+ * heuristic title-matching này và lấy isQuiz từ chương trực tiếp (QuizConfig).
  */
 function adaptLesson(lesson: ApiLesson): UiLesson {
   const titleLower = lesson.title.toLowerCase();
   const hasVideo = !!(lesson.videoUrl || lesson.videoEmbedUrl);
   let type: 'video' | 'pdf' | 'quiz' = 'video';
-  let questions: QuizQuestion[] | undefined = undefined;
 
   if (
     titleLower.includes('quiz') ||
@@ -80,14 +82,9 @@ function adaptLesson(lesson: ApiLesson): UiLesson {
     titleLower.includes('trắc nghiệm') ||
     titleLower.includes('bài tập')
   ) {
+    // Chỉ đánh dấu type='quiz' — KHÔNG gán mock questions.
+    // Câu hỏi thật đến từ /api/student/courses/:id/chapters/:chId/quiz (StudentQuizPage).
     type = 'quiz';
-    if (titleLower.includes('văn') || titleLower.includes('tiếng việt')) {
-      questions = QUIZ_VAN_C1;
-    } else if (titleLower.includes('lý') || titleLower.includes('từ trường') || titleLower.includes('điện')) {
-      questions = QUIZ_LY_C1;
-    } else {
-      questions = QUIZ_TOAN_C1;
-    }
   } else if (
     // type='pdf' CHỈ khi bài KHÔNG có video VÀ có tài liệu hoặc tên bài chỉ rõ là tài liệu.
     // Nếu bài có cả video + tài liệu → type='video', tài liệu hiển thị ở tab Tổng quan.
@@ -113,7 +110,7 @@ function adaptLesson(lesson: ApiLesson): UiLesson {
     type,
     url,
     isCompleted: false,
-    questions,
+    questions: undefined, // luôn undefined — câu hỏi thật load qua StudentQuizPage
     documents: lesson.documents ?? [],
   };
 }

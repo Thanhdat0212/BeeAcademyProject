@@ -28,7 +28,13 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
 export default function OAuthCallbackPage() {
   const navigate = useNavigate();
   const loginWithTokens = useAuthStore((s) => s.loginWithTokens);
-  // Tránh React StrictMode double-invoke
+
+  // useRef thay vì useState để tránh React StrictMode double-invoke.
+  // Lý do: React StrictMode mount → unmount → remount component trong dev.
+  // Nếu dùng useState(false), cả 2 lần mount đều thấy processed=false trước khi
+  // set chạy → effect chạy 2 lần → 2 lần gọi /api/auth/oauth/sync → race condition.
+  // useRef.current được ghi nhận ngay (không qua render cycle) nên lần mount thứ 2
+  // thấy processed.current = true và thoát sớm.
   const processed = useRef(false);
 
   useEffect(() => {

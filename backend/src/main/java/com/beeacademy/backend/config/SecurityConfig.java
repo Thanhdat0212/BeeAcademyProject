@@ -97,23 +97,25 @@ public class SecurityConfig {
 
 
                         // ----- Teacher Portal -----
-                        .requestMatchers("/api/teacher/**").authenticated()
-                        .requestMatchers("/api/upload/**").authenticated()
+                        // hasRole("teacher") kiểm tra authority "ROLE_teacher" — phòng trường hợp
+                        // thêm endpoint mới mà quên @PreAuthorize (defense-in-depth).
+                        // JwtAuthenticationFilter set authority = "ROLE_" + role.toDbValue() (lowercase).
+                        .requestMatchers("/api/teacher/**").hasRole("teacher")
+                        .requestMatchers("/api/upload/**").hasAnyRole("teacher", "admin")
 
                         // ----- Admin Portal -----
-                        .requestMatchers("/api/admin/**").authenticated()
+                        .requestMatchers("/api/admin/**").hasRole("admin")
 
                         // ----- Student Quiz -----
+                        // Học sinh, phụ huynh xem tiến độ, giáo viên không cần route này
                         .requestMatchers("/api/student/**").authenticated()
 
                         // ----- Tất cả route còn lại cần JWT hợp lệ -----
                         .anyRequest().authenticated()
                 )
 
-                // BUG FIX: Spring Security mặc định trả 403 cho cả "chưa xác thực" (401)
-                // lẫn "không có quyền" (403). Cần tách biệt rõ:
-                //   - AuthenticationEntryPoint: xử lý khi request KHÔNG có/sai JWT → 401 + JSON
-                //   - AccessDeniedHandler: xử lý khi đã login nhưng không có quyền → 403 (mặc định)
+                // Tách biệt 401 (chưa xác thực) vs 403 (đã login nhưng không đủ quyền).
+                // Cả hai đều trả JSON để apiClient đọc được message thay vì nhận HTML.
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((request, response, authException) -> {
                             response.setStatus(401);
@@ -121,6 +123,15 @@ public class SecurityConfig {
                             response.getWriter().write(
                                     "{\"success\":false,\"code\":\"UNAUTHORIZED\"," +
                                     "\"message\":\"Vui lòng đăng nhập để tiếp tục.\"}");
+                        })
+                        // AccessDeniedHandler: user đã login nhưng không có đúng role (403).
+                        // Không thêm handler này → Spring trả HTML whitelabel → apiClient không đọc được message.
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            response.setStatus(403);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write(
+                                    "{\"success\":false,\"code\":\"FORBIDDEN\"," +
+                                    "\"message\":\"Bạn không có quyền thực hiện thao tác này.\"}");
                         })
                 )
 

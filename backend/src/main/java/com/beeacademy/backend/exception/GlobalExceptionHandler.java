@@ -10,6 +10,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 import java.util.List;
 
@@ -109,6 +110,22 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
                 .body(ErrorResponse.of("UNAUTHORIZED", "Bạn cần đăng nhập để thực hiện thao tác này"));
+    }
+
+    /**
+     * Client đóng kết nối trước khi server kịp gửi xong response (ví dụ: user
+     * navigate đi trong khi response đang stream về, hoặc request timeout phía
+     * browser). Đây là hành vi bình thường — không cần log ERROR.
+     *
+     * <p>Spring bọc {@code ClientAbortException} (Tomcat) thành
+     * {@code AsyncRequestNotUsableException}. Không trả response ở đây vì
+     * socket đã đóng — Spring sẽ bỏ qua return value khi connection đã abort.
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleClientAbort(AsyncRequestNotUsableException ex) {
+        // WARN thay vì ERROR — client disconnect là expected, không phải bug server
+        log.warn("Client đã đóng kết nối trước khi nhận xong response ({})",
+                ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage());
     }
 
     /**

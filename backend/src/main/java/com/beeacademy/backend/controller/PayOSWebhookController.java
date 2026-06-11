@@ -78,6 +78,11 @@ public class PayOSWebhookController {
 
             if (!sigValid) {
                 if (devMode) {
+                    // ⚠️ CẢNH BÁO SECURITY: DEV_MODE=true bypass toàn bộ xác thực chữ ký.
+                    // Nếu vô tình deploy lên production với cờ này, bất kỳ HTTP request nào
+                    // đến /api/webhooks/payos cũng được xử lý như webhook hợp lệ → có thể
+                    // fake thanh toán mà không cần key thật.
+                    // Đảm bảo DEV_MODE=false trong backend/.env khi deploy production.
                     log.warn("PayOS webhook: chữ ký không khớp — BỎ QUA kiểm tra vì DEV_MODE=true");
                 } else {
                     log.warn("PayOS webhook: chữ ký không hợp lệ, bỏ qua");
@@ -87,6 +92,14 @@ public class PayOSWebhookController {
 
             String code = (String) data.get("code");
             Object orderCodeObj = data.get("orderCode");
+
+            // Bảo vệ NPE: PayOS có thể gửi webhook test/ping không có field orderCode.
+            // Trường hợp đó bỏ qua luôn thay vì để NullPointerException bị catch phía ngoài.
+            if (orderCodeObj == null) {
+                log.info("PayOS webhook: không có orderCode (có thể là ping), bỏ qua.");
+                return ok();
+            }
+
             long orderCode = ((Number) orderCodeObj).longValue();
 
             log.info("PayOS webhook: orderCode={} code={}", orderCode, code);

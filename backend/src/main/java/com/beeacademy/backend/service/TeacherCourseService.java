@@ -38,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Nghiệp vụ quản lý khóa học phía Giáo viên (Phase 1 — CRUD, không upload).
@@ -216,6 +217,7 @@ public class TeacherCourseService {
 
         Chapter chapter = Chapter.createNew(course, req.title(), req.description(), position);
         Chapter saved   = chapterRepository.save(chapter);
+        refreshCourseCounts(courseId);
         log.info("Thêm chương '{}' vào khóa học {}", req.title(), courseId);
         return TeacherChapterResponse.fromEntity(saved);
     }
@@ -224,16 +226,14 @@ public class TeacherCourseService {
     public TeacherChapterResponse updateChapter(UUID courseId, UUID chapterId,
                                                  AuthenticatedUser me,
                                                  UpdateChapterRequest req) {
-        loadAndVerifyOwner(courseId, me.userId());
+        // loadAndVerifyOwner trả Course đã load — dùng lại để assertEditable,
+        // không cần courseRepository.findById() lần 2 (tránh 1 DB round-trip thừa).
+        Course course = loadAndVerifyOwner(courseId, me.userId());
+        assertEditable(course);
 
-        // Verify chapter thuộc đúng courseId
+        // Verify chapter thuộc đúng courseId (tránh chỉnh sửa chapter của GV khác)
         Chapter chapter = chapterRepository.findByIdAndCourseId(chapterId, courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Chapter", chapterId));
-
-        // assertEditable dựa trên course status — load lại để lấy status
-        Course course = courseRepository.findById(courseId)
-                .orElseThrow(() -> new ResourceNotFoundException("Course", courseId));
-        assertEditable(course);
 
         chapter.update(req.title(), req.description(), req.position());
         return TeacherChapterResponse.fromEntity(chapterRepository.save(chapter));
@@ -250,6 +250,7 @@ public class TeacherCourseService {
 
         // CascadeType.ALL + orphanRemoval trên lessons → xóa lessons theo tự động
         chapterRepository.delete(chapter);
+        refreshCourseCounts(courseId);
         log.info("Xóa chương {} khỏi khóa học {}", chapterId, courseId);
     }
 
@@ -278,6 +279,7 @@ public class TeacherCourseService {
         }
 
         Lesson saved = lessonRepository.save(lesson);
+        refreshCourseCounts(courseId);
         log.info("Thêm bài giảng '{}' vào chương {}", req.title(), chapterId);
         return TeacherLessonResponse.fromEntity(saved);
     }
@@ -319,6 +321,7 @@ public class TeacherCourseService {
                 .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
 
         lessonRepository.delete(lesson);
+        refreshCourseCounts(courseId);
         log.info("Xóa bài giảng {} khỏi chương {}", lessonId, chapterId);
     }
 
@@ -393,6 +396,23 @@ public class TeacherCourseService {
             throw new BusinessException("INVALID_SALE_PRICE",
                     "Giá khuyến mãi tối thiểu 1,000 VND.");
         }
+    }
+
+    /**
+     * Đếm lại và cập nhật totalChapters + totalLessons cho khóa học.
+     *
+     * <p>Được gọi sau mỗi thao tác add/delete chapter hoặc lesson để đảm bảo
+     * denormalized counter trong bảng courses luôn chính xác.
+     * Dùng 2 query đơn giản thay vì trigger DB.
+     */
+    private void refreshCourseCounts(UUID courseId) {
+        List<Chapter> chapters = chapterRepository.findByCourseIdOrderByPositionAsc(courseId);
+        List<UUID> chapterIds = chapters.stream()
+                .map(Chapter::getId)
+                .collect(Collectors.toList());
+        int lessonCount = chapterIds.isEmpty() ? 0
+                : lessonRepository.countByChapterIdIn(chapterIds);
+        courseRepository.updateCounts(courseId, chapters.size(), lessonCount);
     }
 
     private Category loadCategory(UUID id) {

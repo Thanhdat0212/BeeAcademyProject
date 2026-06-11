@@ -13,6 +13,7 @@ import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -108,7 +109,16 @@ public class Question {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    /** Danh sách đáp án, sắp xếp theo position. */
+    /**
+     * Danh sách đáp án, sắp xếp theo position.
+     *
+     * @BatchSize(50): khi Hibernate load choices cho N question, thay vì bắn N query lẻ
+     * ("SELECT * FROM question_choices WHERE question_id = ?") nó gom thành batch:
+     * "SELECT * FROM question_choices WHERE question_id IN (?, ?, ..., ?)" với tối đa 50 ID.
+     * Với 200 câu hỏi: 200 queries → 4 queries. Tránh N+1 mà không cần JOIN FETCH
+     * (JOIN FETCH với paginated query gây Hibernate warning HHH90003004: in-memory pagination).
+     */
+    @BatchSize(size = 50)
     @OneToMany(mappedBy = "question", fetch = FetchType.LAZY,
                cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("position ASC")

@@ -30,4 +30,7 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
 
     /** Đếm số lessons trong một chapter — nhanh hơn load toàn bộ list. */
     int countByChapterId(UUID chapterId);
+
+    /** Đếm tổng lessons thuộc nhiều chapter cùng lúc — dùng để refresh course counter. */
+    int countByChapterIdIn(List<UUID> chapterIds);
 }

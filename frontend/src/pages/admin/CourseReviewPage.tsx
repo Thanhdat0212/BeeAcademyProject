@@ -13,10 +13,10 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
-import { apiClient, unwrap } from '../../api/client';
+import { apiClient, unwrap, isApiError } from '../../api/client';
 import type { ApiResponse } from '../../types/api';
 import type { CourseDetail } from '../../types/api';
 import type { ApprovalHistoryResponse } from '../../api/teacherCourseService';
@@ -79,6 +79,9 @@ function ActionBadge({ action }: { action: ApprovalHistoryResponse['action'] }) 
 export default function CourseReviewPage() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
+  // useLocation() thay vì window.location — React Router cập nhật khi navigate (pushState)
+  // window.location không trigger re-render nên active nav sẽ không đổi khi chuyển trang
+  const location = useLocation();
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
 
@@ -140,9 +143,11 @@ export default function CourseReviewPage() {
       await apiClient.post(endpoint, { comment: comment.trim() || null });
       notify.success(successMessages[type]);
       navigate('/admin/approvals');
-    } catch (err: any) {
-      const msg = err?.response?.data?.message;
-      notify.error(msg || `Không thực hiện được thao tác "${labels[type]}"`);
+    } catch (err: unknown) {
+      // apiClient interceptor đã bóc message từ body vào err.message (ApiError extends Error).
+      // KHÔNG dùng err?.response?.data?.message — interceptor đã transform, .response không còn tồn tại.
+      const msg = isApiError(err) ? err.message : `Không thực hiện được thao tác "${labels[type]}"`;
+      notify.error(msg);
     } finally {
       setActionLoading(null);
     }

@@ -11,6 +11,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import org.springframework.data.jpa.repository.Modifying;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -81,4 +83,14 @@ public interface CourseRepository extends JpaRepository<Course, UUID>,
            "(SELECT e.courseId FROM Enrollment e WHERE e.studentId = :studentId) " +
            "ORDER BY c.createdAt DESC")
     List<Course> findEnrolledByStudentId(@Param("studentId") UUID studentId);
+
+    /**
+     * Cập nhật denormalized counters sau khi thêm/xóa chapter hoặc lesson.
+     * Gọi từ TeacherCourseService thay vì dùng trigger DB.
+     */
+    @Modifying
+    @Query("UPDATE Course c SET c.totalChapters = :chapterCount, c.totalLessons = :lessonCount WHERE c.id = :courseId")
+    void updateCounts(@Param("courseId") UUID courseId,
+                      @Param("chapterCount") int chapterCount,
+                      @Param("lessonCount") int lessonCount);
 }

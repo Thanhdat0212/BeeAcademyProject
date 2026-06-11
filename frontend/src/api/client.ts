@@ -69,9 +69,17 @@ apiClient.interceptors.request.use(
 
 /**
  * Track flag để chỉ logout + redirect 1 lần khi 401 dù có nhiều request đồng
- * thời cùng fail. Reset khi route /login load lại.
+ * thời cùng fail (ví dụ: 3 request song song cùng nhận 401, chỉ toast 1 lần).
+ *
+ * Reset khi:
+ *   - User navigate (back/forward button → popstate)
+ *   - Page được restore từ BFCache (browser back/forward cache → pageshow + persisted)
+ * Không dùng setTimeout vì nếu user back trước khi timeout chạy xong,
+ * các 401 hợp lệ tiếp theo sẽ bị nuốt im lặng.
  */
 let isHandling401 = false;
+window.addEventListener('popstate', () => { isHandling401 = false; });
+window.addEventListener('pageshow', (e) => { if (e.persisted) isHandling401 = false; });
 
 apiClient.interceptors.response.use(
   // 2xx: pass through, component nhận response.data
@@ -104,10 +112,7 @@ apiClient.interceptors.response.use(
         window.location.href =
           '/login?from=' + encodeURIComponent(currentPath);
       }
-      // Reset flag sau 2s phòng trường hợp user back/forward
-      setTimeout(() => {
-        isHandling401 = false;
-      }, 2000);
+      // Flag được reset bởi popstate/pageshow listener ở trên — không cần setTimeout
     }
 
     // Tạo Error custom có thêm code + fieldErrors để component xử lý

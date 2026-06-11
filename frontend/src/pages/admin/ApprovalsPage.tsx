@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
 import { apiClient, unwrap } from '../../api/client';
@@ -76,6 +76,9 @@ export default function ApprovalsPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const navigate = useNavigate();
+  // useLocation() thay vì window.location — React Router cập nhật khi navigate (pushState)
+  // window.location không trigger re-render nên active nav sẽ không đổi khi chuyển trang
+  const location = useLocation();
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
 

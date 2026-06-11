@@ -25,21 +25,67 @@ import java.util.UUID;
 public interface QuestionRepository extends JpaRepository<Question, UUID> {
 
     // ─── Teacher side ────────────────────────────────────────────────────────
+    //
+    // Các query dưới đây JOIN FETCH category và chapter để tránh N+1 khi
+    // fromEntity() đọc category.getName() và chapter.getTitle().
+    //
+    // Lưu ý về countQuery: Spring Data JPA không thể tự suy ra COUNT query
+    // đúng khi có JOIN FETCH → phải khai báo tường minh. COUNT query không
+    // cần JOIN FETCH vì không access các field đó.
+    //
+    // choices KHÔNG JOIN FETCH ở đây vì đây là paginated query — Hibernate sẽ
+    // cảnh báo HHH90003004 và load toàn bộ in-memory thay vì dùng LIMIT/OFFSET.
+    // Thay vào đó dùng @BatchSize(50) trên field choices trong Question entity.
 
-    /** Danh sách câu hỏi của một GV, filter tùy chọn theo chapter và difficulty. */
+    @Query(value = "SELECT q FROM Question q " +
+                   "LEFT JOIN FETCH q.category LEFT JOIN FETCH q.chapter " +
+                   "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
+                   "AND q.difficulty = :difficulty AND q.status = :status",
+           countQuery = "SELECT COUNT(q) FROM Question q " +
+                        "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
+                        "AND q.difficulty = :difficulty AND q.status = :status")
     Page<Question> findByTeacherIdAndChapterIdAndDifficultyAndStatus(
-            UUID teacherId, UUID chapterId, String difficulty, String status, Pageable pageable);
+            @Param("teacherId") UUID teacherId,
+            @Param("chapterId") UUID chapterId,
+            @Param("difficulty") String difficulty,
+            @Param("status") String status,
+            Pageable pageable);
 
-    /** Chỉ filter theo teacher + chapter (bỏ qua difficulty). */
+    @Query(value = "SELECT q FROM Question q " +
+                   "LEFT JOIN FETCH q.category LEFT JOIN FETCH q.chapter " +
+                   "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
+                   "AND q.status = :status",
+           countQuery = "SELECT COUNT(q) FROM Question q " +
+                        "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
+                        "AND q.status = :status")
     Page<Question> findByTeacherIdAndChapterIdAndStatus(
-            UUID teacherId, UUID chapterId, String status, Pageable pageable);
+            @Param("teacherId") UUID teacherId,
+            @Param("chapterId") UUID chapterId,
+            @Param("status") String status,
+            Pageable pageable);
 
-    /** Chỉ filter theo teacher + difficulty (bỏ qua chapter). */
+    @Query(value = "SELECT q FROM Question q " +
+                   "LEFT JOIN FETCH q.category LEFT JOIN FETCH q.chapter " +
+                   "WHERE q.teacher.id = :teacherId AND q.difficulty = :difficulty " +
+                   "AND q.status = :status",
+           countQuery = "SELECT COUNT(q) FROM Question q " +
+                        "WHERE q.teacher.id = :teacherId AND q.difficulty = :difficulty " +
+                        "AND q.status = :status")
     Page<Question> findByTeacherIdAndDifficultyAndStatus(
-            UUID teacherId, String difficulty, String status, Pageable pageable);
+            @Param("teacherId") UUID teacherId,
+            @Param("difficulty") String difficulty,
+            @Param("status") String status,
+            Pageable pageable);
 
-    /** Tất cả câu của teacher có status. */
-    Page<Question> findByTeacherIdAndStatus(UUID teacherId, String status, Pageable pageable);
+    @Query(value = "SELECT q FROM Question q " +
+                   "LEFT JOIN FETCH q.category LEFT JOIN FETCH q.chapter " +
+                   "WHERE q.teacher.id = :teacherId AND q.status = :status",
+           countQuery = "SELECT COUNT(q) FROM Question q " +
+                        "WHERE q.teacher.id = :teacherId AND q.status = :status")
+    Page<Question> findByTeacherIdAndStatus(
+            @Param("teacherId") UUID teacherId,
+            @Param("status") String status,
+            Pageable pageable);
 
     // ─── Quiz side ───────────────────────────────────────────────────────────
 

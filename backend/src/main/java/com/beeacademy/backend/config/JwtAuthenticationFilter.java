@@ -38,6 +38,7 @@ import java.security.spec.ECPublicKeySpec;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -55,6 +56,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     // AtomicReference để hỗ trợ lazy retry thread-safe (không dùng synchronized trên mọi request)
     private final AtomicReference<JWTVerifier> es256VerifierRef = new AtomicReference<>(null);
+
+    // Cooldown cho JWKS retry: chỉ thử lại sau 30 giây kể từ lần thất bại gần nhất.
+    // Tránh trường hợp mỗi request phải chờ 5 giây timeout khi Supabase không khả dụng.
+    private static final long JWKS_RETRY_COOLDOWN_MS = 30_000L;
+    private final AtomicLong lastJwksFailureMs = new AtomicLong(0);
     private final JWTVerifier      hs256Verifier;
     private final ProfileRepository profileRepository;
     private final String           supabaseUrl;
@@ -109,22 +115,40 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     /**
      * Chọn verifier theo alg.
-     * Nếu ES256 verifier chưa sẵn sàng → thử build lại (lazy retry).
+     * Nếu ES256 verifier chưa sẵn sàng → thử build lại (lazy retry có cooldown).
+     *
+     * <p>Tại sao cần cooldown: nếu Supabase không khả dụng, mỗi lần fetch JWKS
+     * tốn tới 5 giây timeout. Không có cooldown → mỗi request phải chờ 5 giây
+     * trước khi biết là thất bại → toàn bộ API bị block. Với cooldown 30 giây,
+     * chỉ 1 request mỗi 30 giây phải chịu delay — các request còn lại fail nhanh.
      */
     private JWTVerifier selectVerifier(String alg) {
         if ("ES256".equals(alg)) {
             JWTVerifier current = es256VerifierRef.get();
             if (current != null) return current;
 
-            // Verifier chưa sẵn sàng → thử lại
+            // Kiểm tra cooldown trước khi retry — tránh block mọi request khi Supabase down
+            long now = System.currentTimeMillis();
+            long lastFailure = lastJwksFailureMs.get();
+            if (lastFailure > 0 && now - lastFailure < JWKS_RETRY_COOLDOWN_MS) {
+                log.debug("JWKS cooldown còn hiệu lực ({} giây nữa), bỏ qua retry.",
+                        (JWKS_RETRY_COOLDOWN_MS - (now - lastFailure)) / 1000);
+                return null;
+            }
+
             log.info("ES256 verifier chưa sẵn sàng, thử fetch JWKS lại...");
             JWTVerifier retried = buildEs256Verifier(supabaseUrl);
             if (retried != null) {
                 es256VerifierRef.compareAndSet(null, retried);
+                lastJwksFailureMs.set(0); // reset failure timestamp khi thành công
                 log.info("ES256 verifier đã được khởi tạo thành công (lazy retry).");
                 return retried;
             }
-            log.warn("Retry JWKS thất bại, JWT ES256 sẽ không được xác thực lần này.");
+
+            // Ghi nhận thời điểm thất bại để cooldown có hiệu lực
+            lastJwksFailureMs.set(now);
+            log.warn("Retry JWKS thất bại, sẽ không thử lại trong {} giây.",
+                    JWKS_RETRY_COOLDOWN_MS / 1000);
             return null;
         }
         if ("HS256".equals(alg)) return hs256Verifier;
@@ -220,6 +244,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return header.substring(BEARER_PREFIX.length()).trim();
     }
 
+    /**
+     * Build AuthenticatedUser từ JWT đã verify thành công.
+     *
+     * <p><b>Tại sao lấy role từ DB thay vì JWT?</b><br>
+     * JWT được ký một lần và có thể tồn tại nhiều giờ (TTL mặc định Supabase 1h).
+     * Nếu Admin nâng cấp một user từ {@code student} → {@code teacher} trong DB,
+     * JWT cũ của user vẫn mang role {@code student} cho đến khi hết hạn.
+     * Đọc role từ DB đảm bảo quyền hạn được áp dụng ngay lập tức, không cần
+     * chờ user đăng nhập lại để lấy token mới.
+     *
+     * <p>Fallback về JWT metadata khi DB không truy cập được (exception) hoặc
+     * profile chưa tồn tại (user Google OAuth lần đầu chưa qua /oauth/sync).
+     */
     private AuthenticatedUser buildAuthenticatedUser(DecodedJWT decoded) {
         UUID userId = UUID.fromString(decoded.getSubject());
         String email = safeClaim(decoded, "email");
@@ -242,7 +279,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return decoded.getClaim(name).isMissing() ? null : decoded.getClaim(name).asString();
     }
 
-    @SuppressWarnings("unchecked")
     private String extractRole(DecodedJWT decoded) {
         try {
             var appMeta = decoded.getClaim("app_metadata");
