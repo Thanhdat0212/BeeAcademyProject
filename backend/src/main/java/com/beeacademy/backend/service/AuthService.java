@@ -114,6 +114,14 @@ public class AuthService {
             throw new BusinessException("INVALID_ROLE",
                     "Vai trò không hợp lệ cho đăng ký công khai");
         }
+
+        // Chặn ngay từ bước gửi OTP nếu email đã có tài khoản — tránh user nhận mã,
+        // nhập OTP xong mới bị Supabase báo trùng email ở bước verify (UX tệ + tốn 1 email).
+        if (profileRepository.existsByEmailInAuth(request.email())) {
+            throw new BusinessException("EMAIL_ALREADY_EXISTS",
+                    "Email này đã được đăng ký", HttpStatus.CONFLICT);
+        }
+
         otpService.send(request.email(), request.fullName(), request.role());
     }
 

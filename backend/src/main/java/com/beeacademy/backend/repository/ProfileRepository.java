@@ -31,14 +31,18 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
 
     /**
      * Kiểm tra xem email có tồn tại trong bảng auth.users của Supabase không.
+     *
+     * <p>So sánh LOWER() hai phía vì Supabase chuẩn hóa email về lowercase khi
+     * tạo user, còn input từ client có thể viết hoa — so sánh exact sẽ bỏ sót.
      */
-    @Query(value = "SELECT EXISTS(SELECT 1 FROM auth.users WHERE email = :email)", nativeQuery = true)
+    @Query(value = "SELECT EXISTS(SELECT 1 FROM auth.users WHERE LOWER(email) = LOWER(:email))", nativeQuery = true)
     boolean existsByEmailInAuth(@Param("email") String email);
 
     /**
      * Lấy UUID của user từ email trong bảng auth.users.
+     * LOWER() hai phía — cùng lý do với {@link #existsByEmailInAuth}.
      */
-    @Query(value = "SELECT id FROM auth.users WHERE email = :email", nativeQuery = true)
+    @Query(value = "SELECT id FROM auth.users WHERE LOWER(email) = LOWER(:email)", nativeQuery = true)
     Optional<UUID> findUserIdByEmail(@Param("email") String email);
 
     /**
