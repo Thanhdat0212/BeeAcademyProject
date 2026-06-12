@@ -1407,11 +1407,11 @@ function LearningView({ course, rawChapters, courseId }: {
                   );
                 })}
 
-                {/* Quiz theo chương — hiển thị khi có chapter từ API */}
-                {rawChapters.length > 0 && (
+                {/* Quiz theo chương — chỉ hiện chương GV đã cấu hình quiz (hasQuizConfig=true) */}
+                {rawChapters.some(ch => ch.hasQuizConfig) && (
                   <div className="mt-3 pt-3 border-t border-outline-variant/30">
                     <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider px-1 mb-2">Quiz theo chương</p>
-                    {rawChapters.map(ch => (
+                    {rawChapters.filter(ch => ch.hasQuizConfig).map(ch => (
                       <Link
                         key={ch.id}
                         to={`/courses/${courseId}/chapters/${ch.id}/quiz`}

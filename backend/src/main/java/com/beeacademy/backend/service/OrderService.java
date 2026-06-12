@@ -180,6 +180,8 @@ public class OrderService {
             return OrderResponse.from(order, null);
         }
 
+        // Bước 1: Gọi PayOS API — chỉ bọc lỗi network/JSON trong try-catch
+        boolean payosConfirmedPaid = false;
         try {
             HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
@@ -195,12 +197,15 @@ public class OrderService {
 
             String payosStatus = root.path("data").path("status").asText("");
             log.info("PayOS verify orderCode={} status={}", order.getOrderCode(), payosStatus);
-
-            if ("PAID".equals(payosStatus)) {
-                handlePayOSWebhook(order.getOrderCode());
-            }
+            payosConfirmedPaid = "PAID".equals(payosStatus);
         } catch (Exception e) {
             log.warn("PayOS verify thất bại cho order {}: {}", orderId, e.getMessage());
+        }
+
+        // Bước 2: Xử lý enrollment + revenue — KHÔNG bọc trong try-catch PayOS ở trên
+        // để lỗi DB không bị nuốt lẫn với lỗi network
+        if (payosConfirmedPaid) {
+            handlePayOSWebhook(order.getOrderCode());
         }
 
         Order refreshed = orderRepository.findById(orderId).orElse(order);
@@ -240,9 +245,10 @@ public class OrderService {
             return;
         }
 
+        // Không chặn expired khi PayOS đã xác nhận PAID — tiền đã thu, phải cấp quyền truy cập.
+        // Order.expiresAt chỉ dùng để ngăn tạo đơn mới, không dùng để từ chối xử lý thanh toán đã hoàn tất.
         if (order.isExpired()) {
-            log.warn("PayOS webhook: đơn hàng {} đã hết hạn", orderCode);
-            return;
+            log.warn("PayOS webhook: đơn hàng {} đã hết hạn nhưng vẫn xử lý vì PayOS xác nhận PAID", orderCode);
         }
 
         List<OrderItem> items = orderItemRepository.findByOrderId(order.getId());
@@ -255,7 +261,11 @@ public class OrderService {
             // Ghi revenue split riêng — lỗi ở đây không được rollback enrollment
             try {
                 Course course = courseRepository.findById(item.getCourseId()).orElse(null);
-                if (course != null && course.getTeacher() != null) {
+                if (course == null) {
+                    log.warn("Revenue split bỏ qua: course {} không tồn tại", item.getCourseId());
+                } else if (course.getTeacher() == null) {
+                    log.warn("Revenue split bỏ qua: course {} chưa có giáo viên", item.getCourseId());
+                } else {
                     teacherRevenueService.createRevenueSplit(
                             course.getTeacher().getId(), order.getUserId(), item.getCourseId(),
                             order.getId(), item.getPriceAtPurchase());

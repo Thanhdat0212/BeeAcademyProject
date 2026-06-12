@@ -9,6 +9,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -53,22 +54,35 @@ public record CourseDetailResponse(
      * @param canSeeAllVideos  true nếu user là chủ khoá / đã enrolled
      */
     public static CourseDetailResponse fromEntity(Course course, boolean canSeeAllVideos) {
-        return fromEntity(course, canSeeAllVideos, null, Collections.emptyMap());
+        return fromEntity(course, canSeeAllVideos, null, Collections.emptyMap(), Collections.emptySet());
     }
 
     public static CourseDetailResponse fromEntity(Course course, boolean canSeeAllVideos,
                                                    Function<Lesson, String> resolver) {
-        return fromEntity(course, canSeeAllVideos, resolver, Collections.emptyMap());
+        return fromEntity(course, canSeeAllVideos, resolver, Collections.emptyMap(), Collections.emptySet());
     }
 
-    /** Overload đầy đủ: signed URL resolver + docMap. */
     public static CourseDetailResponse fromEntity(Course course, boolean canSeeAllVideos,
                                                    Function<Lesson, String> resolver,
                                                    Map<UUID, List<CourseDocument>> docMap) {
+        return fromEntity(course, canSeeAllVideos, resolver, docMap, Collections.emptySet());
+    }
+
+    /**
+     * Overload đầy đủ: signed URL resolver + docMap + tập chapterId đã có quiz config.
+     *
+     * @param chaptersWithQuiz chapterId nào đã được GV cấu hình quiz
+     *                         — dùng để set {@code hasQuizConfig} trên từng ChapterResponse
+     */
+    public static CourseDetailResponse fromEntity(Course course, boolean canSeeAllVideos,
+                                                   Function<Lesson, String> resolver,
+                                                   Map<UUID, List<CourseDocument>> docMap,
+                                                   Set<UUID> chaptersWithQuiz) {
         List<Integer> grades = Arrays.stream(course.getGrades()).boxed().collect(Collectors.toList());
 
         List<ChapterResponse> chapters = course.getChapters().stream()
-                .map(c -> ChapterResponse.fromEntity(c, canSeeAllVideos, resolver, docMap))
+                .map(c -> ChapterResponse.fromEntity(c, canSeeAllVideos, resolver, docMap,
+                        chaptersWithQuiz.contains(c.getId())))
                 .toList();
 
         String categoryName = course.getCategory() != null ? course.getCategory().getName() : null;

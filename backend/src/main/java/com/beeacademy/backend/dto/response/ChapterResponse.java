@@ -15,22 +15,25 @@ public record ChapterResponse(
         String title,
         String description,
         Integer position,
-        List<LessonResponse> lessons
+        List<LessonResponse> lessons,
+        /** true nếu chương đã có quiz config — frontend dùng để ẩn/hiện nút "Làm quiz". */
+        boolean hasQuizConfig
 ) {
 
     public static ChapterResponse fromEntity(Chapter chapter, boolean canSeeAllVideos) {
-        return fromEntity(chapter, canSeeAllVideos, null, Collections.emptyMap());
+        return fromEntity(chapter, canSeeAllVideos, null, Collections.emptyMap(), false);
     }
 
     public static ChapterResponse fromEntity(Chapter chapter, boolean canSeeAllVideos,
                                               Function<Lesson, String> resolver) {
-        return fromEntity(chapter, canSeeAllVideos, resolver, Collections.emptyMap());
+        return fromEntity(chapter, canSeeAllVideos, resolver, Collections.emptyMap(), false);
     }
 
-    /** Overload đầy đủ: signed URL + docMap (lessonId → tài liệu đính kèm). */
+    /** Overload đầy đủ: signed URL + docMap + hasQuizConfig. */
     public static ChapterResponse fromEntity(Chapter chapter, boolean canSeeAllVideos,
                                               Function<Lesson, String> resolver,
-                                              Map<UUID, List<CourseDocument>> docMap) {
+                                              Map<UUID, List<CourseDocument>> docMap,
+                                              boolean hasQuizConfig) {
         List<LessonResponse> lessons = chapter.getLessons().stream()
                 .map(l -> {
                     boolean canSee = canSeeAllVideos || Boolean.TRUE.equals(l.getIsFree());
@@ -45,7 +48,8 @@ public record ChapterResponse(
                 chapter.getTitle(),
                 chapter.getDescription(),
                 chapter.getPosition(),
-                lessons
+                lessons,
+                hasQuizConfig
         );
     }
 }

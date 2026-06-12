@@ -3,9 +3,9 @@ import { motion } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
-import { getRevenueSplits, getPayoutPeriods } from '../../api/revenueService';
+import { getTeacherStats } from '../../api/revenueService';
 import { listMyCourses } from '../../api/teacherCourseService';
-import type { RevenueSplitResponse, PayoutPeriodResponse } from '../../api/revenueService';
+import type { TeacherStatsResponse, RevenueSplitResponse } from '../../api/revenueService';
 import type { TeacherCourseResponse } from '../../api/teacherCourseService';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
@@ -28,17 +28,11 @@ function fmtDate(iso: string) {
   });
 }
 
-function thisMonth() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function lastMonth() {
-  const d = new Date();
-  const p = new Date(d.getFullYear(), d.getMonth() - 1, 1);
-  return `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, '0')}`;
-}
-
+/**
+ * Tính % thay đổi so với tháng trước.
+ * Nếu tháng trước = 0 và tháng này > 0 → +100% (mới có doanh thu).
+ * Nếu cả hai = 0 → 0% (không thay đổi).
+ */
 function pctChange(cur: number, prev: number) {
   if (prev === 0) return cur > 0 ? 100 : 0;
   return Math.round(((cur - prev) / prev) * 100);
@@ -172,10 +166,13 @@ function MyCoursesList({ items }: { items: CourseStat[] }) {
 export default function DashboardTeacher() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [splits, setSplits] = useState<RevenueSplitResponse[]>([]);
-  const [periods, setPeriods] = useState<PayoutPeriodResponse[]>([]);
+
+  // stats: số liệu tổng hợp từ server (1 call thay vì 3)
+  const [stats, setStats] = useState<TeacherStatsResponse | null>(null);
+  // courses: vẫn cần để render bar chart với đầy đủ thông tin title/status
   const [courses, setCourses] = useState<TeacherCourseResponse[]>([]);
-  const didLoadOverviewRef = useRef(false);
+
+  const didLoadRef = useRef(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -183,81 +180,56 @@ export default function DashboardTeacher() {
   const user = useAuthStore(s => s.user);
 
   useEffect(() => {
-    if (didLoadOverviewRef.current) return;
-    didLoadOverviewRef.current = true;
+    // Chỉ load 1 lần dù StrictMode render 2 lần
+    if (didLoadRef.current) return;
+    didLoadRef.current = true;
 
     setLoading(true);
     Promise.allSettled([
-      getRevenueSplits(),
-      getPayoutPeriods(),
+      getTeacherStats(),
       listMyCourses(0, 50).then(p => p.items),
     ])
-      .then(([splitsResult, periodsResult, coursesResult]) => {
-        const failedSections: string[] = [];
+      .then(([statsResult, coursesResult]) => {
+        const failed: string[] = [];
 
-        if (splitsResult.status === 'fulfilled') {
-          setSplits(splitsResult.value);
+        if (statsResult.status === 'fulfilled') {
+          setStats(statsResult.value);
         } else {
-          failedSections.push('doanh thu');
-        }
-
-        if (periodsResult.status === 'fulfilled') {
-          setPeriods(periodsResult.value);
-        } else {
-          failedSections.push('kỳ thanh toán');
+          failed.push('doanh thu');
         }
 
         if (coursesResult.status === 'fulfilled') {
           setCourses(coursesResult.value);
         } else {
-          failedSections.push('khóa học');
+          failed.push('khóa học');
         }
 
-        if (failedSections.length > 0) {
-          notify.error(`Không thể tải ${failedSections.join(', ')}`);
+        if (failed.length > 0) {
+          notify.error(`Không thể tải ${failed.join(', ')}`);
         }
       })
       .finally(() => setLoading(false));
   }, []);
 
-  // ── Computed stats ─────────────────────────────────────────────
+  // ── Stat card values (lấy trực tiếp từ server, không tính client-side) ─────
 
-  const curMonth = thisMonth();
-  const prevMonth = lastMonth();
+  // % thay đổi so với tháng trước — tính từ giá trị server trả về
+  const revChange     = pctChange(stats?.currentMonthRevenue ?? 0,  stats?.previousMonthRevenue ?? 0);
+  const salesChange   = pctChange(stats?.currentMonthSalesCount ?? 0, stats?.previousMonthSalesCount ?? 0);
 
-  const stats = useMemo(() => {
-    const curPeriod = periods.find(p => p.monthYear === curMonth);
-    const prevPeriod = periods.find(p => p.monthYear === prevMonth);
+  // ── 8 giao dịch gần đây (server đã slice sẵn) ─────────────────────────────
+  const recentSplits: RevenueSplitResponse[] = stats?.recentSplits ?? [];
 
-    const curRevenue = curPeriod?.totalTeacherAmount ?? 0;
-    const prevRevenue = prevPeriod?.totalTeacherAmount ?? 0;
-
-    const curSplits = splits.filter(s => s.occurredAt.startsWith(curMonth));
-    const prevSplits = splits.filter(s => s.occurredAt.startsWith(prevMonth));
-
-    const uniqueStudents = new Set(splits.map(s => s.studentName)).size;
-
-    const publishedCourses = courses.filter(c => c.status === 'published').length;
-
-    return {
-      curRevenue,
-      revChange: pctChange(curRevenue, prevRevenue),
-      uniqueStudents,
-      studentsChange: 0,
-      publishedCourses,
-      curSalesCount: curSplits.length,
-      salesChange: pctChange(curSplits.length, prevSplits.length),
-    };
-  }, [splits, periods, courses, curMonth, prevMonth]);
-
-  const recentSplits = useMemo(() => splits.slice(0, 8), [splits]);
-
+  // ── Bar chart: ghép TeacherCourseResponse (title/status) với enrollment count ─
+  // courseEnrollmentCounts từ server: { [courseId]: count }
   const courseStats = useMemo<CourseStat[]>(() => {
+    const counts = stats?.courseEnrollmentCounts ?? {};
     return courses.slice(0, 5).map(c => ({
       course: c,
-      salesCount: splits.filter(s => s.courseId === c.id).length,
+      // Dùng enrollment count từ server thay vì đếm splits client-side
+      salesCount: counts[c.id] ?? 0,
     }));
-  }, [courses, splits]);
+  }, [courses, stats]);
 
   function handleLogout() { logout(); navigate('/login'); }
 
@@ -381,13 +353,13 @@ export default function DashboardTeacher() {
             </div>
           ) : (
             <>
-              {/* Stat cards */}
+              {/* Stat cards — giá trị lấy từ stats server, không tính lại client-side */}
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
                 <StatCard
                   delay={0}
-                  title="Doanh thu kỳ này"
-                  value={fmt(stats.curRevenue)}
-                  change={stats.revChange}
+                  title="Doanh thu tháng này"
+                  value={fmt(stats?.currentMonthRevenue ?? 0)}
+                  change={revChange}
                   icon={<DollarSign className="w-5 h-5" />}
                   color="bg-green-500/10"
                   iconColor="text-green-500"
@@ -395,8 +367,8 @@ export default function DashboardTeacher() {
                 <StatCard
                   delay={0.1}
                   title="Học viên đã mua"
-                  value={stats.uniqueStudents.toLocaleString('vi-VN')}
-                  change={stats.studentsChange}
+                  value={(stats?.uniqueStudentsTotal ?? 0).toLocaleString('vi-VN')}
+                  change={0}
                   icon={<Users className="w-5 h-5" />}
                   color="bg-blue-500/10"
                   iconColor="text-blue-500"
@@ -404,7 +376,7 @@ export default function DashboardTeacher() {
                 <StatCard
                   delay={0.2}
                   title="Khóa học đang bán"
-                  value={stats.publishedCourses.toString()}
+                  value={(stats?.publishedCoursesCount ?? 0).toString()}
                   change={0}
                   icon={<BookOpen className="w-5 h-5" />}
                   color="bg-primary/10"
@@ -413,8 +385,8 @@ export default function DashboardTeacher() {
                 <StatCard
                   delay={0.3}
                   title="Lượt bán tháng này"
-                  value={stats.curSalesCount.toString()}
-                  change={stats.salesChange}
+                  value={(stats?.currentMonthSalesCount ?? 0).toString()}
+                  change={salesChange}
                   icon={<BarChart2 className="w-5 h-5" />}
                   color="bg-amber-500/10"
                   iconColor="text-amber-500"

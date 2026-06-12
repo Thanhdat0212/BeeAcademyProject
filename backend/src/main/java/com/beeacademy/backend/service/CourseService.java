@@ -13,6 +13,7 @@ import com.beeacademy.backend.repository.CategoryRepository;
 import com.beeacademy.backend.repository.CourseDocumentRepository;
 import com.beeacademy.backend.repository.CourseRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
+import com.beeacademy.backend.repository.QuizConfigRepository;
 import com.beeacademy.backend.repository.spec.CourseSpecifications;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -45,6 +47,7 @@ public class CourseService {
     private final CategoryRepository       categoryRepository;
     private final EnrollmentRepository     enrollmentRepository;
     private final CourseDocumentRepository documentRepository;
+    private final QuizConfigRepository     quizConfigRepository;
     private final SupabaseStorageClient    storageClient;
 
     // ========================================================================
@@ -112,7 +115,8 @@ public class CourseService {
 
         boolean canSeeAllVideos = canUserAccessAllVideos(course, me);
         return CourseDetailResponse.fromEntity(course, canSeeAllVideos,
-                buildUrlResolver(canSeeAllVideos), buildDocMap(course));
+                buildUrlResolver(canSeeAllVideos), buildDocMap(course),
+                buildChaptersWithQuiz(course));
     }
 
     @Transactional(readOnly = true)
@@ -122,7 +126,22 @@ public class CourseService {
 
         boolean canSeeAllVideos = canUserAccessAllVideos(course, me);
         return CourseDetailResponse.fromEntity(course, canSeeAllVideos,
-                buildUrlResolver(canSeeAllVideos), buildDocMap(course));
+                buildUrlResolver(canSeeAllVideos), buildDocMap(course),
+                buildChaptersWithQuiz(course));
+    }
+
+    /**
+     * Trả về tập chapterId đã có quiz config trong khóa học.
+     *
+     * <p>1 query duy nhất cho tất cả chapters — tránh N+1 nếu dùng
+     * {@code existsByChapterId} cho từng chapter.
+     */
+    private Set<UUID> buildChaptersWithQuiz(Course course) {
+        List<UUID> chapterIds = course.getChapters().stream()
+                .map(ch -> ch.getId())
+                .toList();
+        if (chapterIds.isEmpty()) return Collections.emptySet();
+        return quizConfigRepository.findConfiguredChapterIds(chapterIds);
     }
 
     /**

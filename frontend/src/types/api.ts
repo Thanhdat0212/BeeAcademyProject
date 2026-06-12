@@ -137,6 +137,8 @@ export interface ChapterDetail {
   description: string | null;
   position: number;
   lessons: LessonDetail[];
+  /** true nếu GV đã cấu hình quiz cho chương này — dùng để ẩn/hiện nút "Làm quiz". */
+  hasQuizConfig: boolean;
 }
 
 /** Shape đầy đủ cho detail page (GET /api/courses/{id}). */
