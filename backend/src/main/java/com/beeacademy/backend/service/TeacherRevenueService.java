@@ -21,6 +21,8 @@ import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.repository.RevenueSplitRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -40,6 +42,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class TeacherRevenueService {
+
+    // Self-reference qua proxy — cần thiết để @Transactional(REQUIRES_NEW) hoạt động
+    // khi gọi createRevenueSplit() từ bên trong cùng bean (tránh self-invocation bypass).
+    @Autowired @Lazy
+    private TeacherRevenueService self;
 
     private final RevenueSplitRepository splitRepo;
     private final PayoutPeriodRepository periodRepo;
@@ -103,7 +110,8 @@ public class TeacherRevenueService {
             orderItemId = item.getId();
         }
 
-        createRevenueSplit(teacherId, studentId, courseId, orderId, orderItemId, amount);
+        // Dùng self proxy để @Transactional(REQUIRES_NEW) hoạt động đúng
+        self.createRevenueSplit(teacherId, studentId, courseId, orderId, orderItemId, amount);
     }
 
     @Transactional
@@ -155,27 +163,15 @@ public class TeacherRevenueService {
                 .toList();
     }
 
-    /**
-     * Tổng hợp tất cả số liệu cần cho dashboard giáo viên trong 1 query set.
-     *
-     * <p>Thay vì frontend gọi 3 API riêng rồi tính toán client-side,
-     * method này tổng hợp server-side và trả 1 response duy nhất.
-     *
-     * <p>Luồng xử lý:
-     * <ol>
-     *   <li>Load toàn bộ revenue_splits của GV một lần.</li>
-     *   <li>Từ splits → đếm học viên unique, per-course counts, recent 8 giao dịch.</li>
-     *   <li>Từ payout_periods → tính doanh thu tháng này / tháng trước.</li>
-     *   <li>Từ courses → đếm published courses.</li>
-     * </ol>
-     *
-     * <p><b>Tại sao KHÔNG dùng enrollmentRepo ở đây:</b>
-     * Bảng {@code enrollments} có thể chưa được migrate sang cột {@code student_id}
-     * (schema cũ dùng {@code user_id}). Dùng {@code revenue_splits} tránh phụ thuộc
-     * vào schema của bảng enrollments — và ngữ nghĩa chính xác hơn (học viên đã trả tiền).
-     */
-    @Transactional(readOnly = true)
+    @Transactional
     public TeacherStatsResponse getTeacherStats(UUID teacherId) {
+        // Backfill trước: đảm bảo mọi enrollment đều có revenue_split tương ứng.
+        // Idempotent — gọi nhiều lần an toàn, bỏ qua split đã tồn tại.
+        try {
+            backfillEnrollmentRevenue(teacherId);
+        } catch (Exception e) {
+            log.warn("Backfill revenue thất bại cho teacher={}: {}", teacherId, e.getMessage());
+        }
         String curMonth  = ZonedDateTime.now(ZoneOffset.UTC).format(MONTH_FMT);
         String prevMonth = getPreviousMonth(curMonth);
 
