@@ -25,6 +25,7 @@ import {
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, CheckCircle2, Clock, AlertTriangle,
   Megaphone, Database, Send, RefreshCcw, Eye, Save, Loader2, ChevronDown,
+  Upload, Image as ImageIcon,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -135,6 +136,7 @@ function Spinner() {
 interface CourseForm {
   title: string;
   description: string;
+  thumbnailUrl: string;
   categoryId: string;
   grades: number[];
   priceVnd: string;
@@ -142,11 +144,13 @@ interface CourseForm {
 }
 
 const EMPTY_FORM: CourseForm = {
-  title: '', description: '', categoryId: '',
+  title: '', description: '', thumbnailUrl: '', categoryId: '',
   grades: [], priceVnd: '', salePriceVnd: '',
 };
 
 const ALL_GRADES = [6, 7, 8, 9];
+const ALLOWED_THUMBNAIL_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_THUMBNAIL_SIZE_BYTES = 5 * 1024 * 1024;
 
 interface CourseFormPanelProps {
   open: boolean;
@@ -159,14 +163,31 @@ interface CourseFormPanelProps {
 function CourseFormPanel({ open, editing, categories, onClose, onSaved }: CourseFormPanelProps) {
   const [form, setForm] = useState<CourseForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
+  const [thumbnailPreviewUrl, setThumbnailPreviewUrl] = useState('');
+  const [thumbnailInputKey, setThumbnailInputKey] = useState(0);
+
+  useEffect(() => {
+    if (!thumbnailFile) {
+      setThumbnailPreviewUrl('');
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(thumbnailFile);
+    setThumbnailPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [thumbnailFile]);
 
   useEffect(() => {
     if (!open) return;
+    setThumbnailFile(null);
+    setThumbnailInputKey(k => k + 1);
     if (editing) {
       // TeacherCourseResponse đã có categoryId → set form ngay không cần đợi API
       setForm({
         title:        editing.title,
         description:  '',
+        thumbnailUrl: editing.thumbnailUrl ?? '',
         categoryId:   editing.categoryId ?? '',
         grades:       editing.grades ?? [],
         priceVnd:     editing.priceVnd.toString(),
@@ -179,7 +200,11 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
       // useRef ghi nhận ngay, không qua render cycle.
       let isMounted = true;
       teacherCourseService.getCourseDetail(editing.id).then(d => {
-        if (isMounted) setForm(f => ({ ...f, description: d.description ?? '' }));
+        if (isMounted) setForm(f => ({
+          ...f,
+          description: d.description ?? '',
+          thumbnailUrl: d.thumbnailUrl ?? editing.thumbnailUrl ?? '',
+        }));
       }).catch(() => {});
       return () => { isMounted = false; };
     } else {
@@ -192,6 +217,26 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
       ...f,
       grades: f.grades.includes(g) ? f.grades.filter(x => x !== g) : [...f.grades, g],
     }));
+  }
+
+  function handleThumbnailChange(file: File | undefined) {
+    if (!file) return;
+    if (!ALLOWED_THUMBNAIL_TYPES.includes(file.type)) {
+      notify.error('Chi chap nhan anh JPEG, PNG hoac WEBP');
+      setThumbnailInputKey(k => k + 1);
+      return;
+    }
+    if (file.size > MAX_THUMBNAIL_SIZE_BYTES) {
+      notify.error('Anh bia khong duoc vuot qua 5MB');
+      setThumbnailInputKey(k => k + 1);
+      return;
+    }
+    setThumbnailFile(file);
+  }
+
+  function cancelThumbnailSelection() {
+    setThumbnailFile(null);
+    setThumbnailInputKey(k => k + 1);
   }
 
   async function handleSave() {
@@ -211,17 +256,27 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
       }
     }
 
-    const req: CreateCourseRequest = {
-      title:       form.title.trim(),
-      description: form.description.trim() || undefined,
-      categoryId:  form.categoryId,
-      grades:      form.grades,
-      priceVnd:    Number(form.priceVnd),
-      salePriceVnd: form.salePriceVnd ? Number(form.salePriceVnd) : undefined,
-    };
-
     setSaving(true);
     try {
+      let thumbnailUrl = form.thumbnailUrl.trim() || undefined;
+      if (thumbnailFile) {
+        const uploaded = await teacherCourseService.uploadCourseThumbnail(thumbnailFile);
+        if (!uploaded.publicUrl) {
+          throw new Error('Upload anh bia khong tra ve URL');
+        }
+        thumbnailUrl = uploaded.publicUrl;
+      }
+
+      const req: CreateCourseRequest = {
+        title:       form.title.trim(),
+        description: form.description.trim() || undefined,
+        thumbnailUrl,
+        categoryId:  form.categoryId,
+        grades:      form.grades,
+        priceVnd:    Number(form.priceVnd),
+        salePriceVnd: form.salePriceVnd ? Number(form.salePriceVnd) : undefined,
+      };
+
       let saved: TeacherCourseResponse;
       if (editing) {
         saved = await teacherCourseService.updateCourse(editing.id, req);
@@ -295,6 +350,56 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
                   placeholder="Nội dung khóa học, đối tượng học sinh, mục tiêu..."
                   className="w-full px-3 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary resize-none"
                 />
+              </div>
+
+              {/* Ảnh bìa */}
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-1.5">Ảnh bìa khóa học</label>
+                <label className="flex items-center justify-center gap-2 w-full px-3 py-3 text-sm font-bold bg-surface-container border border-dashed border-outline-variant rounded-xl text-on-surface-variant hover:border-primary hover:text-primary cursor-pointer transition-colors">
+                  <Upload className="w-4 h-4" />
+                  {thumbnailFile ? thumbnailFile.name : 'Chon anh tu may'}
+                  <input
+                    key={thumbnailInputKey}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={e => handleThumbnailChange(e.target.files?.[0])}
+                    className="hidden"
+                  />
+                </label>
+                <p className="mt-1.5 text-xs text-on-surface-variant">
+                  JPEG, PNG hoac WEBP - toi da 5MB.
+                </p>
+                {thumbnailFile && (
+                  <button
+                    type="button"
+                    onClick={cancelThumbnailSelection}
+                    className="mt-2 text-xs font-bold text-primary hover:underline"
+                  >
+                    Huy chon anh
+                  </button>
+                )}
+                <input
+                  type="hidden"
+                  value={form.thumbnailUrl}
+                  readOnly
+                />
+                {(thumbnailPreviewUrl || form.thumbnailUrl.trim()) && (
+                  <div className="mt-3 overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container">
+                    <img
+                      src={thumbnailPreviewUrl || form.thumbnailUrl.trim()}
+                      alt="Xem trước ảnh bìa"
+                      className="w-full h-36 object-cover"
+                      onError={e => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                )}
+                {!thumbnailPreviewUrl && !form.thumbnailUrl.trim() && (
+                  <div className="mt-3 h-28 rounded-xl border border-outline-variant/30 bg-surface-container/60 flex items-center justify-center">
+                    <ImageIcon className="w-8 h-8 text-on-surface-variant/40" />
+                  </div>
+                )}
               </div>
 
               {/* Môn học */}

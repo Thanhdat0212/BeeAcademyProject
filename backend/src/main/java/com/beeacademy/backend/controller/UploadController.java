@@ -65,4 +65,16 @@ public class UploadController {
                 lessonId, CurrentUser.required().userId(), name, file);
         return ApiResponse.ok(result, "Upload tài liệu thành công");
     }
+
+    /**
+     * Upload anh bia khoa hoc.
+     * Path: /api/upload/course-thumbnail
+     */
+    @PostMapping("/course-thumbnail")
+    public ApiResponse<UploadResponse> uploadCourseThumbnail(
+            @RequestParam("file") MultipartFile file) {
+        UploadResponse result = uploadService.uploadCourseThumbnail(
+                CurrentUser.required().userId(), file);
+        return ApiResponse.ok(result, "Upload anh bia thanh cong");
+    }
 }

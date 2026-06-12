@@ -15,6 +15,9 @@ public record CreateQuestionRequest(
         @NotNull(message = "Vui lòng chọn môn học")
         UUID categoryId,
 
+        @NotNull(message = "Vui lòng chọn lớp")
+        Integer grade,
+
         UUID chapterId,   // null = câu hỏi cấp môn học
 
         @NotBlank(message = "Nội dung câu hỏi không được trống")

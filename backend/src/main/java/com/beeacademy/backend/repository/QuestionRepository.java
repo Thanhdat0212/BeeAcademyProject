@@ -3,6 +3,7 @@ package com.beeacademy.backend.repository;
 import com.beeacademy.backend.model.Question;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -22,7 +23,7 @@ import java.util.UUID;
  * </ul>
  */
 @Repository
-public interface QuestionRepository extends JpaRepository<Question, UUID> {
+public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSpecificationExecutor<Question> {
 
     // ─── Teacher side ────────────────────────────────────────────────────────
     //
@@ -36,6 +37,30 @@ public interface QuestionRepository extends JpaRepository<Question, UUID> {
     // choices KHÔNG JOIN FETCH ở đây vì đây là paginated query — Hibernate sẽ
     // cảnh báo HHH90003004 và load toàn bộ in-memory thay vì dùng LIMIT/OFFSET.
     // Thay vào đó dùng @BatchSize(50) trên field choices trong Question entity.
+
+    @Query(value = "SELECT q FROM Question q " +
+                   "LEFT JOIN FETCH q.category LEFT JOIN FETCH q.chapter " +
+                   "WHERE q.teacher.id = :teacherId " +
+                   "AND (:categoryId IS NULL OR q.category.id = :categoryId) " +
+                   "AND (:grade IS NULL OR q.grade = :grade) " +
+                   "AND (:chapterId IS NULL OR q.chapter.id = :chapterId) " +
+                   "AND (:difficulty IS NULL OR q.difficulty = :difficulty) " +
+                   "AND q.status = :status",
+           countQuery = "SELECT COUNT(q) FROM Question q " +
+                        "WHERE q.teacher.id = :teacherId " +
+                        "AND (:categoryId IS NULL OR q.category.id = :categoryId) " +
+                        "AND (:grade IS NULL OR q.grade = :grade) " +
+                        "AND (:chapterId IS NULL OR q.chapter.id = :chapterId) " +
+                        "AND (:difficulty IS NULL OR q.difficulty = :difficulty) " +
+                        "AND q.status = :status")
+    Page<Question> findForTeacher(
+            @Param("teacherId") UUID teacherId,
+            @Param("categoryId") UUID categoryId,
+            @Param("grade") Integer grade,
+            @Param("chapterId") UUID chapterId,
+            @Param("difficulty") String difficulty,
+            @Param("status") String status,
+            Pageable pageable);
 
     @Query(value = "SELECT q FROM Question q " +
                    "LEFT JOIN FETCH q.category LEFT JOIN FETCH q.chapter " +
@@ -93,11 +118,38 @@ public interface QuestionRepository extends JpaRepository<Question, UUID> {
      * Lấy pool câu theo chapter + difficulty + status=active để randomize.
      * Không phân trang — lấy hết rồi shuffle trong Java.
      */
-    @Query("SELECT q FROM Question q WHERE q.chapter.id = :chapterId " +
+    @Query("SELECT q FROM Question q WHERE q.category.id = :categoryId " +
+           "AND q.grade IN :grades " +
            "AND q.difficulty = :difficulty AND q.status = 'active'")
-    List<Question> findActiveByChapterAndDifficulty(
+    List<Question> findActiveByCategoryAndGradesAndDifficulty(
+            @Param("categoryId") UUID categoryId,
+            @Param("grades") List<Integer> grades,
+            @Param("difficulty") String difficulty);
+
+    @Query("SELECT DISTINCT q FROM Question q LEFT JOIN FETCH q.choices " +
+           "WHERE q.teacher.id = :teacherId AND q.category.id = :categoryId " +
+           "AND q.grade IN :grades " +
+           "AND q.difficulty = :difficulty AND q.status = 'active'")
+    List<Question> findActiveByTeacherAndCategoryAndGradesAndDifficulty(
+            @Param("teacherId") UUID teacherId,
+            @Param("categoryId") UUID categoryId,
+            @Param("grades") List<Integer> grades,
+            @Param("difficulty") String difficulty);
+
+    @Query("SELECT DISTINCT q FROM Question q LEFT JOIN FETCH q.choices " +
+           "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
+           "AND q.difficulty = :difficulty AND q.status = 'active'")
+    List<Question> findActiveByTeacherAndChapterAndDifficulty(
+            @Param("teacherId") UUID teacherId,
             @Param("chapterId") UUID chapterId,
             @Param("difficulty") String difficulty);
+
+    @Query("SELECT DISTINCT q FROM Question q LEFT JOIN FETCH q.choices " +
+           "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
+           "AND q.status = 'active'")
+    List<Question> findActiveByTeacherAndChapter(
+            @Param("teacherId") UUID teacherId,
+            @Param("chapterId") UUID chapterId);
 
     // ─── Stats ───────────────────────────────────────────────────────────────
 
@@ -106,9 +158,27 @@ public interface QuestionRepository extends JpaRepository<Question, UUID> {
      * Dùng để hiển thị "Ngân hàng có X câu Dễ / Y câu Trung bình / Z câu Khó".
      */
     @Query("SELECT q.difficulty, COUNT(q) FROM Question q " +
-           "WHERE q.chapter.id = :chapterId AND q.status = 'active' " +
+           "WHERE q.category.id = :categoryId AND q.grade IN :grades AND q.status = 'active' " +
            "GROUP BY q.difficulty")
-    List<Object[]> countActiveByDifficultyForChapter(@Param("chapterId") UUID chapterId);
+    List<Object[]> countActiveByDifficultyForCategoryAndGrades(
+            @Param("categoryId") UUID categoryId,
+            @Param("grades") List<Integer> grades);
+
+    @Query("SELECT q.difficulty, COUNT(q) FROM Question q " +
+           "WHERE q.teacher.id = :teacherId " +
+           "AND q.category.id = :categoryId AND q.grade IN :grades AND q.status = 'active' " +
+           "GROUP BY q.difficulty")
+    List<Object[]> countActiveByDifficultyForTeacherCategoryAndGrades(
+            @Param("teacherId") UUID teacherId,
+            @Param("categoryId") UUID categoryId,
+            @Param("grades") List<Integer> grades);
+
+    @Query("SELECT q.difficulty, COUNT(q) FROM Question q " +
+           "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
+           "AND q.status = 'active' GROUP BY q.difficulty")
+    List<Object[]> countActiveByDifficultyForTeacherAndChapter(
+            @Param("teacherId") UUID teacherId,
+            @Param("chapterId") UUID chapterId);
 
     // ─── Batch update usageCount ─────────────────────────────────────────────
 

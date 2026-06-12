@@ -28,6 +28,7 @@ export interface QuestionResponse {
   usageCount: number;
   categoryId: string | null;
   categoryName: string | null;
+  grade: number | null;
   chapterId: string | null;
   chapterTitle: string | null;
   createdAt: string;
@@ -43,6 +44,7 @@ export interface QuestionStatsResponse {
 
 export interface CreateQuestionRequest {
   categoryId: string;
+  grade: number;
   chapterId?: string;
   content: string;
   explanation?: string;
@@ -60,6 +62,8 @@ export async function createQuestion(req: CreateQuestionRequest): Promise<Questi
 }
 
 export interface ListQuestionsParams {
+  categoryId?: string;
+  grade?: number;
   chapterId?: string;
   difficulty?: Difficulty;
   status?: QuestionStatus;
@@ -97,6 +101,16 @@ export async function getQuestionStats(chapterId: string): Promise<QuestionStats
   const res = await apiClient.get<ApiResponse<QuestionStatsResponse>>(
     `/api/teacher/questions/stats/${chapterId}`);
   return unwrap(res.data);
+}
+
+export async function countActiveQuestionsByChapter(chapterId: string): Promise<number> {
+  const page = await listQuestions({
+    chapterId,
+    status: 'active',
+    page: 0,
+    size: 1,
+  });
+  return page.totalItems;
 }
 
 export interface BulkImportResult {

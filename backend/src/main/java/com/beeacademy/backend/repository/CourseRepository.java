@@ -84,11 +84,16 @@ public interface CourseRepository extends JpaRepository<Course, UUID>,
            "ORDER BY c.createdAt DESC")
     List<Course> findEnrolledByStudentId(@Param("studentId") UUID studentId);
 
+    /** Danh sách khóa học thuộc một giáo viên. */
+    @EntityGraph(attributePaths = {"teacher"})
+    @Query("SELECT c FROM Course c WHERE c.teacher.id = :teacherId")
+    List<Course> findByTeacherId(@Param("teacherId") UUID teacherId);
+
     /**
      * Cập nhật denormalized counters sau khi thêm/xóa chapter hoặc lesson.
      * Gọi từ TeacherCourseService thay vì dùng trigger DB.
      */
-    @Modifying
+    @Modifying(flushAutomatically = true)
     @Query("UPDATE Course c SET c.totalChapters = :chapterCount, c.totalLessons = :lessonCount WHERE c.id = :courseId")
     void updateCounts(@Param("courseId") UUID courseId,
                       @Param("chapterCount") int chapterCount,

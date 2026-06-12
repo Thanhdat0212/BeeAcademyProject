@@ -55,13 +55,15 @@ public class QuestionController {
      */
     @GetMapping
     public ApiResponse<PageResponse<QuestionResponse>> listQuestions(
+            @RequestParam(required = false) UUID categoryId,
+            @RequestParam(required = false) Integer grade,
             @RequestParam(required = false) UUID chapterId,
             @RequestParam(required = false) String difficulty,
             @RequestParam(required = false) String status,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
             Pageable pageable) {
         return ApiResponse.ok(questionService.listQuestions(
-                CurrentUser.required(), chapterId, difficulty, status, pageable));
+                CurrentUser.required(), categoryId, grade, chapterId, difficulty, status, pageable));
     }
 
     /** Chi tiết một câu hỏi. */
@@ -99,6 +101,6 @@ public class QuestionController {
     /** Thống kê ngân hàng câu hỏi theo chương (để hiển thị trên trang cấu hình quiz). */
     @GetMapping("/stats/{chapterId}")
     public ApiResponse<QuestionStatsResponse> getStats(@PathVariable UUID chapterId) {
-        return ApiResponse.ok(questionService.getStatsForChapter(chapterId));
+        return ApiResponse.ok(questionService.getStatsForChapter(CurrentUser.required(), chapterId));
     }
 }

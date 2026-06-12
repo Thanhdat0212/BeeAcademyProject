@@ -20,6 +20,7 @@ public record QuestionResponse(
         Integer usageCount,
         UUID categoryId,
         String categoryName,
+        Integer grade,
         UUID chapterId,
         String chapterTitle,
         Instant createdAt,
@@ -37,6 +38,7 @@ public record QuestionResponse(
                 q.getDifficulty(), q.getType(), q.getStatus(), q.getUsageCount(),
                 q.getCategory() != null ? q.getCategory().getId() : null,
                 q.getCategory() != null ? q.getCategory().getName() : null,
+                q.getGrade(),
                 q.getChapter() != null ? q.getChapter().getId() : null,
                 q.getChapter() != null ? q.getChapter().getTitle() : null,
                 q.getCreatedAt(), choices
@@ -54,7 +56,7 @@ public record QuestionResponse(
         return new QuestionResponse(
                 q.getId(), q.getContent(), null,  // explanation ẩn
                 q.getDifficulty(), q.getType(), q.getStatus(), q.getUsageCount(),
-                null, null, null, null,
+                null, null, null, null, null,
                 null, choices
         );
     }

@@ -4,6 +4,7 @@ export type PayoutStatus = 'PENDING' | 'PROCESSING' | 'PAID';
 
 export interface RevenueSplitResponse {
   id: string;
+  studentId: string;
   studentName: string;
   courseId: string;
   courseTitle: string;

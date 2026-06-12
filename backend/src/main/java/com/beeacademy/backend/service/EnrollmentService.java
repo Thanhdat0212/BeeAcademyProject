@@ -29,6 +29,7 @@ public class EnrollmentService {
 
     private final EnrollmentRepository enrollmentRepository;
     private final CourseRepository     courseRepository;
+    private final TeacherRevenueService teacherRevenueService;
 
     /**
      * Ghi danh học sinh vào khóa học.
@@ -62,6 +63,7 @@ public class EnrollmentService {
 
         Enrollment enrollment = Enrollment.create(studentId, courseId);
         enrollmentRepository.save(enrollment);
+        teacherRevenueService.recordEnrollmentRevenue(studentId, course);
         log.info("Đã ghi danh student {} vào khóa học {}", studentId, courseId);
     }
 

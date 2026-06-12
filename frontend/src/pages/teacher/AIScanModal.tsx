@@ -185,6 +185,7 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
   const [courses,     setCourses]     = useState<TeacherCourseResponse[]>([]);
   const [chapters,    setChapters]    = useState<TeacherChapterResponse[]>([]);
   const [categoryId,  setCategoryId]  = useState('');
+  const [grade,       setGrade]       = useState('');
   const [courseId,    setCourseId]    = useState('');
   const [chapterId,   setChapterId]   = useState('');
   const [loadingMeta, setLoadingMeta] = useState(false);
@@ -217,6 +218,7 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
         setChapters(d.chapters);
         // Luôn fill (bỏ điều kiện !categoryId cũ) — đảm bảo category khớp course
         if (d.categoryId) setCategoryId(d.categoryId);
+        if (d.grades?.[0]) setGrade(String(d.grades[0]));
       })
       .catch(() => {})
       .finally(() => setLoadingCh(false));
@@ -227,7 +229,7 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
     if (step === 'scanning') return; // Không đóng khi đang scan
     setStep('setup');
     setFileName(''); setQuestions([]); setResult(null); setProgress('');
-    setCategoryId(''); setCourseId(''); setChapterId('');
+    setCategoryId(''); setGrade(''); setCourseId(''); setChapterId('');
     onClose();
   }
 
@@ -242,6 +244,10 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
     }
     if (!categoryId) {
       notify.error('Vui lòng chọn môn học trước khi scan');
+      return;
+    }
+    if (!grade) {
+      notify.error('Vui lòng chọn lớp trước khi scan');
       return;
     }
 
@@ -285,7 +291,7 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
     } finally {
       setProgress('');
     }
-  }, [apiKey, categoryId, geminiModel]);
+  }, [apiKey, categoryId, grade, geminiModel]);
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -303,10 +309,12 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
 
   async function handleImport() {
     if (!categoryId) { notify.error('Chọn môn học'); return; }
+    if (!grade) { notify.error('Chọn lớp'); return; }
     if (validQ.length === 0) return;
 
     const requests: CreateQuestionRequest[] = validQ.map(q => ({
       categoryId,
+      grade: Number(grade),
       chapterId:   chapterId   || undefined,
       content:     q.content,
       explanation: q.explanation ?? undefined,
@@ -420,7 +428,7 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
                     {(() => {
                       const isCategoryLocked = Boolean(courseId);
                       return (
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                           {/* Khóa học — chọn trước để auto-fill môn */}
                           <div>
                             <label className="block text-xs font-semibold text-on-surface-variant mb-1">Khóa học</label>
@@ -461,6 +469,24 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
                             {isCategoryLocked && (
                               <p className="text-xs text-primary/70 mt-1">Lấy từ khóa học</p>
                             )}
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                              Lớp <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                              <select
+                                value={grade}
+                                onChange={e => setGrade(e.target.value)}
+                                disabled={step === 'scanning'}
+                                className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary disabled:opacity-50"
+                              >
+                                <option value="">-- Chọn lớp --</option>
+                                {[6, 7, 8, 9].map(g => <option key={g} value={g}>Lớp {g}</option>)}
+                              </select>
+                              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+                            </div>
                           </div>
 
                           {/* Chương */}
@@ -673,7 +699,7 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
                 {step === 'preview' && (
                   <button
                     onClick={handleImport}
-                    disabled={importing || validQ.length === 0 || !categoryId}
+                    disabled={importing || validQ.length === 0 || !categoryId || !grade}
                     className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-violet-600 text-white rounded-xl hover:bg-violet-700 transition-colors disabled:opacity-50"
                   >
                     {importing

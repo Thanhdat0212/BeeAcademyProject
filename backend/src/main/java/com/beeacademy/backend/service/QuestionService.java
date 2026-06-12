@@ -22,11 +22,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -79,6 +81,7 @@ public class QuestionService {
 
         // Validate: category phải khớp với course chứa chapter
         validateCategoryMatchesChapter(req.categoryId(), chapter);
+        validateGradeMatchesChapter(req.categoryId(), req.grade(), chapter);
 
         // Validate: đúng 1 đáp án đúng
         long correctCount = req.choices().stream()
@@ -88,7 +91,7 @@ public class QuestionService {
                     "Câu hỏi phải có đúng 1 đáp án đúng (hiện có: " + correctCount + ").");
         }
 
-        Question question = Question.create(teacher, category, chapter,
+        Question question = Question.create(teacher, category, req.grade(), chapter,
                 req.content(), req.explanation(), req.difficulty(), req.type());
 
         // Tạo choices và gắn vào question trước khi save (cascade sẽ insert cùng)
@@ -108,26 +111,32 @@ public class QuestionService {
     /** Danh sách câu hỏi của GV với filter tùy chọn. */
     @Transactional(readOnly = true)
     public PageResponse<QuestionResponse> listQuestions(AuthenticatedUser me,
+                                                         UUID categoryId,
+                                                         Integer grade,
                                                          UUID chapterId,
                                                          String difficulty,
                                                          String status,
                                                          Pageable pageable) {
         String resolvedStatus = status != null ? status : "active";
-        Page<Question> page;
+        Specification<Question> spec = (root, query, cb) ->
+                cb.equal(root.get("teacher").get("id"), me.userId());
 
-        if (chapterId != null && difficulty != null) {
-            page = questionRepository.findByTeacherIdAndChapterIdAndDifficultyAndStatus(
-                    me.userId(), chapterId, difficulty, resolvedStatus, pageable);
-        } else if (chapterId != null) {
-            page = questionRepository.findByTeacherIdAndChapterIdAndStatus(
-                    me.userId(), chapterId, resolvedStatus, pageable);
-        } else if (difficulty != null) {
-            page = questionRepository.findByTeacherIdAndDifficultyAndStatus(
-                    me.userId(), difficulty, resolvedStatus, pageable);
-        } else {
-            page = questionRepository.findByTeacherIdAndStatus(
-                    me.userId(), resolvedStatus, pageable);
+        spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), resolvedStatus));
+
+        if (categoryId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("category").get("id"), categoryId));
         }
+        if (grade != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("grade"), grade));
+        }
+        if (chapterId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("chapter").get("id"), chapterId));
+        }
+        if (difficulty != null && !difficulty.isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("difficulty"), difficulty));
+        }
+
+        Page<Question> page = questionRepository.findAll(spec, pageable);
 
         return PageResponse.of(page, QuestionResponse::fromEntity);
     }
@@ -155,10 +164,13 @@ public class QuestionService {
         }
 
         // Validate: category phải khớp với course chứa chapter mới (nếu có đổi chapter)
+        Category category = loadCategory(req.categoryId());
         Chapter chapter = req.chapterId() != null ? loadChapter(req.chapterId()) : null;
         validateCategoryMatchesChapter(req.categoryId(), chapter);
+        validateGradeMatchesChapter(req.categoryId(), req.grade(), chapter);
 
-        question.update(req.content(), req.explanation(), req.difficulty());
+        question.update(category, req.grade(), chapter,
+                req.content(), req.explanation(), req.difficulty());
 
         // Xóa toàn bộ choices cũ — orphanRemoval=true sẽ DELETE các bản ghi cũ khi flush
         question.clearChoices();
@@ -251,9 +263,11 @@ public class QuestionService {
      * GV xem để biết ngân hàng đủ câu chưa trước khi cấu hình quiz.
      */
     @Transactional(readOnly = true)
-    public QuestionStatsResponse getStatsForChapter(UUID chapterId) {
+    public QuestionStatsResponse getStatsForChapter(AuthenticatedUser me, UUID chapterId) {
+        loadChapter(chapterId);
         List<Object[]> rows =
-                questionRepository.countActiveByDifficultyForChapter(chapterId);
+                questionRepository.countActiveByDifficultyForTeacherAndChapter(
+                        me.userId(), chapterId);
 
         int easy = 0, medium = 0, hard = 0;
         for (Object[] row : rows) {
@@ -294,6 +308,9 @@ public class QuestionService {
         }
         if (req.categoryId() == null) {
             throw new BusinessException("CATEGORY_REQUIRED", "Vui lòng chọn môn học.");
+        }
+        if (req.grade() == null || req.grade() < 1) {
+            throw new BusinessException("GRADE_REQUIRED", "Vui lòng chọn lớp.");
         }
         if (req.content() == null || req.content().isBlank()) {
             throw new BusinessException("CONTENT_REQUIRED", "Nội dung câu hỏi không được trống.");
@@ -347,5 +364,23 @@ public class QuestionService {
                     "Môn học không khớp với khóa học của chương đã chọn. " +
                     "Chương này thuộc môn: " + courseCategory.getName() + ".");
         }
+    }
+
+    private void validateGradeMatchesChapter(UUID requestedCategoryId, Integer grade, Chapter chapter) {
+        if (chapter == null || grade == null) return;
+        validateCategoryMatchesChapter(requestedCategoryId, chapter);
+        if (!courseGrades(chapter).contains(grade)) {
+            throw new BusinessException("GRADE_MISMATCH",
+                    "Lớp không khớp với khóa học của chương đã chọn.");
+        }
+    }
+
+    private List<Integer> courseGrades(Chapter chapter) {
+        int[] grades = chapter.getCourse().getGrades();
+        if (grades == null || grades.length == 0) {
+            throw new BusinessException("COURSE_GRADE_MISSING",
+                    "Khóa học của chương chưa có thông tin lớp.");
+        }
+        return Arrays.stream(grades).boxed().toList();
     }
 }

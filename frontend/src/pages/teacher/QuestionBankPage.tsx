@@ -85,6 +85,7 @@ function emptyChoices(type: 'multiple_choice' | 'true_false'): ChoiceRow[] {
 
 interface FormState {
   categoryId: string;
+  grade: string;
   courseId: string;
   chapterId: string;
   content: string;
@@ -96,7 +97,7 @@ interface FormState {
 
 function emptyForm(): FormState {
   return {
-    categoryId: '', courseId: '', chapterId: '',
+    categoryId: '', grade: '', courseId: '', chapterId: '',
     content: '', explanation: '',
     difficulty: 'medium', type: 'multiple_choice',
     choices: emptyChoices('multiple_choice'),
@@ -106,6 +107,7 @@ function emptyForm(): FormState {
 function formFromQuestion(q: QuestionResponse): FormState {
   return {
     categoryId:  q.categoryId  ?? '',
+    grade:       q.grade ? String(q.grade) : '',
     courseId:    '',
     chapterId:   q.chapterId   ?? '',
     content:     q.content,
@@ -148,7 +150,11 @@ function QuestionFormPanel({ open, editing, categories, courses, onClose, onSave
         // Luôn auto-fill category từ course (bỏ điều kiện !editing cũ)
         // — đảm bảo categoryId luôn khớp với course đang chọn
         if (detail.categoryId) {
-          setForm(f => ({ ...f, categoryId: detail.categoryId! }));
+          setForm(f => ({
+            ...f,
+            categoryId: detail.categoryId!,
+            grade: detail.grades?.[0] ? String(detail.grades[0]) : f.grade,
+          }));
         }
       })
       .catch(() => notify.error('Không tải được danh sách chương'))
@@ -196,12 +202,14 @@ function QuestionFormPanel({ open, editing, categories, courses, onClose, onSave
 
   async function handleSave() {
     if (!form.categoryId) { notify.error('Vui lòng chọn môn học'); return; }
+    if (!form.grade) { notify.error('Vui lòng chọn lớp'); return; }
     if (!form.content.trim()) { notify.error('Vui lòng nhập nội dung câu hỏi'); return; }
     if (form.choices.some(c => !c.content.trim())) { notify.error('Vui lòng điền đầy đủ nội dung các đáp án'); return; }
     if (!form.choices.some(c => c.isCorrect)) { notify.error('Vui lòng chọn đáp án đúng'); return; }
 
     const req: CreateQuestionRequest = {
       categoryId:  form.categoryId,
+      grade:       Number(form.grade),
       chapterId:   form.chapterId || undefined,
       content:     form.content.trim(),
       explanation: form.explanation.trim() || undefined,
@@ -267,7 +275,7 @@ function QuestionFormPanel({ open, editing, categories, courses, onClose, onSave
             <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
               {/* Khóa học → Chương (ưu tiên chọn trước) */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-sm font-bold text-on-surface mb-1.5">Khóa học</label>
                   <div className="relative">
@@ -298,6 +306,22 @@ function QuestionFormPanel({ open, editing, categories, courses, onClose, onSave
                       ? <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin" />
                       : <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
                     }
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-on-surface mb-1.5">
+                    Lớp <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={form.grade}
+                      onChange={e => set('grade', e.target.value)}
+                      className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary"
+                    >
+                      <option value="">-- Chọn lớp --</option>
+                      {[6, 7, 8, 9].map(g => <option key={g} value={g}>Lớp {g}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
                   </div>
                 </div>
               </div>
@@ -622,6 +646,8 @@ export default function QuestionBankPage() {
   // ── Filters ───────────────────────────────────────────────────
   const [diffFilter,    setDiffFilter]    = useState<Difficulty | 'all'>('all');
   const [statusFilter,  setStatusFilter]  = useState<QuestionStatus | 'all'>('all');
+  const [categoryFilter,setCategoryFilter]= useState('');
+  const [gradeFilter,   setGradeFilter]   = useState('');
   const [courseFilter,  setCourseFilter]  = useState('');
   const [chapterFilter, setChapterFilter] = useState('');
 
@@ -659,7 +685,11 @@ export default function QuestionBankPage() {
   useEffect(() => {
     if (!courseFilter) { setAllChapters([]); setChapterFilter(''); return; }
     getCourseDetail(courseFilter)
-      .then(d => setAllChapters(d.chapters))
+      .then(d => {
+        setAllChapters(d.chapters);
+        setCategoryFilter(d.categoryId ?? '');
+        setGradeFilter(d.grades?.[0] ? String(d.grades[0]) : '');
+      })
       .catch(() => {});
     setChapterFilter('');
   }, [courseFilter]);
@@ -684,13 +714,23 @@ export default function QuestionBankPage() {
     const params: questionService.ListQuestionsParams = { page: 0, size: FETCH_LIMIT };
     if (diffFilter    !== 'all') params.difficulty = diffFilter;
     if (statusFilter  !== 'all') params.status     = statusFilter;
+    if (categoryFilter)          params.categoryId = categoryFilter;
+    if (gradeFilter)             params.grade      = Number(gradeFilter);
     if (chapterFilter)           params.chapterId  = chapterFilter;
 
     questionService.listQuestions(params)
       .then(pageResult => {
         if (cancelled) return;
-        setQuestions(pageResult.items);
-        setSelectedIds(prev => prev.filter(id => pageResult.items.some(q => q.id === id)));
+        const filteredItems = pageResult.items.filter(q => {
+          if (categoryFilter && q.categoryId !== categoryFilter) return false;
+          if (gradeFilter && q.grade !== Number(gradeFilter)) return false;
+          if (chapterFilter && q.chapterId !== chapterFilter) return false;
+          if (diffFilter !== 'all' && q.difficulty !== diffFilter) return false;
+          if (statusFilter !== 'all' && q.status !== statusFilter) return false;
+          return true;
+        });
+        setQuestions(filteredItems);
+        setSelectedIds(prev => prev.filter(id => filteredItems.some(q => q.id === id)));
         // Lưu tổng số thật từ BE để phát hiện trường hợp bị cắt ngầm
         setTotalItems(pageResult.totalItems);
       })
@@ -698,7 +738,7 @@ export default function QuestionBankPage() {
       .finally(() => { if (!cancelled) setLoadingQ(false); });
 
     return () => { cancelled = true; };
-  }, [diffFilter, statusFilter, chapterFilter, refreshKey]);
+  }, [diffFilter, statusFilter, categoryFilter, gradeFilter, chapterFilter, refreshKey]);
 
   // Dùng useCallback để các event handler (delete, save) có thể gọi reload.
   // Không chứa logic fetch — chỉ trigger lại useEffect bên trên qua refreshKey.
@@ -763,7 +803,7 @@ export default function QuestionBankPage() {
     hard:   questions.filter(q => q.difficulty === 'hard').length,
   };
 
-  const hasFilter = diffFilter !== 'all' || statusFilter !== 'all' || courseFilter || chapterFilter;
+  const hasFilter = diffFilter !== 'all' || statusFilter !== 'all' || categoryFilter || gradeFilter || courseFilter || chapterFilter;
 
   // ═══════════════════════════════════════════════════════════════
   //  RENDER
@@ -919,6 +959,26 @@ export default function QuestionBankPage() {
               <span className="text-sm font-medium">Lọc:</span>
             </div>
 
+            <div className="relative">
+              <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setCourseFilter(''); setChapterFilter(''); }}
+                className="appearance-none pl-3 pr-8 py-2 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface font-medium focus:outline-none focus:border-primary cursor-pointer max-w-[180px]"
+              >
+                <option value="">Tất cả môn</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+            </div>
+
+            <div className="relative">
+              <select value={gradeFilter} onChange={e => { setGradeFilter(e.target.value); setCourseFilter(''); setChapterFilter(''); }}
+                className="appearance-none pl-3 pr-8 py-2 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface font-medium focus:outline-none focus:border-primary cursor-pointer"
+              >
+                <option value="">Tất cả lớp</option>
+                {[6, 7, 8, 9].map(g => <option key={g} value={g}>Lớp {g}</option>)}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+            </div>
+
             {/* Khóa học */}
             <div className="relative">
               <select value={courseFilter} onChange={e => setCourseFilter(e.target.value)}
@@ -965,7 +1025,7 @@ export default function QuestionBankPage() {
 
             {hasFilter && (
               <button
-                onClick={() => { setDiffFilter('all'); setStatusFilter('all'); setCourseFilter(''); setChapterFilter(''); }}
+                onClick={() => { setDiffFilter('all'); setStatusFilter('all'); setCategoryFilter(''); setGradeFilter(''); setCourseFilter(''); setChapterFilter(''); }}
                 className="text-xs font-bold text-primary hover:underline"
               >
                 Xóa bộ lọc

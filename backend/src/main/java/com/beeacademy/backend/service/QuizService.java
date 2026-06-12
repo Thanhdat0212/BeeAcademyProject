@@ -28,6 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -296,19 +297,23 @@ public class QuizService {
     /** Lấy câu theo chapter + difficulty, shuffle từng pool, pick min(count, poolSize). */
     private List<Question> randomPickQuestions(UUID chapterId, QuizConfig config) {
         List<Question> result = new ArrayList<>();
-        result.addAll(pickFromPool(chapterId, "easy",   config.getEasyCount()));
-        result.addAll(pickFromPool(chapterId, "medium", config.getMediumCount()));
-        result.addAll(pickFromPool(chapterId, "hard",   config.getHardCount()));
+        UUID categoryId = config.getChapter().getCourse().getCategory().getId();
+        List<Integer> grades = Arrays.stream(config.getChapter().getCourse().getGrades())
+                .boxed()
+                .toList();
+        result.addAll(pickFromPool(categoryId, grades, "easy",   config.getEasyCount()));
+        result.addAll(pickFromPool(categoryId, grades, "medium", config.getMediumCount()));
+        result.addAll(pickFromPool(categoryId, grades, "hard",   config.getHardCount()));
         return result;
     }
 
-    private List<Question> pickFromPool(UUID chapterId, String difficulty, int count) {
+    private List<Question> pickFromPool(UUID categoryId, List<Integer> grades, String difficulty, int count) {
         List<Question> pool = new ArrayList<>(
-                questionRepository.findActiveByChapterAndDifficulty(chapterId, difficulty));
+                questionRepository.findActiveByCategoryAndGradesAndDifficulty(categoryId, grades, difficulty));
         Collections.shuffle(pool);
         if (pool.size() < count) {
-            log.warn("Ngân hàng câu hỏi chapter={} difficulty={} thiếu câu: cần={} có={}",
-                     chapterId, difficulty, count, pool.size());
+            log.warn("Ngân hàng câu hỏi category={} grades={} difficulty={} thiếu câu: cần={} có={}",
+                     categoryId, grades, difficulty, count, pool.size());
         }
         return pool.subList(0, Math.min(count, pool.size()));
     }

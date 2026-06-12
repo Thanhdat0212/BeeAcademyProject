@@ -21,6 +21,9 @@ public record CreateCourseRequest(
         @Size(max = 5000, message = "Mô tả tối đa 5000 ký tự")
         String description,
 
+        @Size(max = 1000, message = "URL ảnh bìa tối đa 1000 ký tự")
+        String thumbnailUrl,
+
         @NotNull(message = "Vui lòng chọn danh mục môn học")
         UUID categoryId,
 

@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS questions (
     id              UUID                PRIMARY KEY DEFAULT gen_random_uuid(),
     teacher_id      UUID                NOT NULL REFERENCES profiles(id),
     category_id     UUID                REFERENCES categories(id),
+    grade           INTEGER             NOT NULL DEFAULT 6,
     chapter_id      UUID                REFERENCES chapters(id),   -- null = cấp môn học
     content         TEXT                NOT NULL,
     explanation     TEXT,
@@ -87,6 +88,7 @@ CREATE TABLE IF NOT EXISTS questions (
 
 CREATE INDEX IF NOT EXISTS idx_questions_chapter    ON questions(chapter_id);
 CREATE INDEX IF NOT EXISTS idx_questions_category   ON questions(category_id);
+CREATE INDEX IF NOT EXISTS idx_questions_category_grade ON questions(category_id, grade);
 CREATE INDEX IF NOT EXISTS idx_questions_teacher    ON questions(teacher_id);
 CREATE INDEX IF NOT EXISTS idx_questions_difficulty ON questions(difficulty);
 CREATE INDEX IF NOT EXISTS idx_questions_status     ON questions(status);

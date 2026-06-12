@@ -22,6 +22,8 @@ export interface TeacherCourseResponse {
   status: 'draft' | 'pending_review' | 'approved' | 'rejected' | 'needs_revision' | 'published';
   totalChapters: number;
   totalLessons: number;
+  salesCount: number;
+  publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -65,6 +67,7 @@ export interface ApprovalHistoryResponse {
 export interface CreateCourseRequest {
   title: string;
   description?: string;
+  thumbnailUrl?: string;
   categoryId: string;
   grades: number[];
   priceVnd: number;
@@ -201,6 +204,15 @@ export async function uploadDocument(lessonId: string, file: File,
   if (displayName) form.append('name', displayName);
   const res = await apiClient.post<ApiResponse<UploadResponse>>(
     `/api/upload/document/${lessonId}`, form,
+    { headers: { 'Content-Type': 'multipart/form-data' } });
+  return unwrap(res.data);
+}
+
+export async function uploadCourseThumbnail(file: File): Promise<UploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiClient.post<ApiResponse<UploadResponse>>(
+    '/api/upload/course-thumbnail', form,
     { headers: { 'Content-Type': 'multipart/form-data' } });
   return unwrap(res.data);
 }

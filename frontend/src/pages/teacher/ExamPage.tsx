@@ -25,18 +25,28 @@
  *   5. "Lưu bài kiểm tra" → commit; "Hủy" → đóng form không lưu
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
+import { getCourseDetail, listMyCourses } from '../../api/teacherCourseService';
+import type { TeacherCourseDetailResponse } from '../../api/teacherCourseService';
+import * as examService from '../../api/examService';
+import * as questionService from '../../api/questionService';
+import type {
+  ExamConfigRequest,
+  ExamConfigResponse,
+  ExamQuestionPayload,
+} from '../../api/examService';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
-  Bell, LogOut, Menu, X, Plus, Trash2,
+  Bell, LogOut, Menu, X, Trash2,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Save, CheckCircle2, Circle,
   ChevronDown, ChevronRight, Shuffle, Eye, Repeat,
-  Megaphone, Database,
+  Megaphone, Database, Loader2, AlertTriangle,
+  Plus,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -103,72 +113,27 @@ interface ExamSlot {
   exam?: Exam;                 // undefined = chưa tạo
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  PHẦN 2 — MOCK DATA
-// ═══════════════════════════════════════════════════════════════════
-// 1 khóa có 6 chương → 2 slot exam: slot 0 đã có sẵn để demo edit,
-// slot 1 chưa có để demo tạo mới.
-const INITIAL_DATA: CourseInfo[] = [
-  {
-    id: 'c1',
-    title: 'Toán Đại Số - Lớp 8',
-    chapters: [
-      { id: 'ch1', order: 1, title: 'Chương 1: Hằng đẳng thức' },
-      { id: 'ch2', order: 2, title: 'Chương 2: Phân tích đa thức' },
-      { id: 'ch3', order: 3, title: 'Chương 3: Phân thức đại số' },
-      { id: 'ch4', order: 4, title: 'Chương 4: Phương trình bậc nhất' },
-      { id: 'ch5', order: 5, title: 'Chương 5: Bất phương trình' },
-      { id: 'ch6', order: 6, title: 'Chương 6: Hệ phương trình' },
-    ],
-    exams: {
-      0: {
-        name: 'Bài kiểm tra giữa kỳ I',
-        description: 'Tổng hợp kiến thức 3 chương đầu. Đọc kỹ đề trước khi làm.',
-        durationMinutes: 45,
-        passScorePercent: 60,
-        maxAttempts: 1,
-        shuffleQuestions: true,
-        shuffleOptions: true,
-        showAnswerAfterSubmit: false,
-        questions: [
-          {
-            id: 'eq1',
-            text: 'Khai triển (a + b)² ta được:',
-            type: 'single',
-            options: ['a² + b²', 'a² + 2ab + b²', 'a² − b²', '2a² + 2b²'],
-            correctIndices: [1],
-            explanation: '(a + b)² = a² + 2ab + b²',
-            points: 5,
-            difficulty: 'easy',
-          },
-          {
-            id: 'eq2',
-            text: 'Phân tích thành nhân tử: x² − 5x + 6',
-            type: 'single',
-            options: ['(x−2)(x−3)', '(x+2)(x+3)', '(x−1)(x−6)', '(x+1)(x−6)'],
-            correctIndices: [0],
-            points: 10,
-            difficulty: 'medium',
-          },
-        ],
-      },
-      // Slot 1 (ch 4-6) chưa có exam
-    },
-  },
-  {
-    id: 'c2',
-    title: 'Vật Lý - Lớp 9',
-    chapters: [
-      { id: 'ch7', order: 1, title: 'Chương 1: Điện học' },
-      { id: 'ch8', order: 2, title: 'Chương 2: Điện từ' },
-      { id: 'ch9', order: 3, title: 'Chương 3: Quang học' },
-    ],
-    exams: {},  // Khóa này chưa có exam nào
-  },
-];
+interface ChapterRandomConfig {
+  totalCount: number;
+}
+
+interface ChapterQuestionCount {
+  totalActive: number;
+}
+
+function defaultChapterRandomConfig(totalCount = 10): ChapterRandomConfig {
+  return {
+    totalCount,
+  };
+}
+
+function formatPoints(points: number): string {
+  if (Number.isInteger(points)) return String(points);
+  return points.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+}
 
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 3 — NAV_ITEMS (đồng bộ sidebar teacher)
+//  PHẦN 2 — NAV_ITEMS (đồng bộ sidebar teacher)
 // ═══════════════════════════════════════════════════════════════════
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: 'Tổng quan',         path: '/teacher',          },
@@ -185,7 +150,7 @@ const NAV_ITEMS = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 4 — HELPER: chia chương thành các slot 3 chương
+//  PHẦN 3 — HELPER: chia chương thành các slot 3 chương
 // ═══════════════════════════════════════════════════════════════════
 /**
  * computeSlots — Chia mảng chapters thành các slot 3 chương liên tiếp.
@@ -210,8 +175,79 @@ function computeSlots(chapters: ChapterRef[], exams: Record<number, Exam>): Exam
   return slots;
 }
 
+function examFromResponse(response: ExamConfigResponse): Exam {
+  return {
+    name: response.name,
+    description: response.description ?? '',
+    durationMinutes: response.durationMinutes,
+    passScorePercent: response.passScorePercent,
+    maxAttempts: response.maxAttempts,
+    shuffleQuestions: response.shuffleQuestions,
+    shuffleOptions: response.shuffleOptions,
+    showAnswerAfterSubmit: response.showAnswerAfterSubmit,
+    questions: response.questions.map(questionFromPayload),
+  };
+}
+
+function questionFromPayload(payload: ExamQuestionPayload): ExamQuestion {
+  return {
+    id: payload.id,
+    text: payload.text,
+    type: payload.type,
+    options: [...payload.options],
+    correctIndices: [...payload.correctIndices],
+    explanation: payload.explanation ?? '',
+    points: payload.points,
+    difficulty: payload.difficulty,
+  };
+}
+
+function examToRequest(exam: Exam): ExamConfigRequest {
+  return {
+    name: exam.name.trim(),
+    description: exam.description?.trim() || null,
+    durationMinutes: exam.durationMinutes,
+    passScorePercent: exam.passScorePercent,
+    maxAttempts: exam.maxAttempts,
+    shuffleQuestions: exam.shuffleQuestions,
+    shuffleOptions: exam.shuffleOptions,
+    showAnswerAfterSubmit: exam.showAnswerAfterSubmit,
+    questions: exam.questions.map(q => ({
+      id: q.id,
+      text: q.text.trim(),
+      type: q.type,
+      options: q.options.map(opt => opt.trim()),
+      correctIndices: q.correctIndices,
+      explanation: q.explanation?.trim() || null,
+      points: q.points,
+      difficulty: q.difficulty,
+    })),
+  };
+}
+
+function courseInfoFromDetail(
+    detail: TeacherCourseDetailResponse,
+    exams: ExamConfigResponse[],
+): CourseInfo {
+  return {
+    id: detail.id,
+    title: detail.title,
+    chapters: detail.chapters
+      .map(chapter => ({
+        id: chapter.id,
+        title: chapter.title,
+        order: chapter.position,
+      }))
+      .sort((a, b) => a.order - b.order),
+    exams: exams.reduce<Record<number, Exam>>((acc, exam) => {
+      acc[exam.slotIndex] = examFromResponse(exam);
+      return acc;
+    }, {}),
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 5 — SUB-COMPONENT: ExamQuestionCard
+//  PHẦN 4 — SUB-COMPONENT: ExamQuestionCard
 // ═══════════════════════════════════════════════════════════════════
 /**
  * ExamQuestionCard — Card chứa 1 câu hỏi của bài kiểm tra.
@@ -324,7 +360,7 @@ function ExamQuestionCard({ question, index, onChange, onDelete }: ExamQuestionC
           {question.type === 'single' ? '1 đáp án' : 'Nhiều đáp án'}
         </span>
 
-        <span className="text-xs font-bold text-on-surface-variant">{question.points}đ</span>
+        <span className="text-xs font-bold text-on-surface-variant">{formatPoints(question.points)}đ</span>
 
         <button
           onClick={onDelete}
@@ -396,9 +432,10 @@ function ExamQuestionCard({ question, index, onChange, onDelete }: ExamQuestionC
                   </span>
                   <input
                     type="number"
-                    min={1}
+                    min={0.01}
+                    step={0.01}
                     value={question.points}
-                    onChange={e => onChange({ ...question, points: parseInt(e.target.value) || 1 })}
+                    onChange={e => onChange({ ...question, points: parseFloat(e.target.value) || 0.01 })}
                     className="w-full px-3 py-2 text-sm bg-surface-container-lowest border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface"
                   />
                 </label>
@@ -491,21 +528,29 @@ function ExamQuestionCard({ question, index, onChange, onDelete }: ExamQuestionC
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 6 — MAIN COMPONENT
+//  PHẦN 5 — MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════
 
 export default function TeacherExamPage() {
   // ── State chính ─────────────────────────────────────────────────
   // data: nguồn sự thật về khóa/chương/exam đã commit
-  const [data, setData] = useState<CourseInfo[]>(INITIAL_DATA);
+  const [data, setData] = useState<CourseInfo[]>([]);
   // Khóa đang chọn
-  const [selectedCourseId, setSelectedCourseId] = useState<string>(INITIAL_DATA[0].id);
+  const [selectedCourseId, setSelectedCourseId] = useState<string>('');
   // Slot đang chọn để chỉnh sửa (null = chưa chọn)
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
 
   // form: bản copy của exam đang sửa.
   // Tách ra khỏi data để "Hủy" không ảnh hưởng — chỉ commit khi "Lưu".
   const [form, setForm] = useState<Exam | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [randomizing, setRandomizing] = useState(false);
+  const [chapterRandomConfigs, setChapterRandomConfigs] =
+    useState<Record<string, ChapterRandomConfig>>({});
+  const [chapterStats, setChapterStats] =
+    useState<Record<string, ChapterQuestionCount>>({});
+  const [loadingChapterStats, setLoadingChapterStats] = useState(false);
 
   // Sidebar mobile
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -515,6 +560,54 @@ export default function TeacherExamPage() {
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCoursesAndExams() {
+      setLoading(true);
+      try {
+        const page = await listMyCourses(0, 100);
+        const courses = await Promise.all(
+          page.items.map(async course => {
+            const [detail, exams] = await Promise.all([
+              getCourseDetail(course.id),
+              examService.listCourseExams(course.id),
+            ]);
+            return courseInfoFromDetail(detail, exams);
+          }),
+        );
+
+        if (cancelled) return;
+
+        setData(courses);
+        setSelectedCourseId(prev => {
+          if (prev && courses.some(course => course.id === prev)) return prev;
+          return courses[0]?.id ?? '';
+        });
+        setSelectedSlotIndex(null);
+        setForm(null);
+      } catch (error) {
+        if (!cancelled) {
+          setData([]);
+          setSelectedCourseId('');
+          notify.error(error instanceof Error
+            ? error.message
+            : 'Không tải được danh sách bài kiểm tra');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadCoursesAndExams();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ── Derived ─────────────────────────────────────────────────────
   const currentCourse = data.find(c => c.id === selectedCourseId);
   // Tính lại slots mỗi lần render — rẻ vì chỉ là chia mảng
@@ -523,10 +616,70 @@ export default function TeacherExamPage() {
 
   // Tổng điểm — hiển thị để GV biết bài kiểm tra đáng bao nhiêu
   const totalPoints = form?.questions.reduce((sum, q) => sum + q.points, 0) ?? 0;
+  const activeChapterConfigs = currentSlot?.chapters.map(chapter => ({
+    chapter,
+    config: chapterRandomConfigs[chapter.id] ?? defaultChapterRandomConfig(),
+    stats: chapterStats[chapter.id],
+  })) ?? [];
+  const chapterRandomTotal = activeChapterConfigs.reduce((sum, item) =>
+    sum + item.config.totalCount, 0);
+  const autoPointPerQuestion = chapterRandomTotal > 0 ? 10 / chapterRandomTotal : 0;
+  const chapterRandomWarnings = activeChapterConfigs
+    .filter(item => item.stats && item.config.totalCount > item.stats.totalActive)
+    .map(item => ({
+      key: item.chapter.id,
+      chapterTitle: item.chapter.title,
+      need: item.config.totalCount,
+      have: item.stats!.totalActive,
+    }));
+
+  useEffect(() => {
+    if (!currentSlot) {
+      setChapterStats({});
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingChapterStats(true);
+    Promise.all(
+      currentSlot.chapters.map(async chapter => {
+        const totalActive = await questionService.countActiveQuestionsByChapter(chapter.id);
+        return [chapter.id, { totalActive }] as const;
+      }),
+    )
+      .then(entries => {
+        if (!cancelled) {
+          setChapterStats(Object.fromEntries(entries));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setChapterStats({});
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingChapterStats(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCourseId, selectedSlotIndex]);
 
   // ── Handler: chọn slot để bắt đầu edit exam ──────────────────────
   function selectSlot(slot: ExamSlot) {
     setSelectedSlotIndex(slot.slotIndex);
+    setChapterRandomConfigs(prev => {
+      const next = { ...prev };
+      slot.chapters.forEach(chapter => {
+        if (!next[chapter.id]) {
+          next[chapter.id] = defaultChapterRandomConfig();
+        }
+      });
+      return next;
+    });
     // Slot đã có exam → copy vào form để edit
     // Chưa có → khởi tạo exam rỗng với default hợp lý cho bài kiểm tra
     if (slot.exam) {
@@ -587,10 +740,68 @@ export default function TeacherExamPage() {
     setForm({ ...form, questions: form.questions.filter((_, i) => i !== idx) });
   }
 
+  function updateChapterRandomConfig(
+      chapterId: string,
+      key: keyof ChapterRandomConfig,
+      value: number,
+  ) {
+    setChapterRandomConfigs(prev => {
+      const current = prev[chapterId] ?? defaultChapterRandomConfig();
+      const safeValue = Math.max(0, value);
+      return {
+        ...prev,
+        [chapterId]: {
+          ...current,
+          [key]: safeValue,
+        },
+      };
+    });
+  }
+
+  async function randomizeQuestionsFromBank() {
+    if (!form || !selectedCourseId || !currentSlot || randomizing) return;
+    if (chapterRandomTotal <= 0) {
+      notify.error('Cần chọn ít nhất 1 câu hỏi để random');
+      return;
+    }
+    if (chapterRandomWarnings.length > 0) {
+      notify.error('Ngân hàng câu hỏi chưa đủ theo phân bổ đã chọn');
+      return;
+    }
+
+    setRandomizing(true);
+    try {
+      const questions = await examService.randomizeCourseExamQuestions(
+        selectedCourseId,
+        {
+          easyCount: 0,
+          mediumCount: 0,
+          hardCount: 0,
+          pointsPerQuestion: autoPointPerQuestion,
+          chapterConfigs: activeChapterConfigs.map(item => ({
+            chapterId: item.chapter.id,
+            totalCount: item.config.totalCount,
+          })),
+        },
+      );
+      setForm({
+        ...form,
+        questions: questions.map(questionFromPayload),
+      });
+      notify.success(`Đã random ${questions.length} câu từ ngân hàng câu hỏi`);
+    } catch (error) {
+      notify.error(error instanceof Error
+        ? error.message
+        : 'Không random được câu hỏi từ ngân hàng');
+    } finally {
+      setRandomizing(false);
+    }
+  }
+
   // ── Handler: lưu bài kiểm tra ───────────────────────────────────
   // Validate: tương tự quiz nhưng có thêm check maxAttempts
-  function saveExam() {
-    if (!form || selectedSlotIndex === null) return;
+  async function saveExam() {
+    if (!form || selectedSlotIndex === null || !selectedCourseId || saving) return;
 
     if (!form.name.trim()) {
       notify.error('Vui lòng nhập tên bài kiểm tra');
@@ -628,15 +839,34 @@ export default function TeacherExamPage() {
       }
     }
 
-    // Commit: gán exam vào exams[slotIndex] của course tương ứng
-    setData(prev => prev.map(course => {
-      if (course.id !== selectedCourseId) return course;
-      return {
-        ...course,
-        exams: { ...course.exams, [selectedSlotIndex]: form },
-      };
-    }));
-    notify.success('Đã lưu bài kiểm tra');
+    setSaving(true);
+    try {
+      const saved = await examService.saveCourseExam(
+        selectedCourseId,
+        selectedSlotIndex,
+        examToRequest(form),
+      );
+      const savedExam = examFromResponse(saved);
+
+      setData(prev => prev.map(course => {
+        if (course.id !== selectedCourseId) return course;
+        return {
+          ...course,
+          exams: { ...course.exams, [selectedSlotIndex]: savedExam },
+        };
+      }));
+      setForm({
+        ...savedExam,
+        questions: savedExam.questions.map(q => ({ ...q })),
+      });
+      notify.success('Đã lưu bài kiểm tra');
+    } catch (error) {
+      notify.error(error instanceof Error
+        ? error.message
+        : 'Không lưu được bài kiểm tra');
+    } finally {
+      setSaving(false);
+    }
   }
 
   // ── Handler: hủy chỉnh sửa ──────────────────────────────────────
@@ -747,8 +977,14 @@ export default function TeacherExamPage() {
               <select
                 value={selectedCourseId}
                 onChange={e => changeCourse(e.target.value)}
+                disabled={loading || data.length === 0}
                 className="w-full max-w-md px-4 py-3 bg-surface-container-lowest border border-outline-variant rounded-xl focus:outline-none focus:border-primary text-on-surface font-semibold"
               >
+                {data.length === 0 && (
+                  <option value="">
+                    {loading ? 'Đang tải khóa học...' : 'Chưa có khóa học'}
+                  </option>
+                )}
                 {data.map(course => (
                   <option key={course.id} value={course.id}>{course.title}</option>
                 ))}
@@ -772,7 +1008,11 @@ export default function TeacherExamPage() {
               {slots.length === 0 ? (
                 // Khóa < 3 chương → không có slot nào
                 <p className="text-sm text-on-surface-variant text-center py-8">
-                  Khóa học cần ít nhất 3 chương để có bài kiểm tra.
+                  {loading
+                    ? 'Đang tải dữ liệu bài kiểm tra...'
+                    : data.length === 0
+                      ? 'Bạn chưa có khóa học nào để tạo bài kiểm tra.'
+                      : 'Khóa học cần ít nhất 3 chương để có bài kiểm tra.'}
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -824,7 +1064,11 @@ export default function TeacherExamPage() {
                 <div className="text-center py-16">
                   <GraduationCap className="w-12 h-12 text-on-surface-variant/30 mx-auto mb-4" />
                   <p className="text-on-surface-variant">
-                    Chọn 1 vị trí ở bên trái để bắt đầu tạo/sửa bài kiểm tra
+                    {loading
+                      ? 'Đang tải dữ liệu bài kiểm tra...'
+                      : data.length === 0
+                        ? 'Bạn chưa có khóa học nào để tạo bài kiểm tra.'
+                        : 'Chọn 1 vị trí ở bên trái để bắt đầu tạo/sửa bài kiểm tra'}
                   </p>
                 </div>
               ) : (
@@ -909,7 +1153,7 @@ export default function TeacherExamPage() {
                           Tổng điểm
                         </span>
                         <div className="w-full px-3 py-2 text-sm bg-surface-container/50 border border-outline-variant/50 rounded-lg text-on-surface font-bold">
-                          {totalPoints} điểm
+                          {formatPoints(totalPoints)} điểm
                         </div>
                       </div>
                     </div>
@@ -984,10 +1228,102 @@ export default function TeacherExamPage() {
                       Câu hỏi <span className="text-on-surface-variant font-normal">({form.questions.length})</span>
                     </p>
 
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-sm font-bold text-on-surface flex items-center gap-2">
+                            <Shuffle className="w-4 h-4 text-primary" />
+                            Random từ ngân hàng câu hỏi
+                          </p>
+                          <p className="text-xs text-on-surface-variant mt-1">
+                            Mỗi chương sẽ được bốc ngẫu nhiên tự nhiên trong ngân hàng câu hỏi của chính chương đó, không lọc độ khó.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        {activeChapterConfigs.map(({ chapter, config, stats }) => (
+                          <div
+                            key={chapter.id}
+                            className="rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-3"
+                          >
+                            <div className="grid grid-cols-1 md:grid-cols-[1fr_120px] gap-3 md:items-center">
+                              <div>
+                                <p className="text-sm font-bold text-on-surface">
+                                  Ch.{chapter.order}: {chapter.title}
+                                </p>
+                                <p className="text-xs text-on-surface-variant mt-1">
+                                  {loadingChapterStats ? (
+                                    <span className="inline-flex items-center gap-1">
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      Đang tải
+                                    </span>
+                                  ) : stats ? (
+                                    <>Có {stats.totalActive} câu trong ngân hàng</>
+                                  ) : (
+                                    <>Chưa đọc được thống kê</>
+                                  )}
+                                </p>
+                              </div>
+
+                              <label className="block">
+                                <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5 block">
+                                  Số câu
+                                </span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={config.totalCount}
+                                  onChange={e => updateChapterRandomConfig(
+                                    chapter.id,
+                                    'totalCount',
+                                    parseInt(e.target.value) || 0,
+                                  )}
+                                  className="w-full px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface"
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-xs">
+                          {chapterRandomWarnings.length > 0 ? (
+                            <div className="text-red-600 font-medium flex items-start gap-1.5">
+                              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                              <span>
+                                Thiếu {chapterRandomWarnings.map(item =>
+                                  `${item.chapterTitle}: cần ${item.need}, có ${item.have}`,
+                                ).join('; ')}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-on-surface-variant">
+                              Sẽ random {chapterRandomTotal} câu từ {activeChapterConfigs.length} chương · {formatPoints(autoPointPerQuestion)} điểm/câu.
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={randomizeQuestionsFromBank}
+                          disabled={randomizing || loadingChapterStats || chapterRandomTotal <= 0 || chapterRandomWarnings.length > 0}
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {randomizing ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Shuffle className="w-4 h-4" />
+                          )}
+                          {randomizing ? 'Đang random...' : 'Random câu hỏi'}
+                        </button>
+                      </div>
+                    </div>
+
                     {form.questions.length === 0 ? (
                       <div className="text-center py-8 border-2 border-dashed border-outline-variant/40 rounded-xl">
                         <p className="text-sm text-on-surface-variant">
-                          Chưa có câu hỏi nào
+                          Chưa có câu hỏi nào. Hãy random từ ngân hàng câu hỏi ở phía trên.
                         </p>
                       </div>
                     ) : (
@@ -1009,7 +1345,7 @@ export default function TeacherExamPage() {
                       className="w-full flex items-center justify-center gap-2 py-3 text-sm font-bold text-primary border-2 border-dashed border-primary/30 hover:bg-primary/5 rounded-xl transition-colors"
                     >
                       <Plus className="w-4 h-4" />
-                      Thêm câu hỏi
+                      Thêm câu hỏi thủ công
                     </button>
                   </div>
 
@@ -1023,10 +1359,11 @@ export default function TeacherExamPage() {
                     </button>
                     <button
                       onClick={saveExam}
-                      className="flex items-center gap-2 px-5 py-2.5 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors shadow-md shadow-primary/20"
+                      disabled={saving}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors shadow-md shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       <Save className="w-4 h-4" />
-                      Lưu bài kiểm tra
+                      {saving ? 'Đang lưu...' : 'Lưu bài kiểm tra'}
                     </button>
                   </div>
                 </>

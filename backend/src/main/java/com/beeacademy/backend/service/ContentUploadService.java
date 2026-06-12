@@ -38,6 +38,7 @@ public class ContentUploadService {
 
     private static final String VIDEO_BUCKET = "course-videos";
     private static final String DOCS_BUCKET  = "course-docs";
+    private static final String THUMBNAIL_BUCKET = DOCS_BUCKET;
 
     private static final Set<String> ALLOWED_VIDEO_MIME = Set.of(
             "video/mp4", "video/webm", "video/quicktime");
@@ -47,9 +48,12 @@ public class ContentUploadService {
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             "application/msword",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    private static final Set<String> ALLOWED_THUMBNAIL_MIME = Set.of(
+            "image/jpeg", "image/png", "image/webp");
 
     private static final long MAX_VIDEO_BYTES = 500L * 1024 * 1024;  // 500 MB
     private static final long MAX_DOC_BYTES   =  50L * 1024 * 1024;  // 50 MB
+    private static final long MAX_THUMBNAIL_BYTES = 5L * 1024 * 1024; // 5 MB
 
     private final SupabaseStorageClient  storageClient;
     private final CourseRepository       courseRepository;
@@ -178,6 +182,28 @@ public class ContentUploadService {
      * Tạo signed URL tạm thời (1 giờ) để student stream video private.
      * Gọi từ {@code CourseService.getCourseDetail()} khi {@code canSeeAllVideos=true}.
      */
+    @Transactional
+    public UploadResponse uploadCourseThumbnail(UUID teacherId, MultipartFile file) {
+        validateFile(file, ALLOWED_THUMBNAIL_MIME, MAX_THUMBNAIL_BYTES,
+                     "anh JPEG, PNG hoac WEBP", "5MB");
+
+        String ext = imageExtension(file.getContentType());
+        String path = "thumbnails/" + teacherId + "/" + UUID.randomUUID() + "." + ext;
+
+        String publicUrl;
+        try {
+            publicUrl = storageClient.upload(THUMBNAIL_BUCKET, path,
+                                             file.getContentType(), file.getBytes());
+        } catch (IOException e) {
+            throw new BusinessException("UPLOAD_FAILED",
+                    "Khong the doc file anh. Vui long thu lai.");
+        }
+
+        log.info("Upload course thumbnail thanh cong: teacherId={} path={} url={}",
+                 teacherId, path, publicUrl);
+        return new UploadResponse(path, publicUrl, ext, file.getSize());
+    }
+
     public String generateSignedVideoUrl(String storagePath) {
         return storageClient.generateSignedUrl(VIDEO_BUCKET, storagePath, 3600);
     }
@@ -221,5 +247,14 @@ public class ContentUploadService {
     private String getExtension(String filename, String defaultExt) {
         if (filename == null || !filename.contains(".")) return defaultExt;
         return filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
+    }
+
+    private String imageExtension(String contentType) {
+        return switch (contentType) {
+            case "image/jpeg" -> "jpg";
+            case "image/png" -> "png";
+            case "image/webp" -> "webp";
+            default -> "jpg";
+        };
     }
 }

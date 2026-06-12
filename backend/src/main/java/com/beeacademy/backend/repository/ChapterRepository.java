@@ -3,6 +3,8 @@ package com.beeacademy.backend.repository;
 import com.beeacademy.backend.model.Chapter;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -33,6 +35,16 @@ public interface ChapterRepository extends JpaRepository<Chapter, UUID> {
      * Dùng để tính position tiếp theo khi thêm chapter mới.
      */
     List<Chapter> findByCourseIdOrderByPositionAsc(UUID courseId);
+
+    int countByCourseId(UUID courseId);
+
+    @Query("""
+           SELECT ch.course.id AS courseId, COUNT(ch.id) AS itemCount
+           FROM Chapter ch
+           WHERE ch.course.id IN :courseIds
+           GROUP BY ch.course.id
+           """)
+    List<CourseContentCount> countByCourseIds(@Param("courseIds") List<UUID> courseIds);
 
     /**
      * Chapters kèm lessons (JOIN FETCH) — tránh N+1 khi render curriculum accordion.

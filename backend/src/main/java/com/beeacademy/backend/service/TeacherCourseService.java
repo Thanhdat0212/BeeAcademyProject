@@ -23,7 +23,9 @@ import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.repository.ApprovalHistoryRepository;
 import com.beeacademy.backend.repository.CategoryRepository;
 import com.beeacademy.backend.repository.ChapterRepository;
+import com.beeacademy.backend.repository.CourseContentCount;
 import com.beeacademy.backend.repository.CourseRepository;
+import com.beeacademy.backend.repository.EnrollmentRepository;
 import com.beeacademy.backend.repository.LessonRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
@@ -36,9 +38,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
  * Nghiệp vụ quản lý khóa học phía Giáo viên (Phase 1 — CRUD, không upload).
@@ -69,6 +72,7 @@ public class TeacherCourseService {
     private final ProfileRepository         profileRepository;
     private final ChapterRepository         chapterRepository;
     private final LessonRepository          lessonRepository;
+    private final EnrollmentRepository      enrollmentRepository;
     private final ApprovalHistoryRepository approvalHistoryRepository;
 
     // ========================================================================
@@ -107,6 +111,9 @@ public class TeacherCourseService {
         if (req.salePriceVnd() != null) {
             course.update(null, null, null, null, 0, req.salePriceVnd(), null);
         }
+        if (req.thumbnailUrl() != null && !req.thumbnailUrl().isBlank()) {
+            course.setThumbnailUrl(req.thumbnailUrl().trim());
+        }
 
         Course saved = courseRepository.save(course);
         log.info("GV {} tạo khóa học '{}' ({})", me.userId(), saved.getTitle(), saved.getId());
@@ -114,22 +121,44 @@ public class TeacherCourseService {
     }
 
     /** Danh sách khóa học của GV, sắp xếp theo updatedAt DESC. */
-    @Transactional(readOnly = true)
+    @Transactional
     public PageResponse<TeacherCourseResponse> listMyCourses(AuthenticatedUser me,
                                                                Pageable pageable) {
         Specification<Course> spec = (root, q, cb) ->
                 cb.equal(root.get("teacher").get("id"), me.userId());
         Page<Course> page = courseRepository.findAll(spec, pageable);
-        return PageResponse.of(page, TeacherCourseResponse::fromEntity);
+        List<Course> courses = page.getContent();
+        Map<UUID, Integer> chapterCounts = loadChapterCounts(courses);
+        Map<UUID, Integer> lessonCounts = loadLessonCounts(courses);
+        syncCourseCounters(courses, chapterCounts, lessonCounts);
+
+        List<TeacherCourseResponse> items = courses.stream()
+                .map(c -> TeacherCourseResponse.fromEntity(
+                        c,
+                        enrollmentRepository.countByCourseId(c.getId()),
+                        chapterCounts.getOrDefault(c.getId(), 0),
+                        lessonCounts.getOrDefault(c.getId(), 0)))
+                .toList();
+
+        return new PageResponse<>(
+                items,
+                page.getNumber(),
+                page.getSize(),
+                page.getTotalElements(),
+                page.getTotalPages(),
+                page.hasNext());
     }
 
     /** Chi tiết khóa học + chapters + lessons + lịch sử duyệt. */
-    @Transactional(readOnly = true)
+    @Transactional
     public TeacherCourseDetailResponse getCourseDetail(UUID courseId, AuthenticatedUser me) {
         Course course = loadAndVerifyOwner(courseId, me.userId());
+        List<Chapter> chapters = chapterRepository.findWithLessonsByCourseId(courseId);
+        syncCourseCounters(course, chapters.size(), countLessons(chapters));
         List<ApprovalHistory> history =
                 approvalHistoryRepository.findByCourseIdOrderByCreatedAtAsc(courseId);
-        return TeacherCourseDetailResponse.fromEntity(course, history);
+        return TeacherCourseDetailResponse.fromEntity(
+                course, history, enrollmentRepository.countByCourseId(courseId), chapters);
     }
 
     /** Cập nhật thông tin cơ bản (chỉ khi DRAFT/NEEDS_REVISION). */
@@ -137,7 +166,7 @@ public class TeacherCourseService {
     public TeacherCourseResponse updateCourse(UUID courseId, AuthenticatedUser me,
                                                UpdateCourseRequest req) {
         Course   course   = loadAndVerifyOwner(courseId, me.userId());
-        assertEditable(course);
+        assertCourseInfoEditable(course);
 
         // Tính giá hiệu dụng sau khi update để validate cross-field
         Integer effectivePrice     = req.priceVnd()     != null ? req.priceVnd()     : course.getPriceVnd();
@@ -156,8 +185,9 @@ public class TeacherCourseService {
                       grades,
                       effectivePrice,
                       effectiveSalePrice,
-                      null);
-        return TeacherCourseResponse.fromEntity(courseRepository.save(course));
+                      req.thumbnailUrl());
+        Course saved = courseRepository.save(course);
+        return TeacherCourseResponse.fromEntity(saved, enrollmentRepository.countByCourseId(saved.getId()));
     }
 
     /** Xóa khóa học — chỉ khi DRAFT. */
@@ -197,7 +227,7 @@ public class TeacherCourseService {
         course.submitForReview();
         Course saved = courseRepository.save(course);
         log.info("GV {} nộp khóa học {} để duyệt", me.userId(), courseId);
-        return TeacherCourseResponse.fromEntity(saved);
+        return TeacherCourseResponse.fromEntity(saved, enrollmentRepository.countByCourseId(saved.getId()));
     }
 
     // ========================================================================
@@ -381,10 +411,74 @@ public class TeacherCourseService {
         }
     }
 
+    private void assertCourseInfoEditable(Course course) {
+        CourseStatus s = course.getStatus();
+        boolean editable = s == CourseStatus.DRAFT
+                        || s == CourseStatus.PENDING_REVIEW
+                        || s == CourseStatus.NEEDS_REVISION
+                        || s == CourseStatus.REJECTED
+                        || s == CourseStatus.PUBLISHED;
+        if (!editable) {
+            String statusLabel = switch (s) {
+                case PENDING_REVIEW -> "Đang chờ duyệt";
+                case APPROVED       -> "Đã duyệt (chờ publish)";
+                case ARCHIVED       -> "Đã lưu trữ";
+                default             -> s.toDbValue();
+            };
+            throw new BusinessException("NOT_EDITABLE",
+                    "Không thể cập nhật thông tin khi khóa học đang ở trạng thái '"
+                    + statusLabel + "'.");
+        }
+    }
+
     /**
      * Validate giá khuyến mãi phải nhỏ hơn giá gốc.
      * Bỏ qua nếu salePriceVnd = null (không áp dụng KM).
      */
+    private Map<UUID, Integer> loadChapterCounts(List<Course> courses) {
+        if (courses.isEmpty()) return new HashMap<>();
+        List<UUID> courseIds = courses.stream().map(Course::getId).toList();
+        return toCountMap(chapterRepository.countByCourseIds(courseIds));
+    }
+
+    private Map<UUID, Integer> loadLessonCounts(List<Course> courses) {
+        if (courses.isEmpty()) return new HashMap<>();
+        List<UUID> courseIds = courses.stream().map(Course::getId).toList();
+        return toCountMap(lessonRepository.countByCourseIds(courseIds));
+    }
+
+    private Map<UUID, Integer> toCountMap(List<CourseContentCount> rows) {
+        Map<UUID, Integer> counts = new HashMap<>();
+        for (CourseContentCount row : rows) {
+            counts.put(row.getCourseId(), Math.toIntExact(row.getItemCount()));
+        }
+        return counts;
+    }
+
+    private void syncCourseCounters(List<Course> courses,
+                                    Map<UUID, Integer> chapterCounts,
+                                    Map<UUID, Integer> lessonCounts) {
+        for (Course course : courses) {
+            syncCourseCounters(
+                    course,
+                    chapterCounts.getOrDefault(course.getId(), 0),
+                    lessonCounts.getOrDefault(course.getId(), 0));
+        }
+    }
+
+    private void syncCourseCounters(Course course, int chapterCount, int lessonCount) {
+        if (!Integer.valueOf(chapterCount).equals(course.getTotalChapters())
+                || !Integer.valueOf(lessonCount).equals(course.getTotalLessons())) {
+            courseRepository.updateCounts(course.getId(), chapterCount, lessonCount);
+        }
+    }
+
+    private int countLessons(List<Chapter> chapters) {
+        return chapters.stream()
+                .mapToInt(ch -> ch.getLessons() != null ? ch.getLessons().size() : 0)
+                .sum();
+    }
+
     private void validateSalePrice(Integer salePriceVnd, Integer priceVnd) {
         if (salePriceVnd == null || priceVnd == null) return;
         if (salePriceVnd >= priceVnd) {
@@ -406,13 +500,9 @@ public class TeacherCourseService {
      * Dùng 2 query đơn giản thay vì trigger DB.
      */
     private void refreshCourseCounts(UUID courseId) {
-        List<Chapter> chapters = chapterRepository.findByCourseIdOrderByPositionAsc(courseId);
-        List<UUID> chapterIds = chapters.stream()
-                .map(Chapter::getId)
-                .collect(Collectors.toList());
-        int lessonCount = chapterIds.isEmpty() ? 0
-                : lessonRepository.countByChapterIdIn(chapterIds);
-        courseRepository.updateCounts(courseId, chapters.size(), lessonCount);
+        int chapterCount = chapterRepository.countByCourseId(courseId);
+        int lessonCount = lessonRepository.countByCourseId(courseId);
+        courseRepository.updateCounts(courseId, chapterCount, lessonCount);
     }
 
     private Category loadCategory(UUID id) {

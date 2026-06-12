@@ -1,6 +1,7 @@
 package com.beeacademy.backend.dto.response;
 
 import com.beeacademy.backend.model.ApprovalHistory;
+import com.beeacademy.backend.model.Chapter;
 import com.beeacademy.backend.model.Course;
 
 import java.time.Instant;
@@ -27,15 +28,34 @@ public record TeacherCourseDetailResponse(
         String status,
         Integer totalChapters,
         Integer totalLessons,
+        Integer salesCount,
+        Instant publishedAt,
         Instant createdAt,
         List<TeacherChapterResponse> chapters,
         List<ApprovalHistoryResponse> approvalHistory
 ) {
     public static TeacherCourseDetailResponse fromEntity(Course c,
                                                           List<ApprovalHistory> history) {
-        List<TeacherChapterResponse> chapters = c.getChapters().stream()
+        return fromEntity(c, history, 0);
+    }
+
+    public static TeacherCourseDetailResponse fromEntity(Course c,
+                                                          List<ApprovalHistory> history,
+                                                          int salesCount) {
+        return fromEntity(c, history, salesCount, c.getChapters());
+    }
+
+    public static TeacherCourseDetailResponse fromEntity(Course c,
+                                                          List<ApprovalHistory> history,
+                                                          int salesCount,
+                                                          List<Chapter> chapterEntities) {
+        List<TeacherChapterResponse> chapters = chapterEntities.stream()
                 .map(TeacherChapterResponse::fromEntity)
                 .toList();
+        int totalChapters = chapters.size();
+        int totalLessons = chapters.stream()
+                .mapToInt(ch -> ch.lessons() != null ? ch.lessons().size() : 0)
+                .sum();
         List<ApprovalHistoryResponse> historyDtos = history.stream()
                 .map(ApprovalHistoryResponse::fromEntity)
                 .toList();
@@ -47,8 +67,8 @@ public record TeacherCourseDetailResponse(
                 Arrays.stream(c.getGrades()).boxed().collect(Collectors.toList()),
                 c.getPriceVnd(), c.getSalePriceVnd(),
                 c.getStatus().toDbValue(),
-                c.getTotalChapters(), c.getTotalLessons(),
-                c.getCreatedAt(), chapters, historyDtos
+                totalChapters, totalLessons,
+                salesCount, c.getPublishedAt(), c.getCreatedAt(), chapters, historyDtos
         );
     }
 }

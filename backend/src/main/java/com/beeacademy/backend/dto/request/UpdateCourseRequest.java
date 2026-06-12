@@ -11,6 +11,7 @@ public record UpdateCourseRequest(
 
         @Size(max = 200) String title,
         @Size(max = 5000) String description,
+        @Size(max = 1000) String thumbnailUrl,
         UUID categoryId,
         List<Integer> grades,
         @Min(1000) Integer priceVnd,

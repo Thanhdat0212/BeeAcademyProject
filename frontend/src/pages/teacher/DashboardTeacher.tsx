@@ -39,9 +39,23 @@ function lastMonth() {
   return `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function monthKey(iso: string | null | undefined) {
+  if (!iso) return null;
+  return iso.slice(0, 7);
+}
+
 function pctChange(cur: number, prev: number) {
   if (prev === 0) return cur > 0 ? 100 : 0;
   return Math.round(((cur - prev) / prev) * 100);
+}
+
+function withTimeout<T>(promise: Promise<T>, ms = 10000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('timeout')), ms);
+    promise
+      .then(resolve, reject)
+      .finally(() => window.clearTimeout(timer));
+  });
 }
 
 function courseStatusMeta(status: TeacherCourseResponse['status']) {
@@ -188,9 +202,9 @@ export default function DashboardTeacher() {
 
     setLoading(true);
     Promise.allSettled([
-      getRevenueSplits(),
-      getPayoutPeriods(),
-      listMyCourses(0, 50).then(p => p.items),
+      withTimeout(getRevenueSplits()),
+      withTimeout(getPayoutPeriods()),
+      withTimeout(listMyCourses(0, 50).then(p => p.items)),
     ])
       .then(([splitsResult, periodsResult, coursesResult]) => {
         const failedSections: string[] = [];
@@ -229,22 +243,39 @@ export default function DashboardTeacher() {
     const curPeriod = periods.find(p => p.monthYear === curMonth);
     const prevPeriod = periods.find(p => p.monthYear === prevMonth);
 
-    const curRevenue = curPeriod?.totalTeacherAmount ?? 0;
-    const prevRevenue = prevPeriod?.totalTeacherAmount ?? 0;
-
     const curSplits = splits.filter(s => s.occurredAt.startsWith(curMonth));
     const prevSplits = splits.filter(s => s.occurredAt.startsWith(prevMonth));
 
-    const uniqueStudents = new Set(splits.map(s => s.studentName)).size;
+    const curRevenue = curPeriod?.totalTeacherAmount
+      ?? curSplits.reduce((sum, s) => sum + s.teacherAmount, 0);
+    const prevRevenue = prevPeriod?.totalTeacherAmount
+      ?? prevSplits.reduce((sum, s) => sum + s.teacherAmount, 0);
+
+    const studentKey = (s: RevenueSplitResponse) => s.studentId || s.studentName;
+    const uniqueStudents = new Set(splits.map(studentKey)).size;
+    const prevUniqueStudents = new Set(
+      splits
+        .filter(s => {
+          const month = monthKey(s.occurredAt);
+          return month !== null && month < curMonth;
+        })
+        .map(studentKey)
+    ).size;
 
     const publishedCourses = courses.filter(c => c.status === 'published').length;
+    const prevPublishedCourses = courses.filter(c => {
+      if (c.status !== 'published') return false;
+      const publishedMonth = monthKey(c.publishedAt ?? c.createdAt);
+      return publishedMonth !== null && publishedMonth < curMonth;
+    }).length;
 
     return {
       curRevenue,
       revChange: pctChange(curRevenue, prevRevenue),
       uniqueStudents,
-      studentsChange: 0,
+      studentsChange: pctChange(uniqueStudents, prevUniqueStudents),
       publishedCourses,
+      publishedCoursesChange: pctChange(publishedCourses, prevPublishedCourses),
       curSalesCount: curSplits.length,
       salesChange: pctChange(curSplits.length, prevSplits.length),
     };
@@ -255,7 +286,7 @@ export default function DashboardTeacher() {
   const courseStats = useMemo<CourseStat[]>(() => {
     return courses.slice(0, 5).map(c => ({
       course: c,
-      salesCount: splits.filter(s => s.courseId === c.id).length,
+      salesCount: c.salesCount ?? splits.filter(s => s.courseId === c.id).length,
     }));
   }, [courses, splits]);
 
@@ -405,7 +436,7 @@ export default function DashboardTeacher() {
                   delay={0.2}
                   title="Khóa học đang bán"
                   value={stats.publishedCourses.toString()}
-                  change={0}
+                  change={stats.publishedCoursesChange}
                   icon={<BookOpen className="w-5 h-5" />}
                   color="bg-primary/10"
                   iconColor="text-primary"

@@ -9,6 +9,7 @@ import java.util.UUID;
 @Builder
 public record RevenueSplitResponse(
     UUID id,
+    UUID studentId,
     String studentName,
     UUID courseId,
     String courseTitle,
@@ -22,6 +23,7 @@ public record RevenueSplitResponse(
     public static RevenueSplitResponse from(RevenueSplit s, String studentName, String courseTitle) {
         return RevenueSplitResponse.builder()
                 .id(s.getId())
+                .studentId(s.getStudentId())
                 .studentName(studentName)
                 .courseId(s.getCourseId())
                 .courseTitle(courseTitle)

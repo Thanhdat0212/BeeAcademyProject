@@ -61,6 +61,10 @@ public class Question {
     @JoinColumn(name = "category_id")
     private Category category;
 
+    /** Lop hoc cua ngan hang cau hoi, vi du 6, 7, 8, 9. */
+    @Column(name = "grade", nullable = false)
+    private Integer grade;
+
     /**
      * Chương — tùy chọn. Null = câu hỏi tổng quát toàn môn.
      * Khi cấu hình quiz cho chương, chỉ lấy câu có chapter_id = chapterId.
@@ -132,13 +136,14 @@ public class Question {
     // Factory + business methods
     // ========================================================================
 
-    public static Question create(Profile teacher, Category category, Chapter chapter,
+    public static Question create(Profile teacher, Category category, Integer grade, Chapter chapter,
                                    String content, String explanation,
                                    String difficulty, String type) {
         Question q     = new Question();
         q.id           = UUID.randomUUID();
         q.teacher      = teacher;
         q.category     = category;
+        q.grade        = grade;
         q.chapter      = chapter;
         q.content      = content;
         q.explanation  = explanation;
@@ -149,7 +154,11 @@ public class Question {
         return q;
     }
 
-    public void update(String content, String explanation, String difficulty) {
+    public void update(Category category, Integer grade, Chapter chapter,
+                       String content, String explanation, String difficulty) {
+        if (category != null) this.category = category;
+        if (grade != null) this.grade = grade;
+        this.chapter = chapter;
         if (content != null && !content.isBlank()) this.content = content;
         if (explanation != null) this.explanation = explanation;
         if (difficulty != null) this.difficulty = difficulty;

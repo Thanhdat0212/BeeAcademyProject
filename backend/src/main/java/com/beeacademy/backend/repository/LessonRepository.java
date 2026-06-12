@@ -2,6 +2,8 @@ package com.beeacademy.backend.repository;
 
 import com.beeacademy.backend.model.Lesson;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -33,4 +35,15 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
 
     /** Đếm tổng lessons thuộc nhiều chapter cùng lúc — dùng để refresh course counter. */
     int countByChapterIdIn(List<UUID> chapterIds);
+
+    @Query("SELECT COUNT(l.id) FROM Lesson l WHERE l.chapter.course.id = :courseId")
+    int countByCourseId(@Param("courseId") UUID courseId);
+
+    @Query("""
+           SELECT l.chapter.course.id AS courseId, COUNT(l.id) AS itemCount
+           FROM Lesson l
+           WHERE l.chapter.course.id IN :courseIds
+           GROUP BY l.chapter.course.id
+           """)
+    List<CourseContentCount> countByCourseIds(@Param("courseIds") List<UUID> courseIds);
 }

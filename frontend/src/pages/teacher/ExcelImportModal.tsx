@@ -226,6 +226,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
   const [courses,     setCourses]     = useState<TeacherCourseResponse[]>([]);
   const [chapters,    setChapters]    = useState<TeacherChapterResponse[]>([]);
   const [categoryId,  setCategoryId]  = useState('');
+  const [grade,       setGrade]       = useState('');
   const [courseId,    setCourseId]    = useState('');
   const [chapterId,   setChapterId]   = useState('');
   const [loadingMeta, setLoadingMeta] = useState(false);
@@ -257,6 +258,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
         setChapters(d.chapters);
         // Luôn fill (bỏ điều kiện !categoryId cũ) — đảm bảo category khớp course
         if (d.categoryId) setCategoryId(d.categoryId);
+        if (d.grades?.[0]) setGrade(String(d.grades[0]));
       })
       .catch(() => {})
       .finally(() => setLoadingCh(false));
@@ -272,7 +274,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
 
   function handleClose() {
     resetFile();
-    setCategoryId(''); setCourseId(''); setChapterId('');
+    setCategoryId(''); setGrade(''); setCourseId(''); setChapterId('');
     onClose();
   }
 
@@ -310,10 +312,12 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
 
   async function handleImport() {
     if (!categoryId) { notify.error('Vui lòng chọn môn học'); return; }
+    if (!grade) { notify.error('Vui lòng chọn lớp'); return; }
     if (validRows.length === 0) { notify.error('Không có câu hỏi hợp lệ để nhập'); return; }
 
     const requests: CreateQuestionRequest[] = validRows.map(r => ({
       categoryId,
+      grade: Number(grade),
       chapterId: chapterId || undefined,
       content:     r.content,
       explanation: r.explanation || undefined,
@@ -406,7 +410,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                 {(() => {
                   const isCategoryLocked = Boolean(courseId);
                   return (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                       {/* Khóa học — chọn trước để auto-fill môn */}
                       <div>
                         <label className="block text-xs font-semibold text-on-surface-variant mb-1">Khóa học</label>
@@ -446,6 +450,22 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                         {isCategoryLocked && (
                           <p className="text-xs text-primary/70 mt-1">Lấy từ khóa học</p>
                         )}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                          Lớp <span className="text-red-500">*</span>
+                        </label>
+                        <div className="relative">
+                          <select
+                            value={grade} onChange={e => setGrade(e.target.value)}
+                            className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary"
+                          >
+                            <option value="">-- Chọn lớp --</option>
+                            {[6, 7, 8, 9].map(g => <option key={g} value={g}>Lớp {g}</option>)}
+                          </select>
+                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+                        </div>
                       </div>
 
                       {/* Chương */}
@@ -626,7 +646,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                 {!result && (
                   <button
                     onClick={handleImport}
-                    disabled={importing || validRows.length === 0 || !categoryId}
+                    disabled={importing || validRows.length === 0 || !categoryId || !grade}
                     className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-green-500 text-white rounded-xl hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {importing

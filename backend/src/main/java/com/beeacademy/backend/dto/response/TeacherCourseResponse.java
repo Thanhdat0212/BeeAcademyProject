@@ -31,10 +31,21 @@ public record TeacherCourseResponse(
         String status,          // draft | pending_review | approved | rejected | needs_revision | published
         Integer totalChapters,
         Integer totalLessons,
+        Integer salesCount,
+        Instant publishedAt,
         Instant createdAt,
         Instant updatedAt
 ) {
     public static TeacherCourseResponse fromEntity(Course c) {
+        return fromEntity(c, 0);
+    }
+
+    public static TeacherCourseResponse fromEntity(Course c, int salesCount) {
+        return fromEntity(c, salesCount, c.getTotalChapters(), c.getTotalLessons());
+    }
+
+    public static TeacherCourseResponse fromEntity(Course c, int salesCount,
+                                                   int totalChapters, int totalLessons) {
         return new TeacherCourseResponse(
                 c.getId(), c.getSlug(), c.getTitle(), c.getThumbnailUrl(),
                 c.getCategory() != null ? c.getCategory().getId()   : null,
@@ -42,7 +53,8 @@ public record TeacherCourseResponse(
                 Arrays.stream(c.getGrades()).boxed().collect(Collectors.toList()),
                 c.getPriceVnd(), c.getSalePriceVnd(),
                 c.getStatus().toDbValue(),
-                c.getTotalChapters(), c.getTotalLessons(),
+                totalChapters, totalLessons, salesCount,
+                c.getPublishedAt(),
                 c.getCreatedAt(), c.getUpdatedAt()
         );
     }
