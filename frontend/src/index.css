@@ -1,0 +1,46 @@
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-primary: #ad2c00;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #d83900;
+  --color-on-primary-container: #fffbff;
+  --color-primary-fixed: #ffdbd1;
+  --color-primary-fixed-dim: #ffb5a0;
+  
+  --color-secondary: #7c5800;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #feb700;
+  --color-on-secondary-container: #6b4b00;
+  
+  --color-tertiary: #565c6a;
+  --color-on-tertiary: #ffffff;
+  
+  --color-surface: #f8f9fd;
+  --color-surface-dim: #d9dade;
+  --color-surface-bright: #f8f9fd;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f2f3f7;
+  --color-surface-container: #edeef2;
+  --color-surface-container-high: #e7e8ec;
+  --color-surface-container-highest: #e1e2e6;
+  
+  --color-on-surface: #191c1f;
+  --color-on-surface-variant: #5d4038;
+  
+  --color-outline: #926f66;
+  --color-outline-variant: #e7bdb2;
+  
+  --radius-xl: 1.5rem;
+  --radius-lg: 1rem;
+  --radius-md: 0.75rem;
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-on-surface font-sans;
+  }
+}
