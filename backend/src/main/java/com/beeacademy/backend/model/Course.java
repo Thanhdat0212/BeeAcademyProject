@@ -238,12 +238,15 @@ public class Course {
 
     /**
      * GV nộp khóa học để Admin duyệt.
-     * Chỉ hợp lệ khi status ∈ {DRAFT, NEEDS_REVISION}.
+     * Chỉ hợp lệ khi status ∈ {DRAFT, NEEDS_REVISION, REJECTED}.
+     * REJECTED được phép nộp lại: GV sửa khóa bị từ chối rồi gửi duyệt lần nữa.
      */
     public void submitForReview() {
-        if (status != CourseStatus.DRAFT && status != CourseStatus.NEEDS_REVISION) {
+        if (status != CourseStatus.DRAFT
+                && status != CourseStatus.NEEDS_REVISION
+                && status != CourseStatus.REJECTED) {
             throw new IllegalStateException(
-                "Chỉ có thể nộp duyệt khi khóa học ở trạng thái Bản nháp hoặc Cần sửa.");
+                "Chỉ có thể nộp duyệt khi khóa học ở trạng thái Bản nháp, Cần sửa hoặc Bị từ chối.");
         }
         this.status = CourseStatus.PENDING_REVIEW;
     }
