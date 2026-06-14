@@ -1,0 +1,119 @@
+# ============================================================================
+# Bee Academy Backend - Cấu hình chung (mặc định cho tất cả môi trường)
+# ----------------------------------------------------------------------------
+# Mọi giá trị nhạy cảm đọc từ biến môi trường (.env).
+# Cú pháp ${TÊN_BIẾN:giá_trị_mặc_định} - nếu env không set thì dùng default.
+# ============================================================================
+
+server:
+  # Port mặc định 8080 (đổi qua biến SERVER_PORT)
+  port: ${SERVER_PORT:8080}
+  # Thêm prefix /api cho tất cả endpoint -> tránh trùng route với frontend Vite
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: bee-academy-backend
+
+  # --------------------------------------------------------------------------
+  # Datasource: Supabase Postgres (kết nối qua JDBC, KHÔNG dùng Supabase client)
+  # --------------------------------------------------------------------------
+  datasource:
+    url: jdbc:postgresql://${SUPABASE_DB_HOST:db.haksqgakssvmlbxtqxir.supabase.co}:${SUPABASE_DB_PORT:5432}/${SUPABASE_DB_NAME:postgres}?sslmode=require&prepareThreshold=0
+    username: ${SUPABASE_DB_USER:postgres}
+    password: ${SUPABASE_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # Pool size - Supabase free tier giới hạn ~25 concurrent connections
+      maximum-pool-size: 15
+      minimum-idle: 3
+      connection-timeout: 10000   # 10s
+      idle-timeout: 300000        # 5 phút
+      max-lifetime: 1800000       # 30 phút
+      pool-name: BeeAcademyHikariPool
+
+  # --------------------------------------------------------------------------
+  # JPA / Hibernate
+  # --------------------------------------------------------------------------
+  jpa:
+    hibernate:
+      # QUAN TRỌNG: schema 37 bảng đã có sẵn trên Supabase.
+      # 'none' = Hibernate KHÔNG được tự tạo/sửa/xoá bảng. Mọi thay đổi schema
+      # phải đi qua Supabase migration. Đặt 'update' có thể phá production.
+      ddl-auto: none
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        show_sql: false
+        generate_statistics: false
+        # Dùng tên cột snake_case đúng như Supabase (created_at, user_id...)
+        physical_naming_strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+    open-in-view: false   # Tắt OSIV - tránh lazy load ngoài transaction (best practice)
+
+  # Upload: avatar (5MB) + video khoá học (500MB)
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+
+  # --------------------------------------------------------------------------
+  # Mail: gửi OTP qua Gmail SMTP
+  # --------------------------------------------------------------------------
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+
+# ============================================================================
+# Cấu hình riêng cho Supabase (đọc qua @ConfigurationProperties)
+# ============================================================================
+supabase:
+  url: ${SUPABASE_URL:https://haksqgakssvmlbxtqxir.supabase.co}
+  anon-key: ${SUPABASE_ANON_KEY:}
+  service-role-key: ${SUPABASE_SERVICE_ROLE_KEY:}
+  jwt-secret: ${SUPABASE_JWT_SECRET:}
+
+# ============================================================================
+# CORS - cho phép frontend Vite (port 3000) gọi vào backend
+# ============================================================================
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  dev-mode: ${DEV_MODE:false}
+  frontend-url: ${FRONTEND_URL:http://localhost:3000}
+
+# ============================================================================
+# SePay Webhook — xác thực API key
+# Lấy API key tại: sepay.vn → Cài đặt → Webhook → API Key
+# Đặt vào backend/.env: SEPAY_API_KEY=your_key_here
+# ============================================================================
+payos:
+  client-id: ${PAYOS_CLIENT_ID:}
+  api-key: ${PAYOS_API_KEY:}
+  checksum-key: ${PAYOS_CHECKSUM_KEY:}
+
+# ============================================================================
+# MoMo Payment API v2
+# Lấy credentials từ: https://developers.momo.vn → Sandbox credentials
+# ipn-url phải accessible từ internet khi dev → dùng ngrok:
+#   ngrok http 8080  →  copy URL → đặt vào MOMO_IPN_URL
+# ============================================================================
+
+# ============================================================================
+# Logging
+# ============================================================================
+logging:
+  level:
+    root: INFO
+    com.beeacademy: INFO
+    org.springframework.security: WARN
