@@ -98,4 +98,21 @@ public interface CourseRepository extends JpaRepository<Course, UUID>,
     void updateCounts(@Param("courseId") UUID courseId,
                       @Param("chapterCount") int chapterCount,
                       @Param("lessonCount") int lessonCount);
+
+    /**
+     * Top khóa học theo số enrollment (Admin Dashboard — UC34).
+     * Mỗi row: [UUID id, String title, String teacherName, String categoryName, Long count].
+     *
+     * <p>Enrollment không có JPA relation tới Course ({@code courseId} là UUID
+     * thuần) nên dùng cross-join + WHERE thay vì JOIN path — cùng style với
+     * {@link #findEnrolledByStudentId}. LEFT JOIN teacher/category để không
+     * rớt khóa học thiếu liên kết. Khóa 0 enrollment tự bị loại — đúng nghĩa
+     * "bảng xếp hạng bán chạy".
+     */
+    @Query("SELECT c.id, c.title, t.fullName, cat.name, COUNT(e) " +
+           "FROM Course c LEFT JOIN c.teacher t LEFT JOIN c.category cat, Enrollment e " +
+           "WHERE e.courseId = c.id AND c.status = :status " +
+           "GROUP BY c.id, c.title, t.fullName, cat.name " +
+           "ORDER BY COUNT(e) DESC")
+    List<Object[]> findTopByEnrollments(@Param("status") CourseStatus status, Pageable pageable);
 }
