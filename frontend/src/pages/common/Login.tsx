@@ -6,6 +6,7 @@ import { notify } from '../../lib/toast';
 import { useAuthStore } from '../../store/useAuthStore';
 import { login as loginApi } from '../../api/authService';
 import { isApiError } from '../../api/client';
+import { resolveRoleHome } from '../../lib/utils';
 
 function buildGoogleOAuthUrl(): string {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
@@ -52,18 +53,11 @@ export default function Login() {
       notify.dismiss(toastId);
       notify.success('Đăng nhập thành công!');
 
-      // Chuyển hướng theo role — luôn áp dụng nếu user chưa có đích cụ thể
-      const userRole = tokens.user?.role;
-      const roleHome: Record<string, string> = {
-        teacher: '/teacher',
-        admin:   '/admin',
-        parent:  '/parent',
-        student: '/courses',
-      };
-      // Nếu redirectTo là trang generic (/courses, /login, /) thì ưu tiên role-home
+      // Chuyển hướng theo role — luôn áp dụng nếu user chưa có đích cụ thể.
+      // Nếu redirectTo là trang generic (/courses, /login, /) thì ưu tiên role-home.
       const genericPaths = ['/', '/login', '/courses', '/register'];
       const finalRedirect = genericPaths.includes(redirectTo)
-        ? (userRole ? roleHome[userRole] ?? '/courses' : '/courses')
+        ? resolveRoleHome(tokens.user?.role)
         : redirectTo;
 
       navigate(finalRedirect, { replace: true });

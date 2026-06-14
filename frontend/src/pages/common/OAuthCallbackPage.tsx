@@ -5,6 +5,7 @@ import axios from 'axios';
 import { useAuthStore } from '../../store/useAuthStore';
 import { unwrap } from '../../api/client';
 import { notify } from '../../lib/toast';
+import { resolveRoleHome } from '../../lib/utils';
 import type { ApiResponse, AuthTokenPayload, UserSummary } from '../../types/api';
 
 function parseHash(hash: string): Record<string, string> {
@@ -85,7 +86,8 @@ export default function OAuthCallbackPage() {
         };
         loginWithTokens(tokenPayload);
         notify.success('Đăng nhập Google thành công!');
-        navigate('/courses', { replace: true });
+        // Điều hướng theo role thay vì cố định /courses — GV/Admin/PH vào đúng dashboard.
+        navigate(resolveRoleHome(user.role), { replace: true });
       } catch (err) {
         const msg = axios.isAxiosError(err)
           ? (err.response?.data as { message?: string })?.message ?? 'Đăng nhập Google thất bại.'
