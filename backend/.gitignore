@@ -1,0 +1,30 @@
+# ============================================================================
+# Bee Academy Backend - Git Ignore
+# ============================================================================
+
+# Biến môi trường - TUYỆT ĐỐI KHÔNG commit (chứa SUPABASE_SERVICE_ROLE_KEY)
+.env
+.env.local
+.env.*.local
+
+# Maven build output
+target/
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
