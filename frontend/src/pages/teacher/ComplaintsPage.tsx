@@ -23,16 +23,21 @@
  *      + Phải: chi tiết thread của khiếu nại đang chọn, HOẶC form tạo mới
  */
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
 import {
-  getMyComplaints, createComplaint, replyToMyComplaint,
-  CATEGORY_LABELS, PRIORITY_LABELS,
-  type ComplaintDetail, type ComplaintCategory, type ComplaintPriority,
-  type ComplaintStatus, type ComplaintMessage,
+  addTeacherComplaintMessage,
+  createTeacherComplaint,
+  listTeacherComplaints,
+  CATEGORY_LABELS,
+  PRIORITY_LABELS,
+  type ComplaintCategory,
+  type ComplaintPriority,
+  type ComplaintStatus,
+  type ComplaintDetail,
 } from '../../api/complaintService';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
@@ -43,15 +48,19 @@ import {
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 1 — TYPES (alias từ complaintService — nguồn sự thật chung)
+//  PHẦN 1 — TYPES (dùng từ complaintService — nguồn sự thật chung)
 // ═══════════════════════════════════════════════════════════════════
 
-// Dùng lại type & label map từ service để FE/BE không lệch định nghĩa.
+// Alias ngắn cho dùng nội bộ
 type Priority = ComplaintPriority;
 type Complaint = ComplaintDetail;
 
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 4 — NAV_ITEMS (đồng bộ sidebar teacher — đã có Khiếu nại)
+//  PHẦN 2 — CONSTANTS (dùng từ complaintService)
+// ═══════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════
+//  PHẦN 3 — NAV_ITEMS (đồng bộ sidebar teacher — đã có Khiếu nại)
 // ═══════════════════════════════════════════════════════════════════
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: 'Tổng quan',         path: '/teacher',          },
@@ -179,10 +188,9 @@ function MessageBubble({ message }: { message: ComplaintMessage }) {
 
 export default function TeacherComplaintsPage() {
   // ── State chính ─────────────────────────────────────────────────
-  // Danh sách khiếu nại của GV — load từ /api/complaints.
   const [complaints, setComplaints] = useState<Complaint[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Bộ lọc
   const [categoryFilter, setCategoryFilter] = useState<'all' | ComplaintCategory>('all');
@@ -212,19 +220,32 @@ export default function TeacherComplaintsPage() {
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
 
-  // ── Load danh sách khiếu nại của GV ─────────────────────────────
-  const loadComplaints = useCallback(async () => {
-    setLoading(true);
-    try {
-      setComplaints(await getMyComplaints());
-    } catch {
-      notify.error('Không tải được danh sách khiếu nại');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  useEffect(() => {
+    let cancelled = false;
 
-  useEffect(() => { loadComplaints(); }, [loadComplaints]);
+    async function loadComplaints() {
+      setIsLoading(true);
+      try {
+        const data = await listTeacherComplaints();
+        if (!cancelled) {
+          setComplaints(data);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          notify.error(error instanceof Error ? error.message : 'Khong the tai danh sach khieu nai');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadComplaints();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ── DERIVED: stats cho 3 cards ──────────────────────────────────
   // Tính counter cho từng trạng thái — dùng useMemo để khỏi tính lại
@@ -267,7 +288,7 @@ export default function TeacherComplaintsPage() {
   }
 
   // ── Handler: gửi khiếu nại mới ──────────────────────────────────
-  // Validate → gọi API tạo → prepend kết quả thật vào list → xem chi tiết.
+  // Validate → tạo Complaint mới với 1 message gốc → push vào list
   async function submitCreate() {
     if (!formTitle.trim()) {
       notify.error('Vui lòng nhập tiêu đề');
@@ -278,22 +299,25 @@ export default function TeacherComplaintsPage() {
       return;
     }
 
-    setSubmitting(true);
+    setIsSubmitting(true);
     try {
-      const created = await createComplaint({
+      const newComplaint = await createTeacherComplaint({
         title: formTitle.trim(),
         category: formCategory,
         priority: formPriority,
         content: formContent.trim(),
       });
-      setComplaints(prev => [created, ...prev]);
-      setSelectedId(created.id);
+
+      setComplaints(prev => [newComplaint, ...prev.filter(c => c.id !== newComplaint.id)]);
+      setSelectedId(newComplaint.id);
       setRightMode('view');
+      setFormTitle('');
+      setFormContent('');
       notify.success('Đã gửi khiếu nại đến Admin');
-    } catch {
-      notify.error('Không gửi được khiếu nại — vui lòng thử lại');
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Không thể gửi khiếu nại');
     } finally {
-      setSubmitting(false);
+      setIsSubmitting(false);
     }
   }
 
@@ -305,7 +329,8 @@ export default function TeacherComplaintsPage() {
   }
 
   // ── Handler: GV gửi reply (follow up) ────────────────────────────
-  // Chỉ cho phép reply khi thread chưa đóng (resolved/rejected).
+  // Chỉ cho phép reply khi status là 'in_progress' hoặc 'pending'
+  // (đã 'resolved'/'rejected' thì thread đã đóng)
   async function sendReply() {
     if (!selectedComplaint) return;
     const content = replyInput.trim();
@@ -314,16 +339,18 @@ export default function TeacherComplaintsPage() {
       return;
     }
 
-    setSubmitting(true);
+    setIsSubmitting(true);
     try {
-      const updated = await replyToMyComplaint(selectedComplaint.id, content);
-      setComplaints(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+      const updatedComplaint = await addTeacherComplaintMessage(selectedComplaint.id, content);
+      setComplaints(prev => prev.map(c =>
+        c.id === updatedComplaint.id ? updatedComplaint : c
+      ));
       setReplyInput('');
       notify.success('Đã gửi tin nhắn');
-    } catch {
-      notify.error('Không gửi được tin nhắn — vui lòng thử lại');
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Không thể gửi tin nhắn');
     } finally {
-      setSubmitting(false);
+      setIsSubmitting(false);
     }
   }
 
@@ -530,14 +557,13 @@ export default function TeacherComplaintsPage() {
                 </span>
               </h3>
 
-              {loading ? (
-                <p className="text-sm text-on-surface-variant text-center py-8">Đang tải...</p>
+              {isLoading ? (
+                <p className="text-sm text-on-surface-variant text-center py-8">
+                  Dang tai danh sach khieu nai...
+                </p>
               ) : filteredComplaints.length === 0 ? (
                 <p className="text-sm text-on-surface-variant text-center py-8">
-                  {/* Phân biệt 2 trường hợp: chưa gửi khiếu nại nào vs lọc không ra kết quả */}
-                  {complaints.length === 0
-                    ? 'Bạn chưa gửi khiếu nại nào'
-                    : 'Không có khiếu nại nào khớp bộ lọc'}
+                  Không có khiếu nại nào khớp bộ lọc
                 </p>
               ) : (
                 <div className="space-y-2 max-h-[600px] overflow-y-auto">
@@ -679,8 +705,8 @@ export default function TeacherComplaintsPage() {
                       </button>
                       <button
                         onClick={submitCreate}
-                        disabled={submitting}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors shadow-md shadow-primary/20 disabled:opacity-60"
+                        disabled={isSubmitting}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors shadow-md shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         <Send className="w-4 h-4" />
                         Gửi khiếu nại
@@ -746,8 +772,8 @@ export default function TeacherComplaintsPage() {
                         <div className="flex items-center justify-end">
                           <button
                             onClick={sendReply}
-                            disabled={submitting}
-                            className="flex items-center gap-2 px-5 py-2 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors shadow-md shadow-primary/20 disabled:opacity-60"
+                            disabled={isSubmitting}
+                            className="flex items-center gap-2 px-5 py-2 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors shadow-md shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             <Send className="w-4 h-4" />
                             Gửi

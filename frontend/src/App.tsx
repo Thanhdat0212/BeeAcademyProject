@@ -91,6 +91,7 @@ export default function App() {
 
         {/* ── Admin (chỉ role=admin) ── */}
         <Route path="/admin"                     element={<ProtectedRoute role="admin"><DashboardAdmin /></ProtectedRoute>} />
+        <Route path="/admin/complaints"          element={<ProtectedRoute role="admin"><DashboardAdmin /></ProtectedRoute>} />
         <Route path="/admin/approvals"           element={<ProtectedRoute role="admin"><ApprovalsPage /></ProtectedRoute>} />
         <Route path="/admin/approvals/:courseId" element={<ProtectedRoute role="admin"><CourseReviewPage /></ProtectedRoute>} />
         <Route path="/admin/teachers"   element={<ProtectedRoute role="admin"><ComingSoonPage title="Quản lý giáo viên"    subtitle="Danh sách và thông tin giáo viên" /></ProtectedRoute>} />

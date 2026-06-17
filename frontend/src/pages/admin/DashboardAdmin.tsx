@@ -13,16 +13,16 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
 import { apiClient, unwrap } from '../../api/client';
-import { getAdminOverview } from '../../api/adminService';
-import type { AdminOverview } from '../../api/adminService';
-import { getAdminComplaintStats } from '../../api/complaintService';
-import PayoutsPanel from '../../components/admin/PayoutsPanel';
-import ComplaintsInbox from '../../components/admin/ComplaintsInbox';
 import type { ApiResponse, PageResponse } from '../../types/api';
+import {
+  listAdminComplaints,
+  updateAdminComplaintStatus,
+  type ComplaintThread,
+} from '../../api/complaintService';
 import {
   LayoutDashboard, BookOpen, Users, ShoppingBag,
   FileText, TrendingUp, TrendingDown, DollarSign,
@@ -30,10 +30,20 @@ import {
   CheckCircle2, Clock, XCircle, PlusCircle, Calculator, Wallet, BarChart2, Settings,
   AlertTriangle, Search, Filter, Download, Send, Check, Ban, MessageSquare, AlertCircle, Calendar, Hash, Megaphone, CheckCircle, ShieldAlert, Edit2, RotateCcw
 } from 'lucide-react';
+import { MOCK_COURSES } from '../../data/mockCourses';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // KIỂU DỮ LIỆU (Types & Interfaces)
 // ─────────────────────────────────────────────────────────────────────────────
+
+interface Order {
+  id: string;
+  student: string;
+  course: string;
+  amount: number;
+  date: string;
+  status: 'success' | 'pending' | 'failed';
+}
 
 interface UserAccount {
   id: string;
@@ -54,6 +64,36 @@ interface CourseApproval {
   submittedAt: string;
   status: 'pending' | 'approved' | 'revision_required' | 'rejected';
   reason?: string;
+}
+
+interface TeacherPayout {
+  id: string;
+  teacherName: string;
+  bankName: string;
+  bankAccount: string;
+  bankAccountHolder: string;
+  totalRevenue: number;
+  platformFee: number;
+  teacherShare: number;
+  status: 'paid' | 'pending' | 'overdue';
+  overdueDays?: number;
+  paymentDate?: string;
+  txnHash?: string;
+  notes?: string;
+}
+
+interface Complaint {
+  id: string;
+  senderName: string;
+  senderRole: 'student' | 'parent' | 'teacher';
+  title: string;
+  type: 'payment' | 'content' | 'system' | 'other';
+  content: string;
+  createdAt: string;
+  status: 'pending' | 'in_progress' | 'resolved' | 'rejected';
+  responseNote?: string;
+  messageCount?: number;
+  lastActivityAt?: string;
 }
 
 interface SystemAnnouncement {
@@ -82,9 +122,68 @@ interface AdminUser {
 interface UserStats { students: number; teachers: number; parents: number; total: number; }
 interface PendingCourseSummary { id: string; title: string; teacherName: string; submittedAt: string; }
 
+function formatApiDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function mapComplaintType(category: string): Complaint['type'] {
+  if (category === 'payment') return 'payment';
+  if (category === 'technical' || category === 'system') return 'system';
+  if (
+    category === 'course_content' ||
+    category === 'content' ||
+    category === 'course_review' ||
+    category === 'teacher' ||
+    category === 'grading' ||
+    category === 'student_report'
+  ) {
+    return 'content';
+  }
+  return 'other';
+}
+
+function mapComplaintThread(thread: ComplaintThread): Complaint {
+  const firstMessage = thread.messages[0];
+  const lastAdminMessage = [...thread.messages]
+    .reverse()
+    .find(message => message.authorRole === 'admin');
+
+  return {
+    id: thread.id,
+    senderName: thread.senderName,
+    senderRole: thread.senderRole === 'teacher' ? 'teacher'
+      : thread.senderRole === 'parent' ? 'parent'
+      : 'student',
+    title: thread.title,
+    type: mapComplaintType(thread.category),
+    content: firstMessage?.content ?? '',
+    createdAt: formatApiDateTime(thread.createdAt),
+    status: thread.status,
+    responseNote: lastAdminMessage?.content,
+    messageCount: thread.messages.length,
+    lastActivityAt: formatApiDateTime(thread.lastActivityAt),
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DỮ LIỆU KHỞI TẠO MOCK (Initial Mock Data — sẽ được thay dần bằng API)
 // ─────────────────────────────────────────────────────────────────────────────
+
+const MOCK_ORDERS: Order[] = [
+  { id: 'ORD-001', student: 'Nguyễn Văn An',   course: 'Toán Đại Số Nâng Cao',     amount: 499000, date: '18/05/2026', status: 'success' },
+  { id: 'ORD-002', student: 'Trần Thị Bích',   course: 'Vật Lý Khám Phá Điện Từ',  amount: 550000, date: '18/05/2026', status: 'success' },
+  { id: 'ORD-003', student: 'Lê Minh Cường',   course: 'Hóa Học Cơ Bản',           amount: 400000, date: '17/05/2026', status: 'pending' },
+  { id: 'ORD-004', student: 'Phạm Thị Dung',   course: 'Văn Học Dân Gian',          amount: 350000, date: '17/05/2026', status: 'success' },
+  { id: 'ORD-005', student: 'Hoàng Quốc Đạt',  course: 'Lịch Sử Kháng Chiến',      amount: 299000, date: '16/05/2026', status: 'failed'  },
+  { id: 'ORD-006', student: 'Vũ Ngọc Hà',      course: 'Toán Hình Học Không Gian',  amount: 450000, date: '16/05/2026', status: 'success' },
+  { id: 'ORD-007', student: 'Đỗ Thanh Hùng',   course: 'Địa Lý Khí Hậu Vùng Miền', amount: 250000, date: '15/05/2026', status: 'success' },
+];
 
 const INITIAL_USERS: UserAccount[] = [
   { id: 'USR-001', name: 'Nguyễn Văn An', email: 'an.nv@beeacademy.edu.vn', role: 'student', status: 'active', createdAt: '10/01/2026' },
@@ -102,6 +201,20 @@ const INITIAL_COURSES_APPROVAL: CourseApproval[] = [
   { id: 'CRS-APV-004', title: 'KHTN Lớp 6 - Lý & Hóa Căn Bản', teacherName: 'Thầy Trần Hữu Nam', subject: 'KHTN', grade: 'Lớp 6', price: 299000, submittedAt: '12/05/2026', status: 'revision_required', reason: 'Thiếu file tài liệu bài tập chương 3 và âm thanh video bài 2 bị rè.' },
 ];
 
+const INITIAL_PAYOUTS: TeacherPayout[] = [
+  { id: 'PAY-001', teacherName: 'Thầy Trần Hữu Nam', bankName: 'Vietcombank', bankAccount: '1023456789', bankAccountHolder: 'TRAN HUU NAM', totalRevenue: 25000000, platformFee: 5000000, teacherShare: 20000000, status: 'pending' },
+  { id: 'PAY-002', teacherName: 'Cô Nguyễn Thị Hoa', bankName: 'Techcombank', bankAccount: '1903456789012', bankAccountHolder: 'NGUYEN THI HOA', totalRevenue: 18000000, platformFee: 3600000, teacherShare: 14400000, status: 'overdue', overdueDays: 3 },
+  { id: 'PAY-003', teacherName: 'Thầy Mike Robinson', bankName: 'BIDV', bankAccount: '2151000123456', bankAccountHolder: 'MIKE ROBINSON', totalRevenue: 15000000, platformFee: 3000000, teacherShare: 12000000, status: 'paid', paymentDate: '10/05/2026', txnHash: 'FT261309852230', notes: 'Đã thanh toán lương kỳ 1 tháng 5/2026.' },
+  { id: 'PAY-004', teacherName: 'Cô Lê Thị Kim Anh', bankName: 'Agribank', bankAccount: '3100205123456', bankAccountHolder: 'LE THI KIM ANH', totalRevenue: 8000000, platformFee: 1600000, teacherShare: 6400000, status: 'pending' },
+  { id: 'PAY-005', teacherName: 'Thầy Phạm Thanh Sơn', bankName: 'MB Bank', bankAccount: '0990123456789', bankAccountHolder: 'PHAM THANH SON', totalRevenue: 12000000, platformFee: 2400000, teacherShare: 9600000, status: 'overdue', overdueDays: 5 },
+];
+
+const INITIAL_COMPLAINTS: Complaint[] = [
+  { id: 'CMP-001', senderName: 'Nguyễn Văn An', senderRole: 'student', title: 'Không mở được Quiz chương 4', type: 'system', content: 'Em đã hoàn thành 100% bài giảng của chương 3 và 4 nhưng Quiz chương 4 vẫn báo là bị khóa, nhờ Admin mở giúp.', createdAt: '20/05/2026', status: 'pending' },
+  { id: 'CMP-002', senderName: 'Chị Lê Thị Mai (PH)', senderRole: 'parent', title: 'Lỗi trừ tiền VNPay nhưng chưa kích hoạt khóa học', type: 'payment', content: 'Tôi đã đóng tiền khóa Toán lớp 9 cho con Lê Minh Cường qua VNPay lúc 9h sáng nay, tài khoản đã bị trừ 599.000đ nhưng tài khoản của cháu vẫn chưa mở được bài học.', createdAt: '20/05/2026', status: 'pending' },
+  { id: 'CMP-003', senderName: 'Trần Thị Bích', senderRole: 'student', title: 'Đánh giá sai kết quả bài tập tự luận', type: 'content', content: 'Bài tập làm văn chương 2 em viết rất kỹ nhưng giáo viên chỉ chấm 5 điểm và không có lời nhận xét sửa bài nào cả.', createdAt: '15/05/2026', status: 'resolved', responseNote: 'Admin đã liên hệ giáo viên để chấm lại bài viết và yêu cầu giáo viên ghi lời nhận xét chi tiết. Đã nâng điểm lên 8.5.' },
+];
+
 const INITIAL_ANNOUNCEMENTS: SystemAnnouncement[] = [
   { id: 'ANN-001', title: 'Bảo trì hệ thống định kỳ tháng 5', content: 'Hệ thống sẽ tiến hành bảo trì từ 2:00 sáng đến 4:00 sáng ngày 25/05/2026. Một số tính năng xem bài giảng và thanh toán sẽ tạm ngưng hoạt động trong thời gian này.', target: 'all', priority: 'high', sentAt: '20/05/2026 15:30' },
   { id: 'ANN-002', title: 'Cập nhật chính sách thưởng giáo viên xuất sắc', content: 'Kể từ ngày 01/06/2026, Bee Academy áp dụng mức thưởng thêm 5% doanh thu khóa học cho các khóa học đạt mức đánh giá trung bình từ 4.8 sao trở lên và có trên 100 học sinh mới đăng ký trong tháng.', target: 'teachers', priority: 'normal', sentAt: '18/05/2026 09:00' },
@@ -115,18 +228,22 @@ export default function DashboardAdmin() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const logout = useAuthStore(state => state.logout);
 
   // Lấy tab hoạt động từ URL query (?tab=...), mặc định là 'overview'
-  const activeTab = searchParams.get('tab') || 'overview';
+  const activeTab = location.pathname === '/admin/complaints'
+    ? 'complaints'
+    : searchParams.get('tab') || 'overview';
 
   // State quản lý dữ liệu động của toàn trang
   const [users, setUsers] = useState<UserAccount[]>(INITIAL_USERS);
   const [coursesApproval, setCoursesApproval] = useState<CourseApproval[]>(INITIAL_COURSES_APPROVAL);
+  const [payouts, setPayouts] = useState<TeacherPayout[]>(INITIAL_PAYOUTS);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [loadingComplaints, setLoadingComplaints] = useState(false);
+  const [updatingComplaint, setUpdatingComplaint] = useState(false);
   const [announcements, setAnnouncements] = useState<SystemAnnouncement[]>(INITIAL_ANNOUNCEMENTS);
-
-  // Số khiếu nại đang chờ xử lý — cho badge sidebar + chuông header (API thật)
-  const [complaintPendingCount, setComplaintPendingCount] = useState(0);
 
   // State cấu hình hệ thống
   const [platformFeePercent, setPlatformFeePercent] = useState(20);
@@ -141,6 +258,14 @@ export default function DashboardAdmin() {
   });
   const [courseReason, setCourseReason] = useState('');
 
+  // Modal Đối soát chuyển khoản
+  const [payoutModal, setPayoutModal] = useState<{ isOpen: boolean; payout: TeacherPayout | null }>({ isOpen: false, payout: null });
+  const [payoutForm, setPayoutForm] = useState({ txnHash: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
+
+  // Modal Xử lý khiếu nại
+  const [complaintModal, setComplaintModal] = useState<{ isOpen: boolean; complaint: Complaint | null }>({ isOpen: false, complaint: null });
+  const [complaintReply, setComplaintReply] = useState('');
+
   // Biểu mẫu gửi thông báo mới
   const [announcementForm, setAnnouncementForm] = useState({
     title: '', content: '', target: 'all' as SystemAnnouncement['target'], priority: 'normal' as SystemAnnouncement['priority']
@@ -150,16 +275,17 @@ export default function DashboardAdmin() {
   const [searchUser, setSearchUser] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterUserRole, setFilterUserRole] = useState<string>('all');
+  const [searchPayout, setSearchPayout] = useState('');
+  const [filterPayoutStatus, setFilterPayoutStatus] = useState<string>('all');
   const [filterCourseStatus, setFilterCourseStatus] = useState<string>('all');
+  const [filterComplaintStatus, setFilterComplaintStatus] = useState<string>('all');
 
   // ── STATE & CALLBACKS API THẬT (phải đặt sau filter state) ───────
   const [apiUsers,       setApiUsers]       = useState<AdminUser[]>([]);
   const [loadingUsers,   setLoadingUsers]   = useState(false);
   const [userStats,      setUserStats]      = useState<UserStats | null>(null);
   const [pendingCourses, setPendingCourses] = useState<PendingCourseSummary[]>([]);
-  const [pendingTotal,   setPendingTotal]   = useState(0);
   const [loadingPending, setLoadingPending] = useState(false);
-  const [overview,       setOverview]       = useState<AdminOverview | null>(null);
   const [userPage,       setUserPage]       = useState(0);
   const [userTotalPages, setUserTotalPages] = useState(0);
 
@@ -190,29 +316,69 @@ export default function DashboardAdmin() {
     try {
       const res = await apiClient.get<ApiResponse<PageResponse<PendingCourseSummary>>>(
         '/api/admin/courses/pending', { params: { page: 0, size: 5, sort: 'updatedAt,asc' } });
-      const data = unwrap(res.data);
-      setPendingCourses(data.items);
-      setPendingTotal(data.totalItems);
+      setPendingCourses(unwrap(res.data).items);
     } catch {}
     finally { setLoadingPending(false); }
   }, []);
 
-  const loadOverview = useCallback(async () => {
-    try { setOverview(await getAdminOverview()); } catch {}
+  const loadComplaints = useCallback(async () => {
+    setLoadingComplaints(true);
+    try {
+      const data = await listAdminComplaints();
+      setComplaints(data.map(mapComplaintThread));
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Khong tai duoc hop thu khieu nai');
+    } finally {
+      setLoadingComplaints(false);
+    }
   }, []);
 
-  const loadComplaintBadge = useCallback(async () => {
-    try { setComplaintPendingCount((await getAdminComplaintStats()).pending); } catch {}
-  }, []);
-
-  useEffect(() => {
-    Promise.all([loadUserStats(), loadPendingCourses(), loadOverview(), loadComplaintBadge()]);
-  }, [loadUserStats, loadPendingCourses, loadOverview, loadComplaintBadge]);
+  useEffect(() => { Promise.all([loadUserStats(), loadPendingCourses(), loadComplaints()]); }, [loadUserStats, loadPendingCourses, loadComplaints]);
   useEffect(() => { if (activeTab === 'users') loadUsers(0); }, [activeTab, loadUsers]);
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchUser), 300);
     return () => clearTimeout(t);
   }, [searchUser]);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // TÍNH TOÁN CÁC THÔNG SỐ TÀI CHÍNH DỰA TRÊN STATE ĐỘNG (UC34 & UC37)
+  // ───────────────────────────────────────────────────────────────────────────
+  const financialStats = useMemo(() => {
+    const totalGMV = payouts.reduce((sum, p) => sum + p.totalRevenue, 0);
+    const totalPlatformFee = payouts.reduce((sum, p) => sum + p.platformFee, 0);
+    
+    // Tổng số tiền giáo viên đã thanh toán
+    const totalPaidToTeachers = payouts
+      .filter(p => p.status === 'paid')
+      .reduce((sum, p) => sum + p.teacherShare, 0);
+
+    // Tổng số tiền giáo viên chờ thanh toán
+    const totalUnpaidTeacherShare = payouts
+      .filter(p => p.status !== 'paid')
+      .reduce((sum, p) => sum + p.teacherShare, 0);
+
+    // Tổng tiền công ty đang giữ = Toàn bộ platform_fee thu được + Số tiền giáo viên chưa chuyển khoản
+    const totalFundsHeld = totalPlatformFee + totalUnpaidTeacherShare;
+    
+    // Cảnh báo số lượng giáo viên quá hạn thanh toán
+    const overdueCount = payouts.filter(p => p.status === 'overdue').length;
+
+    return {
+      totalGMV,
+      totalPlatformFee,
+      totalPaidToTeachers,
+      totalFundsHeld,
+      totalPendingPayout: totalUnpaidTeacherShare,
+      overdueCount
+    };
+  }, [payouts]);
+
+  // Tổng số học viên (mock dynamic)
+  const totalStudentsCount = useMemo(() => {
+    const studentsInCourses = MOCK_COURSES.reduce((sum, c) => sum + c.students, 0);
+    const registeredUsersCount = users.filter(u => u.role === 'student').length;
+    return studentsInCourses + registeredUsersCount;
+  }, [users]);
 
   // Đăng xuất
   function handleLogout() {
@@ -223,7 +389,11 @@ export default function DashboardAdmin() {
 
   // Chuyển Tab qua URL search param
   function changeTab(tabId: string) {
-    setSearchParams({ tab: tabId });
+    if (location.pathname === '/admin') {
+      setSearchParams({ tab: tabId });
+    } else {
+      navigate(`/admin?tab=${encodeURIComponent(tabId)}`);
+    }
     setIsSidebarOpen(false);
   }
 
@@ -299,6 +469,121 @@ export default function DashboardAdmin() {
       return c;
     }));
     setCourseActionModal({ isOpen: false, course: null, action: null });
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // WORKFLOW 3: ĐỐI SOÁT & THANH TOÁN (UC39, UC40)
+  // ───────────────────────────────────────────────────────────────────────────
+  const filteredPayouts = useMemo(() => {
+    return payouts.filter(p => {
+      const matchSearch = p.teacherName.toLowerCase().includes(searchPayout.toLowerCase());
+      const matchStatus = filterPayoutStatus === 'all' || p.status === filterPayoutStatus;
+      return matchSearch && matchStatus;
+    });
+  }, [payouts, searchPayout, filterPayoutStatus]);
+
+  // UC39: Xuất báo cáo thanh toán doanh thu đến GV dưới dạng CSV (Excel-compatible)
+  function handleExportCSV() {
+    const headers = ['Mã thanh toán', 'Tên giáo viên', 'Ngân hàng', 'Số tài khoản', 'Chủ tài khoản', 'Tổng doanh thu (đ)', 'Phí nền tảng (đ)', 'Thực nhận (đ)', 'Trạng thái'];
+    const rows = payouts.map(p => [
+      p.id,
+      p.teacherName,
+      p.bankName,
+      `'${p.bankAccount}`, // Tránh Excel tự động convert thành số mũ khoa học
+      p.bankAccountHolder,
+      p.totalRevenue,
+      p.platformFee,
+      p.teacherShare,
+      p.status === 'paid' ? 'Đã thanh toán' : p.status === 'overdue' ? 'Trễ hạn' : 'Chờ thanh toán'
+    ]);
+    
+    // Định dạng CSV hỗ trợ tiếng Việt có dấu trong Excel (dùng UTF-8 BOM \uFEFF)
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
+      + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Bao_Cao_Thanh_Toan_GV_${new Date().getMonth()+1}_2026.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    notify.success('Xuất file báo cáo thanh toán thành công!');
+  }
+
+  function handleOpenPayoutModal(payout: TeacherPayout) {
+    setPayoutModal({ isOpen: true, payout });
+    setPayoutForm({ txnHash: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
+  }
+
+  // UC40: Xác nhận đã chuyển khoản ngân hàng thủ công cho giáo viên
+  function handleConfirmPayout(e: React.FormEvent) {
+    e.preventDefault();
+    if (!payoutForm.txnHash.trim()) {
+      notify.error('Vui lòng nhập Mã giao dịch ngân hàng!');
+      return;
+    }
+    const payout = payoutModal.payout;
+    if (!payout) return;
+
+    setPayouts(prev => prev.map(p => {
+      if (p.id === payout.id) {
+        return {
+          ...p,
+          status: 'paid' as const,
+          txnHash: payoutForm.txnHash,
+          notes: payoutForm.notes,
+          paymentDate: payoutForm.paymentDate
+        };
+      }
+      return p;
+    }));
+
+    notify.success(`Đã xác nhận thanh toán thành công ${payout.teacherShare.toLocaleString('vi-VN')}đ cho ${payout.teacherName}!`);
+    setPayoutModal({ isOpen: false, payout: null });
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // WORKFLOW 4: XỬ LÝ KHIẾU NẠI (UC38)
+  // ───────────────────────────────────────────────────────────────────────────
+  const filteredComplaints = useMemo(() => {
+    return complaints.filter(c => filterComplaintStatus === 'all' || c.status === filterComplaintStatus);
+  }, [complaints, filterComplaintStatus]);
+
+  async function handleResolveComplaint(status: 'resolved' | 'rejected') {
+    if (!complaintReply.trim()) {
+      notify.error('Vui lòng nhập nội dung xử lý/phản hồi!');
+      return;
+    }
+    const complaint = complaintModal.complaint;
+    if (!complaint) return;
+
+    setUpdatingComplaint(true);
+    try {
+      const updated = await updateAdminComplaintStatus(complaint.id, status, complaintReply.trim());
+      const mapped = mapComplaintThread(updated);
+      setComplaints(prev => prev.map(c => c.id === mapped.id ? mapped : c));
+      notify.success(status === 'resolved' ? 'Da giai quyet khieu nai thanh cong!' : 'Da bac bo khieu nai!');
+      setComplaintModal({ isOpen: false, complaint: null });
+      setComplaintReply('');
+      return;
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Khong the cap nhat khieu nai');
+      return;
+    } finally {
+      setUpdatingComplaint(false);
+    }
+
+    setComplaints(prev => prev.map(c => {
+      if (c.id === complaint.id) {
+        return { ...c, status, responseNote: complaintReply };
+      }
+      return c;
+    }));
+
+    notify.success(status === 'resolved' ? 'Đã giải quyết khiếu nại thành công!' : 'Đã bác bỏ khiếu nại!');
+    setComplaintModal({ isOpen: false, complaint: null });
+    setComplaintReply('');
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -392,19 +677,19 @@ export default function DashboardAdmin() {
                 <item.icon className="w-5 h-5 flex-shrink-0" />
                 {item.label}
                 {/* Phản hồi trạng thái cảnh báo trên menu */}
-                {item.tabId === 'payouts' && (overview?.overdueTeacherCount ?? 0) > 0 && (
+                {item.tabId === 'payouts' && financialStats.overdueCount > 0 && (
                   <span className="ml-auto w-5 h-5 rounded-full bg-red-500 text-white font-mono text-[10px] flex items-center justify-center animate-pulse">
-                    {overview?.overdueTeacherCount}
+                    {financialStats.overdueCount}
                   </span>
                 )}
-                {item.tabId === 'courses' && pendingTotal > 0 && (
+                {item.tabId === 'courses' && coursesApproval.filter(c => c.status === 'pending').length > 0 && (
                   <span className="ml-auto w-5 h-5 rounded-full bg-secondary-container text-on-secondary-container font-mono text-[10px] flex items-center justify-center font-bold">
-                    {pendingTotal}
+                    {coursesApproval.filter(c => c.status === 'pending').length}
                   </span>
                 )}
-                {item.tabId === 'complaints' && complaintPendingCount > 0 && (
+                {item.tabId === 'complaints' && complaints.filter(c => c.status === 'pending').length > 0 && (
                   <span className="ml-auto w-5 h-5 rounded-full bg-amber-500 text-white font-mono text-[10px] flex items-center justify-center font-bold">
-                    {complaintPendingCount}
+                    {complaints.filter(c => c.status === 'pending').length}
                   </span>
                 )}
               </button>
@@ -467,9 +752,9 @@ export default function DashboardAdmin() {
               className="relative p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container rounded-xl transition-all"
             >
               <Bell className="w-5 h-5" />
-              {complaintPendingCount > 0 && (
+              {complaints.filter(c => c.status === 'pending').length > 0 && (
                 <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center animate-bounce">
-                  {complaintPendingCount}
+                  {complaints.filter(c => c.status === 'pending').length}
                 </span>
               )}
             </button>
@@ -529,7 +814,7 @@ export default function DashboardAdmin() {
                           <Wallet className="w-5 h-5" />
                         </div>
                       </div>
-                      <p className="text-2xl font-extrabold text-on-surface">{overview ? `${overview.totalFundsHeld.toLocaleString('vi-VN')}đ` : '…'}</p>
+                      <p className="text-2xl font-extrabold text-on-surface">{financialStats.totalFundsHeld.toLocaleString('vi-VN')}đ</p>
                       <p className="text-xs text-green-600 mt-2 flex items-center gap-1 font-semibold">
                         <ShieldAlert className="w-3.5 h-3.5" />
                         Gồm quỹ công ty + tiền chờ GV
@@ -544,29 +829,29 @@ export default function DashboardAdmin() {
                           <Calculator className="w-5 h-5" />
                         </div>
                       </div>
-                      <p className="text-2xl font-extrabold text-on-surface">{overview ? `${overview.totalPendingPayout.toLocaleString('vi-VN')}đ` : '…'}</p>
+                      <p className="text-2xl font-extrabold text-on-surface">{financialStats.totalPendingPayout.toLocaleString('vi-VN')}đ</p>
                       <p className="text-xs text-on-surface-variant mt-2 font-medium">
-                        Phân bổ 70% doanh thu cho giáo viên
+                        Phân bổ 80% doanh thu thực tế
                       </p>
                     </div>
 
                     {/* Thẻ 3: Cảnh báo giáo viên trễ hạn chuyển lương (UC34) */}
                     <div className={`border rounded-2xl p-5 shadow-sm transition-all relative ${
-                      (overview?.overdueTeacherCount ?? 0) > 0
+                      financialStats.overdueCount > 0
                         ? 'bg-red-50 border-red-200 hover:shadow-red-100/50'
                         : 'bg-surface-container-lowest border-outline-variant/40 hover:shadow-md'
                     }`}>
                       <div className="flex justify-between items-start mb-3">
                         <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Cảnh báo trễ hạn</span>
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          (overview?.overdueTeacherCount ?? 0) > 0 ? 'bg-red-500 text-white animate-pulse' : 'bg-amber-500/10 text-amber-600'
+                          financialStats.overdueCount > 0 ? 'bg-red-500 text-white animate-pulse' : 'bg-amber-500/10 text-amber-600'
                         }`}>
                           <AlertTriangle className="w-5 h-5" />
                         </div>
                       </div>
-                      <p className="text-2xl font-extrabold text-on-surface">{overview?.overdueTeacherCount ?? 0} giáo viên</p>
-                      <p className={`text-xs mt-2 font-bold ${(overview?.overdueTeacherCount ?? 0) > 0 ? 'text-red-600' : 'text-on-surface-variant'}`}>
-                        {(overview?.overdueTeacherCount ?? 0) > 0 ? 'Cần chuyển khoản và đối soát gấp!' : 'Đã thanh toán đúng kỳ hạn'}
+                      <p className="text-2xl font-extrabold text-on-surface">{financialStats.overdueCount} giáo viên</p>
+                      <p className={`text-xs mt-2 font-bold ${financialStats.overdueCount > 0 ? 'text-red-600' : 'text-on-surface-variant'}`}>
+                        {financialStats.overdueCount > 0 ? 'Cần chuyển khoản và đối soát gấp!' : 'Đã thanh toán đúng kỳ hạn'}
                       </p>
                     </div>
 
@@ -610,39 +895,30 @@ export default function DashboardAdmin() {
                             </tr>
                           </thead>
                           <tbody>
-                            {(overview?.recentOrders ?? []).map((order, idx) => (
+                            {MOCK_ORDERS.map((order, idx) => (
                               <tr key={order.id} className={`border-b border-outline-variant/10 hover:bg-surface-container/30 transition-colors ${idx % 2 !== 0 ? 'bg-surface-container-low/20' : ''}`}>
                                 <td className="px-6 py-3.5">
-                                  <p className="font-bold text-on-surface">{order.studentName}</p>
-                                  <p className="text-[10px] text-on-surface-variant font-mono">{order.paymentRef}</p>
+                                  <p className="font-bold text-on-surface">{order.student}</p>
+                                  <p className="text-[10px] text-on-surface-variant font-mono">{order.id}</p>
                                 </td>
                                 <td className="px-4 py-3.5 text-on-surface-variant hidden md:table-cell">
-                                  <span className="line-clamp-1 max-w-[200px]">{order.courseTitles}</span>
+                                  <span className="line-clamp-1 max-w-[200px]">{order.course}</span>
                                 </td>
                                 <td className="px-4 py-3.5 font-extrabold text-on-surface">
                                   {order.amount.toLocaleString('vi-VN')}đ
                                 </td>
                                 <td className="px-4 py-3.5">
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">
-                                    Thành công
+                                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                    order.status === 'success' ? 'bg-green-100 text-green-700' :
+                                    order.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                                  }`}>
+                                    {order.status === 'success' && 'Thành công'}
+                                    {order.status === 'pending' && 'Chờ xử lý'}
+                                    {order.status === 'failed' && 'Lỗi'}
                                   </span>
                                 </td>
                               </tr>
                             ))}
-                            {overview && overview.recentOrders.length === 0 && (
-                              <tr>
-                                <td colSpan={4} className="px-6 py-10 text-center text-sm text-on-surface-variant">
-                                  Chưa có đơn hàng nào được thanh toán.
-                                </td>
-                              </tr>
-                            )}
-                            {!overview && (
-                              <tr>
-                                <td colSpan={4} className="px-6 py-10 text-center text-sm text-on-surface-variant">
-                                  Đang tải dữ liệu…
-                                </td>
-                              </tr>
-                            )}
                           </tbody>
                         </table>
                       </div>
@@ -657,14 +933,14 @@ export default function DashboardAdmin() {
                         </span>
                       </div>
                       <div className="space-y-4">
-                        {(overview?.topCourses ?? []).map((course, idx, arr) => {
-                          const maxStudents = arr[0].enrollmentCount || 1;
-                          const percent = (course.enrollmentCount / maxStudents) * 100;
+                        {[...MOCK_COURSES].sort((a, b) => b.students - a.students).slice(0, 5).map((course, idx, arr) => {
+                          const maxStudents = arr[0].students;
+                          const percent = (course.students / maxStudents) * 100;
                           return (
                             <div key={course.id} className="space-y-1">
                               <div className="flex justify-between items-center text-xs">
                                 <span className="font-bold text-on-surface line-clamp-1 flex-1 pr-3">{course.title}</span>
-                                <span className="font-extrabold text-on-surface-variant">{course.enrollmentCount.toLocaleString('vi-VN')} em</span>
+                                <span className="font-extrabold text-on-surface-variant">{course.students.toLocaleString('vi-VN')} em</span>
                               </div>
                               <div className="h-2 bg-surface-container-high rounded-full overflow-hidden">
                                 <motion.div
@@ -675,18 +951,12 @@ export default function DashboardAdmin() {
                                 />
                               </div>
                               <div className="flex justify-between items-center text-[10px] text-on-surface-variant">
-                                <span>Giáo viên: {course.teacherName}</span>
-                                {course.categoryName && <span className="font-bold text-primary">{course.categoryName}</span>}
+                                <span>Giáo viên: {course.instructor}</span>
+                                <span className="font-bold text-primary">{course.subject} · {course.grade}</span>
                               </div>
                             </div>
                           );
                         })}
-                        {overview && overview.topCourses.length === 0 && (
-                          <p className="text-center text-sm text-on-surface-variant py-8">Chưa có khóa học nào được xuất bản.</p>
-                        )}
-                        {!overview && (
-                          <p className="text-center text-sm text-on-surface-variant py-8">Đang tải dữ liệu…</p>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -705,7 +975,7 @@ export default function DashboardAdmin() {
                         <BookOpen className="w-7 h-7 text-primary mb-2" />
                         <p className="font-bold text-sm">Duyệt khóa học</p>
                         <p className="text-xs text-on-surface-variant mt-1">
-                          {pendingTotal} bài chờ duyệt
+                          {coursesApproval.filter(c => c.status === 'pending').length} bài chờ duyệt
                         </p>
                       </button>
                       
@@ -934,7 +1204,7 @@ export default function DashboardAdmin() {
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="font-bold text-on-surface flex items-center gap-2">
                         <Clock className="w-4 h-4 text-amber-500" />
-                        Đang chờ duyệt ({pendingTotal})
+                        Đang chờ duyệt ({pendingCourses.length > 0 ? `${pendingCourses.length}+` : '0'})
                       </h3>
                       <Link to="/admin/approvals" className="text-xs font-bold text-primary hover:underline">
                         Xem tất cả →
@@ -968,14 +1238,239 @@ export default function DashboardAdmin() {
               {/* ─────────────────────────────────────────────────────────────
                   TAB 4: PAYOUTS & SALARY (KẾ TOÁN ĐỐI SOÁT - UC37, UC39, UC40)
                   ───────────────────────────────────────────────────────────── */}
-              {activeTab === 'payouts' && <PayoutsPanel />}
+              {activeTab === 'payouts' && (
+                <div className="space-y-6">
+                  {/* Bảng báo cáo doanh thu tổng quan */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-5 shadow-sm">
+                      <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">Tổng doanh thu nền tảng (GMV)</p>
+                      <h3 className="text-2xl font-black text-on-surface">{financialStats.totalGMV.toLocaleString('vi-VN')}đ</h3>
+                      <p className="text-[10px] text-green-600 mt-1 font-semibold flex items-center gap-0.5">
+                        <TrendingUp className="w-3 h-3" />
+                        Doanh thu từ VNPay & MoMo
+                      </p>
+                    </div>
 
+                    <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-5 shadow-sm">
+                      <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">Phí vận hành giữ lại (Platform Fee {platformFeePercent}%)</p>
+                      <h3 className="text-2xl font-black text-primary">{financialStats.totalPlatformFee.toLocaleString('vi-VN')}đ</h3>
+                      <p className="text-[10px] text-on-surface-variant mt-1">Doanh thu ròng của công ty</p>
+                    </div>
+
+                    <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-5 shadow-sm">
+                      <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">Tổng chi hoa hồng giáo viên (80%)</p>
+                      <h3 className="text-2xl font-black text-green-600">{(financialStats.totalGMV - financialStats.totalPlatformFee).toLocaleString('vi-VN')}đ</h3>
+                      <p className="text-[10px] text-on-surface-variant mt-1">
+                        Đã chuyển: {financialStats.totalPaidToTeachers.toLocaleString('vi-VN')}đ
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Quản lý danh sách đối soát chi tiết */}
+                  <div className="bg-surface-container-lowest border border-outline-variant/40 rounded-2xl p-6 shadow-sm space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                      <div>
+                        <h2 className="text-base font-bold">Danh sách thanh toán lương cho đối tác Giáo viên</h2>
+                        <p className="text-xs text-on-surface-variant mt-0.5">Xuất báo cáo hàng tháng (Excel) và bấm xác nhận chuyển khoản ngân hàng thủ công cho giáo viên.</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleExportCSV}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 rounded-xl text-xs font-bold transition-all"
+                        >
+                          <Download className="w-4 h-4" />
+                          Xuất báo cáo Excel
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Bộ lọc thanh toán */}
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
+                        <input
+                          type="text"
+                          placeholder="Tìm theo tên giáo viên..."
+                          value={searchPayout}
+                          onChange={(e) => setSearchPayout(e.target.value)}
+                          className="w-full pl-9 pr-4 py-2 bg-surface-container-low border border-outline-variant/30 rounded-xl text-sm focus:outline-none focus:border-primary"
+                        />
+                      </div>
+                      <div className="relative">
+                        <select
+                          value={filterPayoutStatus}
+                          onChange={(e) => setFilterPayoutStatus(e.target.value)}
+                          className="pl-3 pr-8 py-2 bg-surface-container-low border border-outline-variant/30 rounded-xl text-sm font-semibold focus:outline-none appearance-none cursor-pointer"
+                        >
+                          <option value="all">Tất cả trạng thái</option>
+                          <option value="paid">Đã thanh toán</option>
+                          <option value="pending">Chờ thanh toán</option>
+                          <option value="overdue">Trễ hạn chuyển</option>
+                        </select>
+                        <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-on-surface-variant pointer-events-none" />
+                      </div>
+                    </div>
+
+                    {/* Bảng lương chi tiết */}
+                    <div className="overflow-x-auto border border-outline-variant/20 rounded-xl">
+                      <table className="w-full text-sm text-left">
+                        <thead>
+                          <tr className="border-b border-outline-variant/20 bg-surface-container-low/50">
+                            <th className="px-6 py-3 font-bold text-on-surface-variant text-xs uppercase">Giáo viên / Số tài khoản</th>
+                            <th className="px-4 py-3 font-bold text-on-surface-variant text-xs uppercase">Doanh thu kỳ này</th>
+                            <th className="px-4 py-3 font-bold text-on-surface-variant text-xs uppercase">Lương (80%)</th>
+                            <th className="px-4 py-3 font-bold text-on-surface-variant text-xs uppercase">Trạng thái</th>
+                            <th className="px-6 py-3 font-bold text-on-surface-variant text-xs uppercase text-right">Hành động</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredPayouts.map(p => (
+                            <tr key={p.id} className="border-b border-outline-variant/10 hover:bg-surface-container/20 transition-colors">
+                              <td className="px-6 py-3.5">
+                                <p className="font-bold text-on-surface">{p.teacherName}</p>
+                                <p className="text-xs text-on-surface-variant font-medium">
+                                  {p.bankName} · <span className="font-mono text-on-surface font-semibold">{p.bankAccount}</span> ({p.bankAccountHolder})
+                                </p>
+                              </td>
+                              <td className="px-4 py-3.5 text-on-surface-variant font-medium">{p.totalRevenue.toLocaleString('vi-VN')}đ</td>
+                              <td className="px-4 py-3.5 font-extrabold text-on-surface">{p.teacherShare.toLocaleString('vi-VN')}đ</td>
+                              <td className="px-4 py-3.5">
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                  p.status === 'paid' ? 'bg-green-100 text-green-700' :
+                                  p.status === 'overdue' ? 'bg-red-100 text-red-700 animate-pulse' : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {p.status === 'paid' && 'Đã thanh toán'}
+                                  {p.status === 'overdue' && `Trễ hạn ${p.overdueDays} ngày`}
+                                  {p.status === 'pending' && 'Chờ thanh toán'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-3.5 text-right">
+                                {p.status !== 'paid' ? (
+                                  <button
+                                    onClick={() => handleOpenPayoutModal(p)}
+                                    className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
+                                  >
+                                    Xác nhận chuyển
+                                  </button>
+                                ) : (
+                                  <div className="text-xs text-on-surface-variant font-semibold">
+                                    <p className="text-green-600 font-bold">Ngày chuyển: {p.paymentDate}</p>
+                                    <p className="font-mono text-[10px] mt-0.5">Mã: {p.txnHash}</p>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* ─────────────────────────────────────────────────────────────
                   TAB 5: COMPLAINTS (HỘP THƯ KHIẾU NẠI - UC38)
                   ───────────────────────────────────────────────────────────── */}
-              {activeTab === 'complaints' && <ComplaintsInbox onStatsChange={loadComplaintBadge} />}
+              {activeTab === 'complaints' && (
+                <div className="bg-surface-container-lowest border border-outline-variant/40 rounded-2xl p-6 shadow-sm space-y-6">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h2 className="text-lg font-bold">Hộp thư khiếu nại từ người dùng</h2>
+                      <p className="text-xs text-on-surface-variant mt-0.5">Tiếp nhận khiếu nại chất lượng nội dung hoặc các lỗi cổng thanh toán, xem xét và phản hồi.</p>
+                    </div>
+                    <div className="relative">
+                      <select
+                        value={filterComplaintStatus}
+                        onChange={(e) => setFilterComplaintStatus(e.target.value)}
+                        className="pl-3 pr-8 py-2 bg-surface-container border border-outline-variant/30 rounded-xl text-sm font-bold focus:outline-none appearance-none cursor-pointer"
+                      >
+                        <option value="all">Tất cả trạng thái</option>
+                        <option value="pending">Chờ xử lý</option>
+                        <option value="in_progress">Đang xử lý</option>
+                        <option value="resolved">Đã giải quyết</option>
+                        <option value="rejected">Bị bác bỏ</option>
+                      </select>
+                      <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-on-surface-variant pointer-events-none" />
+                    </div>
+                  </div>
 
+                  {/* Bảng danh sách khiếu nại */}
+                  <div className="overflow-x-auto border border-outline-variant/20 rounded-xl">
+                    <table className="w-full text-sm text-left">
+                      <thead>
+                        <tr className="border-b border-outline-variant/20 bg-surface-container-low/50">
+                          <th className="px-6 py-3 font-bold text-on-surface-variant text-xs uppercase">Người gửi / Ngày gửi</th>
+                          <th className="px-4 py-3 font-bold text-on-surface-variant text-xs uppercase">Loại khiếu nại</th>
+                          <th className="px-4 py-3 font-bold text-on-surface-variant text-xs uppercase">Tiêu đề nội dung</th>
+                          <th className="px-4 py-3 font-bold text-on-surface-variant text-xs uppercase">Trạng thái</th>
+                          <th className="px-6 py-3 font-bold text-on-surface-variant text-xs uppercase text-right">Hành động</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loadingComplaints ? (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-10 text-center text-on-surface-variant">
+                              Dang tai hop thu khieu nai...
+                            </td>
+                          </tr>
+                        ) : filteredComplaints.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-10 text-center text-on-surface-variant">
+                              Không tìm thấy khiếu nại nào.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredComplaints.map(c => (
+                            <tr key={c.id} className="border-b border-outline-variant/10 hover:bg-surface-container/20 transition-colors">
+                              <td className="px-6 py-3.5">
+                                <p className="font-bold text-on-surface">{c.senderName}</p>
+                                <p className="text-xs text-on-surface-variant font-medium">
+                                  {c.senderRole === 'teacher' ? 'Giáo viên' : c.senderRole === 'parent' ? 'Phụ huynh' : 'Học sinh'} · {c.createdAt}
+                                </p>
+                              </td>
+                              <td className="px-4 py-3.5">
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${
+                                  c.type === 'payment' ? 'bg-green-50 text-green-700 border border-green-200' :
+                                  c.type === 'system' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                }`}>
+                                  {c.type === 'payment' && 'Thanh toán'}
+                                  {c.type === 'system' && 'Lỗi hệ thống'}
+                                  {c.type === 'content' && 'Chất lượng học'}
+                                  {c.type === 'other' && 'Khác'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3.5">
+                                <p className="font-bold text-on-surface line-clamp-1">{c.title}</p>
+                                <p className="text-xs text-on-surface-variant line-clamp-1 mt-0.5">{c.content}</p>
+                              </td>
+                              <td className="px-4 py-3.5">
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                  c.status === 'pending' ? 'bg-amber-100 text-amber-700 animate-pulse' :
+                                  c.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
+                                  c.status === 'resolved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                }`}>
+                                  {c.status === 'pending' && 'Chờ giải quyết'}
+                                  {c.status === 'in_progress' && 'Đang xử lý'}
+                                  {c.status === 'resolved' && 'Đã xử lý'}
+                                  {c.status === 'rejected' && 'Đã bác bỏ'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-3.5 text-right">
+                                <button
+                                  onClick={() => { setComplaintModal({ isOpen: true, complaint: c }); setComplaintReply(c.responseNote || ''); }}
+                                  className="px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-xl text-xs font-bold transition-colors"
+                                >
+                                  {c.status === 'pending' || c.status === 'in_progress' ? 'Xử lý ngay' : 'Xem chi tiết'}
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* ─────────────────────────────────────────────────────────────
                   TAB 6: ANNOUNCEMENTS (GỬI THÔNG BÁO HỆ THỐNG - UC41)
@@ -1219,6 +1714,195 @@ export default function DashboardAdmin() {
             </motion.div>
           </div>
         )}
+
+        {/* 3. MODAL XÁC NHẬN CHUYỂN KHOẢN GIÁO VIÊN (UC40) */}
+        {payoutModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setPayoutModal({ isOpen: false, payout: null })}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl w-full max-w-md p-6 shadow-2xl z-10 relative overflow-hidden"
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 bg-green-500/10 text-green-600 rounded-xl flex items-center justify-center">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-on-surface">Nhập hóa đơn chuyển khoản</h3>
+                  <p className="text-[11px] text-on-surface-variant font-medium">Lưu biên lai giao dịch thanh toán lương GV.</p>
+                </div>
+              </div>
+              
+              <div className="my-4 p-3 bg-surface-container-low rounded-2xl border border-outline-variant/15 space-y-1 text-xs">
+                <p className="font-semibold text-on-surface">Giáo viên: <span className="font-bold">{payoutModal.payout?.teacherName}</span></p>
+                <p className="font-semibold text-on-surface">Ngân hàng: <span className="font-bold">{payoutModal.payout?.bankName}</span></p>
+                <p className="font-semibold text-on-surface">Số tài khoản: <span className="font-mono font-bold text-primary">{payoutModal.payout?.bankAccount}</span></p>
+                <p className="font-semibold text-on-surface">Chủ tài khoản: <span className="font-bold">{payoutModal.payout?.bankAccountHolder}</span></p>
+                <p className="font-semibold text-on-surface">Số tiền cần chuyển: <span className="font-black text-green-600 text-sm">{payoutModal.payout?.teacherShare.toLocaleString('vi-VN')}đ</span></p>
+              </div>
+
+              <form onSubmit={handleConfirmPayout} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5" />
+                    Ngày chuyển khoản
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={payoutForm.paymentDate}
+                    onChange={(e) => setPayoutForm(p => ({ ...p, paymentDate: e.target.value }))}
+                    className="w-full px-3 py-2 bg-surface-container border border-outline-variant/30 rounded-xl text-sm focus:outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase flex items-center gap-1">
+                    <Hash className="w-3.5 h-3.5" />
+                    Mã giao dịch ngân hàng (Txn Hash / Ref No.)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ví dụ: FT2605987163"
+                    value={payoutForm.txnHash}
+                    onChange={(e) => setPayoutForm(p => ({ ...p, txnHash: e.target.value }))}
+                    className="w-full px-3 py-2 bg-surface-container border border-outline-variant/30 rounded-xl text-sm focus:outline-none focus:border-primary font-mono font-bold"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-on-surface-variant uppercase">Ghi chú đối soát</label>
+                  <textarea
+                    rows={2}
+                    placeholder="Ghi chú thêm nếu có..."
+                    value={payoutForm.notes}
+                    onChange={(e) => setPayoutForm(p => ({ ...p, notes: e.target.value }))}
+                    className="w-full px-3 py-2 bg-surface-container border border-outline-variant/30 rounded-xl text-sm focus:outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="submit"
+                    className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors"
+                  >
+                    Xác nhận đã chuyển
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPayoutModal({ isOpen: false, payout: null })}
+                    className="px-4 py-2 bg-surface-container-high hover:bg-surface-container-highest rounded-xl text-sm font-bold transition-colors"
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {/* 4. MODAL XỬ LÝ KHIẾU NẠI (UC38) */}
+        {complaintModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setComplaintModal({ isOpen: false, complaint: null })}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl w-full max-w-lg p-6 shadow-2xl z-10 relative overflow-hidden"
+            >
+              <div className="flex items-start justify-between border-b border-outline-variant/20 pb-3">
+                <div>
+                  <h3 className="font-extrabold text-base text-on-surface">Chi tiết đơn khiếu nại</h3>
+                  <p className="text-[10px] text-on-surface-variant font-medium">Mã số: {complaintModal.complaint?.id}</p>
+                </div>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${
+                  complaintModal.complaint?.type === 'payment' ? 'bg-green-50 text-green-700 border-green-200' :
+                  complaintModal.complaint?.type === 'system' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200'
+                }`}>
+                  {complaintModal.complaint?.type === 'payment' && 'Thanh toán'}
+                  {complaintModal.complaint?.type === 'system' && 'Lỗi hệ thống'}
+                  {complaintModal.complaint?.type === 'content' && 'Chất lượng học'}
+                  {complaintModal.complaint?.type === 'other' && 'Khác'}
+                </span>
+              </div>
+
+              <div className="my-4 space-y-3">
+                <div className="text-xs space-y-1 font-semibold">
+                  <p className="text-on-surface-variant">Người gửi: <span className="text-on-surface font-extrabold">{complaintModal.complaint?.senderName}</span> ({complaintModal.complaint?.senderRole === 'teacher' ? 'Giáo viên' : complaintModal.complaint?.senderRole === 'parent' ? 'Phụ huynh' : 'Học sinh'})</p>
+                  <p className="text-on-surface-variant">Ngày gửi: <span className="text-on-surface font-medium">{complaintModal.complaint?.createdAt}</span></p>
+                  <p className="text-on-surface-variant">Tiêu đề: <span className="text-on-surface font-extrabold text-sm">{complaintModal.complaint?.title}</span></p>
+                </div>
+
+                <div className="p-4 bg-surface-container rounded-2xl border border-outline-variant/10 text-xs text-on-surface-variant leading-relaxed">
+                  <p className="font-bold text-on-surface mb-1">Nội dung khiếu nại:</p>
+                  <p className="italic">{complaintModal.complaint?.content}</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-on-surface-variant uppercase">Nội dung phản hồi giải quyết</label>
+                  <textarea
+                    rows={3}
+                    required
+                    value={complaintReply}
+                    onChange={(e) => setComplaintReply(e.target.value)}
+                    disabled={complaintModal.complaint?.status === 'resolved' || complaintModal.complaint?.status === 'rejected'}
+                    placeholder="Nhập hướng xử lý, đính kèm kết quả hoặc cam kết bồi hoàn/sửa đổi nội dung học..."
+                    className="w-full px-3 py-2 bg-surface-container border border-outline-variant/30 rounded-xl text-sm focus:outline-none focus:border-primary disabled:opacity-75 disabled:cursor-not-allowed"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                {complaintModal.complaint?.status === 'pending' || complaintModal.complaint?.status === 'in_progress' ? (
+                  <>
+                    <button
+                      onClick={() => handleResolveComplaint('resolved')}
+                      disabled={updatingComplaint}
+                      className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Duyệt giải quyết
+                    </button>
+                    <button
+                      onClick={() => handleResolveComplaint('rejected')}
+                      disabled={updatingComplaint}
+                      className="py-2 px-4 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Bác bỏ
+                    </button>
+                  </>
+                ) : (
+                  <div className="w-full text-center text-xs font-bold text-green-600 bg-green-50 p-2.5 rounded-xl border border-green-200">
+                    Đơn khiếu nại đã được giải quyết hoặc bác bỏ.
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setComplaintModal({ isOpen: false, complaint: null })}
+                  className="px-4 py-2 bg-surface-container-high hover:bg-surface-container-highest rounded-xl text-sm font-bold transition-colors"
+                >
+                  Đóng
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
       </AnimatePresence>
     </div>
   );

@@ -80,6 +80,19 @@ function lessonToForm(l: TeacherLessonResponse): LessonFormData {
   };
 }
 
+function sortLessons(lessons: TeacherLessonResponse[]): TeacherLessonResponse[] {
+  return [...lessons].sort((a, b) => a.position - b.position);
+}
+
+function sortChapters(chapters: TeacherChapterResponse[]): TeacherChapterResponse[] {
+  return [...chapters]
+    .map(chapter => ({
+      ...chapter,
+      lessons: sortLessons(chapter.lessons),
+    }))
+    .sort((a, b) => a.position - b.position);
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  NAV
 // ═══════════════════════════════════════════════════════════════════
@@ -375,8 +388,9 @@ export default function TeacherContentPage() {
     setChapterEditing({ mode: 'closed' });
     svc.getCourseDetail(selectedCourseId)
       .then(detail => {
-        setChapters(detail.chapters);
-        const first = detail.chapters[0];
+        const sortedChapters = sortChapters(detail.chapters);
+        setChapters(sortedChapters);
+        const first = sortedChapters[0];
         setExpandedChapters(first ? new Set([first.id]) : new Set());
       })
       .catch(() => notify.error('Không thể tải nội dung khóa học'))
@@ -483,7 +497,7 @@ export default function TeacherContentPage() {
 
       // Bước 3: Refresh danh sách từ server (dù upload lỗi, lesson vẫn cần hiển thị)
       const detail = await svc.getCourseDetail(selectedCourseId);
-      setChapters(detail.chapters);
+      setChapters(sortChapters(detail.chapters));
 
       // Chỉ đóng form và hiển thị success khi KHÔNG có upload error
       if (!uploadError) {
@@ -511,9 +525,9 @@ export default function TeacherContentPage() {
     setDeleteConfirm(null);
     try {
       await svc.deleteLesson(selectedCourseId, chapterId, lessonId);
-      setChapters(prev => prev.map(ch =>
+      setChapters(prev => sortChapters(prev.map(ch =>
         ch.id !== chapterId ? ch : { ...ch, lessons: ch.lessons.filter(l => l.id !== lessonId) }
-      ));
+      )));
       // Đóng form nếu đang edit bài giảng bị xóa
       if (lessonEditing.mode === 'edit' && lessonEditing.lessonId === lessonId) {
         setLessonEditing({ mode: 'closed' });
@@ -551,14 +565,14 @@ export default function TeacherContentPage() {
 
       if (chapterEditing.mode === 'new') {
         const ch = await svc.addChapter(selectedCourseId, req);
-        setChapters(prev => [...prev, { ...ch, lessons: [] }]);
+        setChapters(prev => sortChapters([...prev, { ...ch, lessons: [] }]));
         setExpandedChapters(prev => new Set([...prev, ch.id]));
         notify.success('Đã thêm chương');
       } else {
         const ch = await svc.updateChapter(selectedCourseId, chapterEditing.chapterId, req);
-        setChapters(prev => prev.map(c =>
+        setChapters(prev => sortChapters(prev.map(c =>
           c.id === chapterEditing.chapterId ? { ...ch, lessons: c.lessons } : c
-        ));
+        )));
         notify.success('Đã cập nhật chương');
       }
       setChapterEditing({ mode: 'closed' });
@@ -579,7 +593,7 @@ export default function TeacherContentPage() {
     setDeleteConfirm(null);
     try {
       await svc.deleteChapter(selectedCourseId, chapterId);
-      setChapters(prev => prev.filter(c => c.id !== chapterId));
+      setChapters(prev => sortChapters(prev.filter(c => c.id !== chapterId)));
       setLessonEditing({ mode: 'closed' });
       notify.success('Đã xóa chương');
     } catch {

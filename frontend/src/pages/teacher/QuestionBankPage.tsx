@@ -165,6 +165,17 @@ function QuestionFormPanel({ open, editing, categories, courses, onClose, onSave
     setForm(f => ({ ...f, [key]: value }));
   }
 
+  function handleCourseChange(nextCourseId: string) {
+    const selectedCourse = courses.find(c => c.id === nextCourseId);
+    setForm(f => ({
+      ...f,
+      courseId: nextCourseId,
+      chapterId: '',
+      categoryId: selectedCourse?.categoryId ?? f.categoryId,
+      grade: selectedCourse?.grades?.[0] ? String(selectedCourse.grades[0]) : f.grade,
+    }));
+  }
+
   function handleTypeChange(type: 'multiple_choice' | 'true_false') {
     setForm(f => ({ ...f, type, choices: emptyChoices(type) }));
   }
@@ -237,6 +248,7 @@ function QuestionFormPanel({ open, editing, categories, courses, onClose, onSave
   }
 
   const isCategoryLocked = Boolean(form.courseId);
+  const isGradeLocked = Boolean(form.courseId);
 
   return (
     <>
@@ -281,7 +293,7 @@ function QuestionFormPanel({ open, editing, categories, courses, onClose, onSave
                   <div className="relative">
                     <select
                       value={form.courseId}
-                      onChange={e => { set('courseId', e.target.value); set('chapterId', ''); }}
+                      onChange={e => handleCourseChange(e.target.value)}
                       className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary"
                     >
                       <option value="">-- Không gắn --</option>
@@ -316,13 +328,20 @@ function QuestionFormPanel({ open, editing, categories, courses, onClose, onSave
                     <select
                       value={form.grade}
                       onChange={e => set('grade', e.target.value)}
-                      className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary"
+                      disabled={isGradeLocked}
+                      className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       <option value="">-- Chọn lớp --</option>
                       {[6, 7, 8, 9].map(g => <option key={g} value={g}>Lớp {g}</option>)}
                     </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+                    {isGradeLocked
+                      ? <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary/60" />
+                      : <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+                    }
                   </div>
+                  {isGradeLocked && (
+                    <p className="text-xs text-primary/70 mt-1">Lớp được lấy từ khóa học đã chọn</p>
+                  )}
                 </div>
               </div>
 

@@ -51,7 +51,13 @@ public interface ChapterRepository extends JpaRepository<Chapter, UUID> {
      * Dùng ở trang chi tiết khóa học phía GV.
      */
     @EntityGraph(attributePaths = "lessons")
-    List<Chapter> findWithLessonsByCourseId(UUID courseId);
+    @Query("""
+           SELECT ch
+           FROM Chapter ch
+           WHERE ch.course.id = :courseId
+           ORDER BY ch.position ASC
+           """)
+    List<Chapter> findWithLessonsByCourseId(@Param("courseId") UUID courseId);
 
     /**
      * Load chapter kèm course trong 1 query — dùng khi cần truy cập
