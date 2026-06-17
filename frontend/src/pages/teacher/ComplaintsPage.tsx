@@ -32,6 +32,12 @@ import {
   addTeacherComplaintMessage,
   createTeacherComplaint,
   listTeacherComplaints,
+  CATEGORY_LABELS,
+  PRIORITY_LABELS,
+  type ComplaintCategory,
+  type ComplaintPriority,
+  type ComplaintStatus,
+  type ComplaintDetail,
 } from '../../api/complaintService';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
@@ -42,149 +48,19 @@ import {
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 1 — TYPES
+//  PHẦN 1 — TYPES (dùng từ complaintService — nguồn sự thật chung)
 // ═══════════════════════════════════════════════════════════════════
 
-// 6 loại khiếu nại — phân loại để Admin route đúng team xử lý
-type ComplaintCategory =
-  | 'payment'        // Thanh toán / Doanh thu (chuyển khoản sai, thiếu)
-  | 'course_review'  // Duyệt khóa học (bị reject không thỏa đáng)
-  | 'bank_verify'    // TK ngân hàng (Admin verify sai)
-  | 'student_report' // Báo cáo HS không phù hợp / spam
-  | 'technical'      // Lỗi hệ thống / hỗ trợ kỹ thuật
-  | 'other';
-
-// Mức độ ưu tiên — GV chọn khi gửi, ảnh hưởng thứ tự Admin xử lý
-type Priority = 'low' | 'medium' | 'high';
-
-// 4 trạng thái xử lý khiếu nại
-//   - pending:     vừa gửi, Admin chưa xem
-//   - in_progress: Admin đang xử lý (đã reply ít nhất 1 lần)
-//   - resolved:    đã giải quyết xong
-//   - rejected:    Admin từ chối (vd: không hợp lý)
-type ComplaintStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
-
-// 1 tin nhắn trong thread
-interface ComplaintMessage {
-  id: string;
-  authorName: string;
-  authorRole: 'teacher' | 'admin';
-  content: string;
-  sentAt: string;
-}
-
-// 1 thread khiếu nại
-interface Complaint {
-  id: string;
-  title: string;          // Tiêu đề ngắn gọn
-  category: ComplaintCategory;
-  priority: Priority;
-  status: ComplaintStatus;
-
-  // messages[0] là nội dung khiếu nại gốc của GV
-  messages: ComplaintMessage[];
-
-  createdAt: string;
-  lastActivityAt: string;
-}
+// Alias ngắn cho dùng nội bộ
+type Priority = ComplaintPriority;
+type Complaint = ComplaintDetail;
 
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 2 — CONSTANTS: mapping label cho từng enum
+//  PHẦN 2 — CONSTANTS (dùng từ complaintService)
 // ═══════════════════════════════════════════════════════════════════
 
-// Label tiếng Việt cho từng category — dùng ở dropdown + badge
-const CATEGORY_LABELS: Record<ComplaintCategory, string> = {
-  payment:        'Thanh toán / Doanh thu',
-  course_review:  'Duyệt khóa học',
-  bank_verify:    'TK ngân hàng',
-  student_report: 'Báo cáo học sinh',
-  technical:      'Lỗi kỹ thuật',
-  other:          'Khác',
-};
-
-const PRIORITY_LABELS: Record<Priority, string> = {
-  low:    'Thấp',
-  medium: 'Trung bình',
-  high:   'Cao',
-};
-
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 3 — MOCK DATA
-// ═══════════════════════════════════════════════════════════════════
-// Hardcode tên GV vì useAuthStore mặc định là HS (chưa có role-based auth)
-const TEACHER_DISPLAY_NAME = 'Giáo viên Bee';
-
-const INITIAL_COMPLAINTS: Complaint[] = [
-  // Khiếu nại đang chờ Admin xem
-  {
-    id: 'c1',
-    title: 'Chưa nhận được tiền kỳ tháng 4/2026',
-    category: 'payment',
-    priority: 'high',
-    status: 'pending',
-    createdAt: '2026-05-19T09:00:00',
-    lastActivityAt: '2026-05-19T09:00:00',
-    messages: [
-      {
-        id: 'm1',
-        authorName: TEACHER_DISPLAY_NAME, authorRole: 'teacher',
-        content: 'Tôi đã thấy trạng thái "Đã nhận" cho kỳ tháng 4/2026 nhưng kiểm tra TK ngân hàng vẫn chưa thấy tiền vào. Mong Admin kiểm tra giúp.',
-        sentAt: '2026-05-19T09:00:00',
-      },
-    ],
-  },
-  // Khiếu nại Admin đang xử lý
-  {
-    id: 'c2',
-    title: 'Khóa học bị Reject lần 2 — cần lý do rõ hơn',
-    category: 'course_review',
-    priority: 'medium',
-    status: 'in_progress',
-    createdAt: '2026-05-15T14:30:00',
-    lastActivityAt: '2026-05-16T10:00:00',
-    messages: [
-      {
-        id: 'm2a',
-        authorName: TEACHER_DISPLAY_NAME, authorRole: 'teacher',
-        content: 'Khóa "Toán nâng cao lớp 9" bị reject lần 2 với lý do "nội dung chưa đầy đủ" nhưng tôi đã thêm theo yêu cầu lần 1. Mong Admin cho biết cụ thể phần nào còn thiếu.',
-        sentAt: '2026-05-15T14:30:00',
-      },
-      {
-        id: 'm2b',
-        authorName: 'Admin Trần Hữu Phước', authorRole: 'admin',
-        content: 'Chúng tôi sẽ rà soát lại và phản hồi trong 2 ngày làm việc. Bạn có thể gửi thêm tài liệu cụ thể (vd: outline bài giảng) để chúng tôi đánh giá chính xác hơn.',
-        sentAt: '2026-05-16T10:00:00',
-      },
-    ],
-  },
-  // Khiếu nại đã được giải quyết
-  {
-    id: 'c3',
-    title: 'Báo cáo học sinh spam câu hỏi',
-    category: 'student_report',
-    priority: 'low',
-    status: 'resolved',
-    createdAt: '2026-05-10T16:00:00',
-    lastActivityAt: '2026-05-11T09:30:00',
-    messages: [
-      {
-        id: 'm3a',
-        authorName: TEACHER_DISPLAY_NAME, authorRole: 'teacher',
-        content: 'HS Nguyễn Văn X gửi liên tục 20 câu hỏi vô nghĩa trong 1 giờ. Mong Admin xem xét.',
-        sentAt: '2026-05-10T16:00:00',
-      },
-      {
-        id: 'm3b',
-        authorName: 'Admin Lê Thị Mai', authorRole: 'admin',
-        content: 'Đã ghi nhận. Chúng tôi đã cảnh báo tài khoản HS này và giới hạn tốc độ gửi câu hỏi. Cảm ơn bạn đã báo cáo.',
-        sentAt: '2026-05-11T09:30:00',
-      },
-    ],
-  },
-];
-
-// ═══════════════════════════════════════════════════════════════════
-//  PHẦN 4 — NAV_ITEMS (đồng bộ sidebar teacher — đã có Khiếu nại)
+//  PHẦN 3 — NAV_ITEMS (đồng bộ sidebar teacher — đã có Khiếu nại)
 // ═══════════════════════════════════════════════════════════════════
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: 'Tổng quan',         path: '/teacher',          },
@@ -352,7 +228,7 @@ export default function TeacherComplaintsPage() {
       try {
         const data = await listTeacherComplaints();
         if (!cancelled) {
-          setComplaints(data as Complaint[]);
+          setComplaints(data);
         }
       } catch (error) {
         if (!cancelled) {
@@ -432,48 +308,17 @@ export default function TeacherComplaintsPage() {
         content: formContent.trim(),
       });
 
-      setComplaints(prev => [newComplaint as Complaint, ...prev.filter(c => c.id !== newComplaint.id)]);
+      setComplaints(prev => [newComplaint, ...prev.filter(c => c.id !== newComplaint.id)]);
       setSelectedId(newComplaint.id);
       setRightMode('view');
       setFormTitle('');
       setFormContent('');
-      notify.success('Da gui khieu nai den Admin');
-      return;
+      notify.success('Đã gửi khiếu nại đến Admin');
     } catch (error) {
-      notify.error(error instanceof Error ? error.message : 'Khong the gui khieu nai');
-      return;
+      notify.error(error instanceof Error ? error.message : 'Không thể gửi khiếu nại');
     } finally {
       setIsSubmitting(false);
     }
-
-    const now = new Date().toISOString();
-    const newComplaint: Complaint = {
-      id: `c-${Date.now()}`,
-      title: formTitle.trim(),
-      category: formCategory,
-      priority: formPriority,
-      status: 'pending',
-      createdAt: now,
-      lastActivityAt: now,
-      messages: [
-        {
-          id: `m-${Date.now()}`,
-          authorName: TEACHER_DISPLAY_NAME,
-          authorRole: 'teacher',
-          content: formContent.trim(),
-          sentAt: now,
-        },
-      ],
-    };
-
-    // Push lên đầu list (newest first)
-    setComplaints(prev => [newComplaint, ...prev]);
-
-    // Chuyển sang chế độ xem khiếu nại vừa tạo
-    setSelectedId(newComplaint.id);
-    setRightMode('view');
-
-    notify.success('Đã gửi khiếu nại đến Admin');
   }
 
   // ── Handler: chọn 1 khiếu nại để xem chi tiết ───────────────────
@@ -498,38 +343,15 @@ export default function TeacherComplaintsPage() {
     try {
       const updatedComplaint = await addTeacherComplaintMessage(selectedComplaint.id, content);
       setComplaints(prev => prev.map(c =>
-        c.id === updatedComplaint.id ? updatedComplaint as Complaint : c
+        c.id === updatedComplaint.id ? updatedComplaint : c
       ));
       setReplyInput('');
-      notify.success('Da gui tin nhan');
-      return;
+      notify.success('Đã gửi tin nhắn');
     } catch (error) {
-      notify.error(error instanceof Error ? error.message : 'Khong the gui tin nhan');
-      return;
+      notify.error(error instanceof Error ? error.message : 'Không thể gửi tin nhắn');
     } finally {
       setIsSubmitting(false);
     }
-
-    const now = new Date().toISOString();
-    const newMessage: ComplaintMessage = {
-      id: `m-${Date.now()}`,
-      authorName: TEACHER_DISPLAY_NAME,
-      authorRole: 'teacher',
-      content,
-      sentAt: now,
-    };
-
-    setComplaints(prev => prev.map(c => {
-      if (c.id !== selectedComplaint.id) return c;
-      return {
-        ...c,
-        messages: [...c.messages, newMessage],
-        lastActivityAt: now,
-      };
-    }));
-
-    setReplyInput('');
-    notify.success('Đã gửi tin nhắn');
   }
 
   function handleLogout() {

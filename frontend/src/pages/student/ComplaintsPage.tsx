@@ -33,6 +33,11 @@ import {
   addStudentComplaintMessage,
   createStudentComplaint,
   listStudentComplaints,
+  PRIORITY_LABELS,
+  type ComplaintCategory,
+  type ComplaintPriority,
+  type ComplaintStatus,
+  type ComplaintDetail,
 } from '../../api/complaintService';
 import {
   Send, Plus, CheckCircle2, Clock, XCircle,
@@ -40,50 +45,22 @@ import {
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 1 — TYPES
+//  PHẦN 1 — TYPES (dùng từ complaintService — nguồn sự thật chung)
 // ═══════════════════════════════════════════════════════════════════
 
-// 7 loại khiếu nại — phù hợp role học sinh
-type ComplaintCategory =
-  | 'course_content' // Nội dung khóa học (video lỗi, sai kiến thức)
-  | 'teacher'        // Giáo viên (thái độ, trả lời chậm)
-  | 'payment'        // Thanh toán (trừ tiền 2 lần, không truy cập được)
-  | 'grading'        // Chấm điểm / Quiz / Bài kiểm tra
-  | 'parent_link'    // Liên kết phụ huynh (UC47-49)
-  | 'technical'      // Lỗi kỹ thuật / hỗ trợ
-  | 'other';
-
-// Mức độ ưu tiên — HS chọn khi gửi
-type Priority = 'low' | 'medium' | 'high';
-
-// 4 trạng thái xử lý
-type ComplaintStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
-
-interface ComplaintMessage {
-  id: string;
-  authorName: string;
-  authorRole: 'student' | 'admin';
-  content: string;
-  sentAt: string;
-}
-
-interface Complaint {
-  id: string;
-  title: string;
-  category: ComplaintCategory;
-  priority: Priority;
-  status: ComplaintStatus;
-  // messages[0] là nội dung gốc của HS
-  messages: ComplaintMessage[];
-  createdAt: string;
-  lastActivityAt: string;
-}
+type Priority = ComplaintPriority;
+type Complaint = ComplaintDetail;
 
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 2 — CONSTANTS
+//  PHẦN 2 — CONSTANTS (student-specific labels cho subset categories)
 // ═══════════════════════════════════════════════════════════════════
 
-const CATEGORY_LABELS: Record<ComplaintCategory, string> = {
+// Subset categories phù hợp với học sinh — labels tiếng Việt riêng
+type StudentCategory = Extract<ComplaintCategory,
+  'course_content' | 'teacher' | 'payment' | 'grading' | 'parent_link' | 'technical' | 'other'
+>;
+
+const STUDENT_CATEGORY_LABELS: Record<StudentCategory, string> = {
   course_content: 'Nội dung khóa học',
   teacher:        'Giáo viên',
   payment:        'Thanh toán',
@@ -93,89 +70,10 @@ const CATEGORY_LABELS: Record<ComplaintCategory, string> = {
   other:          'Khác',
 };
 
-const PRIORITY_LABELS: Record<Priority, string> = {
-  low:    'Thấp',
-  medium: 'Trung bình',
-  high:   'Cao',
-};
-
-// ═══════════════════════════════════════════════════════════════════
-//  PHẦN 3 — MOCK DATA
-// ═══════════════════════════════════════════════════════════════════
-
 const STUDENT_DISPLAY_NAME = 'Học viên Bee';
 
-const INITIAL_COMPLAINTS: Complaint[] = [
-  // Khiếu nại đang chờ Admin xem — thanh toán (mức độ cao)
-  {
-    id: 'sc1',
-    title: 'Đã thanh toán nhưng chưa truy cập được khóa học',
-    category: 'payment',
-    priority: 'high',
-    status: 'pending',
-    createdAt: '2026-05-20T08:30:00',
-    lastActivityAt: '2026-05-20T08:30:00',
-    messages: [
-      {
-        id: 'sm1',
-        authorName: STUDENT_DISPLAY_NAME, authorRole: 'student',
-        content: 'Em đã thanh toán khóa "Toán nâng cao lớp 8" qua MoMo lúc 7:50 sáng nay, ngân hàng báo trừ tiền thành công nhưng đến giờ vào mục Khóa học vẫn chưa thấy. Mã giao dịch: MM20260520075012345.',
-        sentAt: '2026-05-20T08:30:00',
-      },
-    ],
-  },
-  // Khiếu nại Admin đang xử lý — nội dung khóa học
-  {
-    id: 'sc2',
-    title: 'Video chương 3 khóa Tiếng Anh lớp 9 bị mất tiếng',
-    category: 'course_content',
-    priority: 'medium',
-    status: 'in_progress',
-    createdAt: '2026-05-17T20:15:00',
-    lastActivityAt: '2026-05-18T09:40:00',
-    messages: [
-      {
-        id: 'sm2a',
-        authorName: STUDENT_DISPLAY_NAME, authorRole: 'student',
-        content: 'Em xem video "Bài 3 — Thì hiện tại hoàn thành" trong khóa Tiếng Anh lớp 9 thì âm thanh chỉ phát được khoảng 30 giây đầu rồi tắt hẳn, dù phụ đề vẫn chạy bình thường. Đã thử trình duyệt Chrome và Edge đều bị.',
-        sentAt: '2026-05-17T20:15:00',
-      },
-      {
-        id: 'sm2b',
-        authorName: 'Admin Trần Hữu Phước', authorRole: 'admin',
-        content: 'Cảm ơn em đã báo lỗi. Chúng tôi đã thông báo cho giáo viên để re-upload video. Dự kiến hoàn tất trong 1-2 ngày làm việc. Em có thể tạm học các chương khác trong khi chờ.',
-        sentAt: '2026-05-18T09:40:00',
-      },
-    ],
-  },
-  // Khiếu nại đã được giải quyết — chấm điểm
-  {
-    id: 'sc3',
-    title: 'Điểm quiz chương 2 hiển thị sai (8/10 nhưng em làm đúng 9 câu)',
-    category: 'grading',
-    priority: 'medium',
-    status: 'resolved',
-    createdAt: '2026-05-12T16:00:00',
-    lastActivityAt: '2026-05-13T11:30:00',
-    messages: [
-      {
-        id: 'sm3a',
-        authorName: STUDENT_DISPLAY_NAME, authorRole: 'student',
-        content: 'Em làm quiz chương 2 môn Lý lớp 8, kiểm tra lại đáp án thấy đúng 9/10 nhưng hệ thống chỉ tính 8/10. Câu số 7 đáp án đúng là B nhưng hệ thống báo em chọn sai.',
-        sentAt: '2026-05-12T16:00:00',
-      },
-      {
-        id: 'sm3b',
-        authorName: 'Admin Lê Thị Mai', authorRole: 'admin',
-        content: 'Đã rà soát: câu 7 có lỗi trong key đáp án (đáp án đúng là B đúng như em phản ánh). Đã cập nhật lại điểm thành 9/10 và sửa lỗi cho các bạn HS khác làm bài này. Cảm ơn em rất nhiều!',
-        sentAt: '2026-05-13T11:30:00',
-      },
-    ],
-  },
-];
-
 // ═══════════════════════════════════════════════════════════════════
-//  PHẦN 4 — HELPERS
+//  PHẦN 3 — HELPERS
 // ═══════════════════════════════════════════════════════════════════
 
 function formatDateTime(iso: string): string {
@@ -296,7 +194,7 @@ export default function ComplaintsPage() {
 
   // Form tạo mới — local state để Hủy không ảnh hưởng dữ liệu
   const [formTitle, setFormTitle] = useState<string>('');
-  const [formCategory, setFormCategory] = useState<ComplaintCategory>('other');
+  const [formCategory, setFormCategory] = useState<StudentCategory>('other');
   const [formPriority, setFormPriority] = useState<Priority>('medium');
   const [formContent, setFormContent] = useState<string>('');
 
@@ -313,7 +211,7 @@ export default function ComplaintsPage() {
       try {
         const data = await listStudentComplaints();
         if (!cancelled) {
-          setComplaints(data as Complaint[]);
+          setComplaints(data);
         }
       } catch (error) {
         if (!cancelled) {
@@ -384,44 +282,17 @@ export default function ComplaintsPage() {
         content: formContent.trim(),
       });
 
-      setComplaints(prev => [newComplaint as Complaint, ...prev.filter(c => c.id !== newComplaint.id)]);
+      setComplaints(prev => [newComplaint, ...prev.filter(c => c.id !== newComplaint.id)]);
       setSelectedId(newComplaint.id);
       setRightMode('view');
       setFormTitle('');
       setFormContent('');
-      notify.success('Da gui khieu nai den Admin');
-      return;
+      notify.success('Đã gửi khiếu nại đến Admin');
     } catch (error) {
-      notify.error(error instanceof Error ? error.message : 'Khong the gui khieu nai');
-      return;
+      notify.error(error instanceof Error ? error.message : 'Không thể gửi khiếu nại');
     } finally {
       setIsSubmitting(false);
     }
-
-    const now = new Date().toISOString();
-    const newComplaint: Complaint = {
-      id: `sc-${Date.now()}`,
-      title: formTitle.trim(),
-      category: formCategory,
-      priority: formPriority,
-      status: 'pending',
-      createdAt: now,
-      lastActivityAt: now,
-      messages: [
-        {
-          id: `sm-${Date.now()}`,
-          authorName: displayName,
-          authorRole: 'student',
-          content: formContent.trim(),
-          sentAt: now,
-        },
-      ],
-    };
-
-    setComplaints(prev => [newComplaint, ...prev]);
-    setSelectedId(newComplaint.id);
-    setRightMode('view');
-    notify.success('Đã gửi khiếu nại đến Admin');
   }
 
   function selectComplaint(c: Complaint) {
@@ -443,38 +314,15 @@ export default function ComplaintsPage() {
     try {
       const updatedComplaint = await addStudentComplaintMessage(selectedComplaint.id, content);
       setComplaints(prev => prev.map(c =>
-        c.id === updatedComplaint.id ? updatedComplaint as Complaint : c
+        c.id === updatedComplaint.id ? updatedComplaint : c
       ));
       setReplyInput('');
-      notify.success('Da gui tin nhan');
-      return;
+      notify.success('Đã gửi tin nhắn');
     } catch (error) {
-      notify.error(error instanceof Error ? error.message : 'Khong the gui tin nhan');
-      return;
+      notify.error(error instanceof Error ? error.message : 'Không thể gửi tin nhắn');
     } finally {
       setIsSubmitting(false);
     }
-
-    const now = new Date().toISOString();
-    const newMessage: ComplaintMessage = {
-      id: `sm-${Date.now()}`,
-      authorName: displayName,
-      authorRole: 'student',
-      content,
-      sentAt: now,
-    };
-
-    setComplaints(prev => prev.map(c => {
-      if (c.id !== selectedComplaint.id) return c;
-      return {
-        ...c,
-        messages: [...c.messages, newMessage],
-        lastActivityAt: now,
-      };
-    }));
-
-    setReplyInput('');
-    notify.success('Đã gửi tin nhắn');
   }
 
   const isThreadClosed = selectedComplaint?.status === 'resolved'
@@ -563,8 +411,8 @@ export default function ComplaintsPage() {
                 className="w-full px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface"
               >
                 <option value="all">Tất cả loại</option>
-                {(Object.keys(CATEGORY_LABELS) as ComplaintCategory[]).map(cat => (
-                  <option key={cat} value={cat}>{CATEGORY_LABELS[cat]}</option>
+                {(Object.keys(STUDENT_CATEGORY_LABELS) as StudentCategory[]).map(cat => (
+                  <option key={cat} value={cat}>{STUDENT_CATEGORY_LABELS[cat]}</option>
                 ))}
               </select>
             </label>
@@ -636,7 +484,7 @@ export default function ComplaintsPage() {
                       </div>
 
                       <p className="text-xs text-on-surface-variant mb-2 line-clamp-1">
-                        {CATEGORY_LABELS[c.category]}
+                        {STUDENT_CATEGORY_LABELS[c.category]}
                       </p>
 
                       <div className="flex items-center justify-between gap-2">
@@ -683,11 +531,11 @@ export default function ComplaintsPage() {
                       </span>
                       <select
                         value={formCategory}
-                        onChange={e => setFormCategory(e.target.value as ComplaintCategory)}
+                        onChange={e => setFormCategory(e.target.value as StudentCategory)}
                         className="w-full px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface"
                       >
-                        {(Object.keys(CATEGORY_LABELS) as ComplaintCategory[]).map(cat => (
-                          <option key={cat} value={cat}>{CATEGORY_LABELS[cat]}</option>
+                        {(Object.keys(STUDENT_CATEGORY_LABELS) as StudentCategory[]).map(cat => (
+                          <option key={cat} value={cat}>{STUDENT_CATEGORY_LABELS[cat]}</option>
                         ))}
                       </select>
                     </label>
@@ -788,7 +636,7 @@ export default function ComplaintsPage() {
 
                     <div className="flex items-center gap-2 text-xs text-on-surface-variant flex-wrap">
                       <span className="bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
-                        {CATEGORY_LABELS[selectedComplaint.category]}
+                        {STUDENT_CATEGORY_LABELS[selectedComplaint.category]}
                       </span>
                       <span>·</span>
                       <span>Gửi lúc {formatDateTime(selectedComplaint.createdAt)}</span>

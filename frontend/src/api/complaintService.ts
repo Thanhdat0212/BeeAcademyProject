@@ -13,13 +13,19 @@ import type { ApiResponse, PageResponse } from '../types/api';
 
 export type ComplaintStatus = 'pending' | 'in_progress' | 'resolved' | 'rejected';
 export type ComplaintPriority = 'low' | 'medium' | 'high';
+// Tất cả category hợp lệ ở DB — mỗi role dùng 1 subset khi tạo khiếu nại
 export type ComplaintCategory =
-  | 'payment'
-  | 'course_review'
-  | 'bank_verify'
-  | 'student_report'
-  | 'content'
-  | 'technical'
+  | 'payment'         // Thanh toán / Doanh thu
+  | 'course_review'   // Duyệt khóa học (GV)
+  | 'bank_verify'     // TK ngân hàng (GV)
+  | 'student_report'  // Báo cáo học sinh (GV)
+  | 'content'         // Nội dung (GV — alias)
+  | 'course_content'  // Nội dung khóa học (HS)
+  | 'teacher'         // Giáo viên (HS)
+  | 'grading'         // Chấm điểm / Quiz (HS)
+  | 'parent_link'     // Liên kết phụ huynh (HS)
+  | 'technical'       // Lỗi kỹ thuật
+  | 'system'          // Lỗi hệ thống (Admin)
   | 'other';
 
 export interface ComplaintMessage {
@@ -77,13 +83,18 @@ export interface CreateComplaintPayload {
 // ── Nhãn tiếng Việt dùng chung cho UI ───────────────────────────────────────
 
 export const CATEGORY_LABELS: Record<ComplaintCategory, string> = {
-  payment: 'Thanh toán / Doanh thu',
-  course_review: 'Duyệt khóa học',
-  bank_verify: 'TK ngân hàng',
+  payment:        'Thanh toán / Doanh thu',
+  course_review:  'Duyệt khóa học',
+  bank_verify:    'TK ngân hàng',
   student_report: 'Báo cáo học sinh',
-  content: 'Chất lượng nội dung',
-  technical: 'Lỗi kỹ thuật',
-  other: 'Khác',
+  content:        'Chất lượng nội dung',
+  course_content: 'Nội dung khóa học',
+  teacher:        'Giáo viên',
+  grading:        'Chấm điểm / Quiz',
+  parent_link:    'Liên kết phụ huynh',
+  technical:      'Lỗi kỹ thuật',
+  system:         'Lỗi hệ thống',
+  other:          'Khác',
 };
 
 export const PRIORITY_LABELS: Record<ComplaintPriority, string> = {
@@ -172,3 +183,13 @@ export async function adminUpdateComplaintStatus(
   );
   return unwrap(res.data);
 }
+
+// ── Aliases theo role — tất cả gọi cùng endpoint /api/complaints ─────────────
+// Đặt alias để teacher/student page import tên rõ nghĩa mà không tự định nghĩa lại type
+export const listTeacherComplaints  = getMyComplaints;
+export const createTeacherComplaint = createComplaint;
+export const addTeacherComplaintMessage = (id: string, content: string) => replyToMyComplaint(id, content);
+
+export const listStudentComplaints  = getMyComplaints;
+export const createStudentComplaint = createComplaint;
+export const addStudentComplaintMessage = (id: string, content: string) => replyToMyComplaint(id, content);
