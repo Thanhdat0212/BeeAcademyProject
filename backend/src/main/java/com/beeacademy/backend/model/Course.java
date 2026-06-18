@@ -200,10 +200,34 @@ public class Course {
         c.totalLessons     = 0;
         c.totalDurationSec = 0;
         // slug tạm thời — service sẽ tạo slug duy nhất sau
-        c.slug = title.trim().toLowerCase()
-                     .replaceAll("[^a-z0-9\\s-]", "")
-                     .replaceAll("\\s+", "-");
+        c.slug = toSlug(title);
         return c;
+    }
+
+    /**
+     * Chuyển tiêu đề tiếng Việt thành URL-friendly slug.
+     *
+     * <p>Bước xử lý:
+     * <ol>
+     *   <li>Xử lý 'đ/Đ' trước (NFD không phân giải được ký tự này).</li>
+     *   <li>NFD decompose: "ắ" → "a" + combining marks.</li>
+     *   <li>Strip combining diacritical marks.</li>
+     *   <li>Chỉ giữ a–z, 0–9, space, dash; loại bỏ ký tự lạ còn sót.</li>
+     *   <li>Gộp khoảng trắng và dashes thừa.</li>
+     * </ol>
+     *
+     * <p>Ví dụ: "Toán Lớp 6 Nâng Cao" → "toan-lop-6-nang-cao"
+     */
+    private static String toSlug(String title) {
+        String s = title.trim().toLowerCase();
+        s = s.replace("đ", "d");
+        s = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD);
+        s = s.replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+        s = s.replaceAll("[^a-z0-9\\s-]", "");
+        s = s.replaceAll("\\s+", "-");
+        s = s.replaceAll("-+", "-");
+        s = s.replaceAll("^-|-$", "");
+        return s.isEmpty() ? "course" : s;
     }
 
     /** Cập nhật thông tin cơ bản khoá học (chỉ khi DRAFT/NEEDS_REVISION). */

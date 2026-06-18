@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -152,8 +153,9 @@ public class QuizService {
                     "Bạn chưa mua khóa học này.", HttpStatus.FORBIDDEN);
         }
 
-        // Kiểm tra max attempts
-        int attemptCount = attemptRepository.countByStudentIdAndQuizConfigId(
+        // Kiểm tra max attempts — chỉ đếm lượt đã NỘP, bỏ qua attempt chưa nộp.
+        // Student tắt browser / mất kết nối giữa chừng sẽ không bị mất lượt oan.
+        int attemptCount = attemptRepository.countByStudentIdAndQuizConfigIdAndSubmittedAtIsNotNull(
                 me.userId(), config.getId());
         if (config.getMaxAttempts() != null && attemptCount >= config.getMaxAttempts()) {
             throw new BusinessException("MAX_ATTEMPTS_REACHED",
@@ -172,8 +174,13 @@ public class QuizService {
         }
         if (config.getShuffleQuestions()) Collections.shuffle(selected);
 
+        // Shuffle choices một lần duy nhất — dùng chung cho snapshot và response.
+        // Nếu shuffle 2 lần độc lập, thứ tự choices trong snapshot khác response,
+        // gây sai lệch position hiển thị dù chấm điểm vẫn đúng (dùng UUID).
+        Map<UUID, List<QuestionChoice>> shuffledChoicesMap = buildShuffledChoices(selected, config.getShuffleChoices());
+
         // Build snapshot JSON (kèm đáp án đúng)
-        String snapshotJson = buildSnapshot(selected, config.getShuffleChoices());
+        String snapshotJson = buildSnapshot(selected, shuffledChoicesMap);
 
         // Lưu attempt
         Profile student = loadProfile(me.userId());
@@ -183,9 +190,9 @@ public class QuizService {
         log.info("Student {} bắt đầu quiz chương {} (attempt #{})",
                  me.userId(), chapterId, attemptCount + 1);
 
-        // Build response — ẨN isCorrect
+        // Build response — ẨN isCorrect, dùng cùng shuffledChoicesMap để position khớp snapshot
         List<QuizAttemptStartResponse.QuestionForStudent> questions =
-                buildStudentQuestions(selected, config.getShuffleChoices());
+                buildStudentQuestions(selected, shuffledChoicesMap);
 
         return new QuizAttemptStartResponse(
                 saved.getId(),
@@ -335,11 +342,27 @@ public class QuizService {
 
     private record SnapshotChoice(UUID id, String content, boolean isCorrect, int position) {}
 
-    private String buildSnapshot(List<Question> questions, boolean shuffleChoices) {
-        Map<String, Object> snapshot = new HashMap<>();
+    /**
+     * Shuffle choices một lần duy nhất cho mỗi câu hỏi.
+     * Kết quả được chia sẻ cho cả buildSnapshot (lưu DB) lẫn buildStudentQuestions (trả FE)
+     * để đảm bảo position choices nhất quán.
+     */
+    private Map<UUID, List<QuestionChoice>> buildShuffledChoices(List<Question> questions,
+                                                                   boolean shuffleChoices) {
+        Map<UUID, List<QuestionChoice>> result = new LinkedHashMap<>();
         for (Question q : questions) {
             List<QuestionChoice> choices = new ArrayList<>(q.getChoices());
             if (shuffleChoices) Collections.shuffle(choices);
+            result.put(q.getId(), choices);
+        }
+        return result;
+    }
+
+    private String buildSnapshot(List<Question> questions,
+                                  Map<UUID, List<QuestionChoice>> shuffledChoicesMap) {
+        Map<String, Object> snapshot = new HashMap<>();
+        for (Question q : questions) {
+            List<QuestionChoice> choices = shuffledChoicesMap.get(q.getId());
 
             UUID correctId = choices.stream()
                     .filter(QuestionChoice::getIsCorrect)
@@ -370,10 +393,9 @@ public class QuizService {
     }
 
     private List<QuizAttemptStartResponse.QuestionForStudent> buildStudentQuestions(
-            List<Question> questions, boolean shuffleChoices) {
+            List<Question> questions, Map<UUID, List<QuestionChoice>> shuffledChoicesMap) {
         return questions.stream().map(q -> {
-            List<QuestionChoice> choices = new ArrayList<>(q.getChoices());
-            if (shuffleChoices) Collections.shuffle(choices);
+            List<QuestionChoice> choices = shuffledChoicesMap.get(q.getId());
             List<QuizAttemptStartResponse.ChoiceForStudent> choiceDtos = choices.stream()
                     .map(c -> new QuizAttemptStartResponse.ChoiceForStudent(
                             c.getId(), c.getContent(), c.getPosition()))

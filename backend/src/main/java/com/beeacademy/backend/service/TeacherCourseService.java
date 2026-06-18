@@ -89,6 +89,8 @@ public class TeacherCourseService {
         Profile  teacher  = loadProfile(me.userId());
         Category category = loadCategory(req.categoryId());
 
+        // Validate: giá gốc trong khoảng 99.000–1.000.000₫ (UseCase v6.5)
+        validatePrice(req.priceVnd());
         // Validate: giá khuyến mãi phải nhỏ hơn giá gốc (cross-field validation)
         validateSalePrice(req.salePriceVnd(), req.priceVnd());
 
@@ -174,6 +176,8 @@ public class TeacherCourseService {
         // Để xóa giá KM, frontend gửi clearSalePrice=true hoặc salePriceVnd=0.
         Integer effectiveSalePrice = req.salePriceVnd() != null ? req.salePriceVnd() : course.getSalePriceVnd();
 
+        // Validate: giá gốc trong khoảng 99.000–1.000.000₫ (UseCase v6.5)
+        validatePrice(effectivePrice);
         // Validate: giá khuyến mãi phải nhỏ hơn giá gốc (sau khi tính giá hiệu dụng)
         validateSalePrice(effectiveSalePrice, effectivePrice);
 
@@ -411,23 +415,29 @@ public class TeacherCourseService {
         }
     }
 
+    /**
+     * Chỉ cho phép cập nhật thông tin cơ bản khi status ∈ {DRAFT, NEEDS_REVISION, REJECTED}.
+     *
+     * <p>PENDING_REVIEW và PUBLISHED bị chặn để đảm bảo mọi thay đổi thông tin
+     * (tiêu đề, giá, mô tả) đều phải qua workflow duyệt của Admin (UC36).
+     * Nếu GV muốn chỉnh sửa khóa đang duyệt/đã phát hành, phải đặt về DRAFT trước.
+     */
     private void assertCourseInfoEditable(Course course) {
         CourseStatus s = course.getStatus();
         boolean editable = s == CourseStatus.DRAFT
-                        || s == CourseStatus.PENDING_REVIEW
                         || s == CourseStatus.NEEDS_REVISION
-                        || s == CourseStatus.REJECTED
-                        || s == CourseStatus.PUBLISHED;
+                        || s == CourseStatus.REJECTED;
         if (!editable) {
             String statusLabel = switch (s) {
                 case PENDING_REVIEW -> "Đang chờ duyệt";
                 case APPROVED       -> "Đã duyệt (chờ publish)";
+                case PUBLISHED      -> "Đã phát hành";
                 case ARCHIVED       -> "Đã lưu trữ";
                 default             -> s.toDbValue();
             };
             throw new BusinessException("NOT_EDITABLE",
                     "Không thể cập nhật thông tin khi khóa học đang ở trạng thái '"
-                    + statusLabel + "'.");
+                    + statusLabel + "'. Liên hệ Admin để hỗ trợ.");
         }
     }
 
@@ -477,6 +487,20 @@ public class TeacherCourseService {
         return chapters.stream()
                 .mapToInt(ch -> ch.getLessons() != null ? ch.getLessons().size() : 0)
                 .sum();
+    }
+
+    /**
+     * Kiểm tra giá gốc theo quy định UseCase v6.5: 99.000₫ – 1.000.000₫.
+     */
+    private void validatePrice(int priceVnd) {
+        if (priceVnd < 99_000) {
+            throw new BusinessException("INVALID_PRICE",
+                    "Giá khóa học tối thiểu là 99,000 VND.");
+        }
+        if (priceVnd > 1_000_000) {
+            throw new BusinessException("INVALID_PRICE",
+                    "Giá khóa học tối đa là 1,000,000 VND.");
+        }
     }
 
     private void validateSalePrice(Integer salePriceVnd, Integer priceVnd) {

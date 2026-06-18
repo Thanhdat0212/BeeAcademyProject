@@ -20,8 +20,15 @@ import java.util.UUID;
 @Repository
 public interface QuizAttemptRepository extends JpaRepository<QuizAttempt, UUID> {
 
-    /** Đếm số lần một student đã làm một quiz config. */
+    /** Đếm số lần một student đã làm một quiz config (gồm cả chưa nộp). */
     int countByStudentIdAndQuizConfigId(UUID studentId, UUID quizConfigId);
+
+    /**
+     * Đếm số lần đã NỘP (submittedAt != null) — dùng khi kiểm tra maxAttempts.
+     * Attempt chưa nộp (vd: student tắt browser giữa chừng) KHÔNG tính vào giới hạn,
+     * tránh student mất lượt do lỗi kỹ thuật ngoài ý muốn.
+     */
+    int countByStudentIdAndQuizConfigIdAndSubmittedAtIsNotNull(UUID studentId, UUID quizConfigId);
 
     boolean existsByStudentIdAndQuizConfigIdAndPassedTrue(UUID studentId, UUID quizConfigId);
 
