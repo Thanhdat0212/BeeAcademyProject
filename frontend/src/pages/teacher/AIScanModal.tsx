@@ -77,6 +77,14 @@ function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+function classifyGeminiError(msg: string): 'quota' | 'apikey' | 'network' | 'other' {
+  const lower = msg.toLowerCase();
+  if (lower.includes('quota') || lower.includes('resource_exhausted') || lower.includes('429') || lower.includes('rate limit') || lower.includes('too many')) return 'quota';
+  if (lower.includes('api key') || lower.includes('api_key') || lower.includes('invalid key') || lower.includes('unauthorized')) return 'apikey';
+  if (lower.includes('fetch') || lower.includes('network') || lower.includes('failed to fetch')) return 'network';
+  return 'other';
+}
+
 function wasNetworkErrorAlreadyToasted(err: unknown): boolean {
   const message = err instanceof Error ? err.message : '';
   return message.startsWith('Không thể kết nối') || message.startsWith('Mất kết nối');
@@ -177,7 +185,7 @@ type Step = 'setup' | 'scanning' | 'preview' | 'done';
 export default function AIScanModal({ open, onClose, onImported }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const apiKey  = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
-  const geminiModel = (import.meta.env.VITE_GEMINI_MODEL as string | undefined)?.trim() || 'gemini-2.0-flash';
+  const geminiModel = (import.meta.env.VITE_GEMINI_MODEL as string | undefined)?.trim() || 'gemini-2.5-flash';
   const hasKey  = Boolean(apiKey?.trim());
 
   // Context
@@ -192,12 +200,13 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
   const [loadingCh,   setLoadingCh]   = useState(false);
 
   // State
-  const [step,      setStep]      = useState<Step>('setup');
-  const [fileName,  setFileName]  = useState('');
-  const [progress,  setProgress]  = useState('');
-  const [questions, setQuestions] = useState<ParsedQuestion[]>([]);
-  const [importing, setImporting] = useState(false);
-  const [result,    setResult]    = useState<questionService.BulkImportResult | null>(null);
+  const [step,       setStep]       = useState<Step>('setup');
+  const [fileName,   setFileName]   = useState('');
+  const [progress,   setProgress]   = useState('');
+  const [questions,  setQuestions]  = useState<ParsedQuestion[]>([]);
+  const [importing,  setImporting]  = useState(false);
+  const [result,     setResult]     = useState<questionService.BulkImportResult | null>(null);
+  const [quotaError, setQuotaError] = useState(false);
 
   // Load metadata on open
   useEffect(() => {
@@ -230,6 +239,7 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
     setStep('setup');
     setFileName(''); setQuestions([]); setResult(null); setProgress('');
     setCategoryId(''); setGrade(''); setCourseId(''); setChapterId('');
+    setQuotaError(false);
     onClose();
   }
 
@@ -285,7 +295,17 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
       setStep('preview');
     } catch (err) {
       const msg = getErrorMessage(err, 'Không xác định');
-      notify.error(msg.includes('API_KEY') ? 'API key không hợp lệ' : `Lỗi AI: ${msg}`);
+      const kind = classifyGeminiError(msg);
+      if (kind === 'quota') {
+        setQuotaError(true);
+        notify.error('Đã vượt quota Gemini API. Xem hướng dẫn bên dưới để khắc phục.');
+      } else if (kind === 'apikey') {
+        notify.error('API key Gemini không hợp lệ. Vui lòng kiểm tra lại key trong file .env.local.');
+      } else if (kind === 'network') {
+        notify.error('Không kết nối được đến Gemini. Kiểm tra mạng và thử lại.');
+      } else {
+        notify.error(`Lỗi AI: ${msg}`);
+      }
       setStep('setup');
       setFileName('');
     } finally {
@@ -414,6 +434,38 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
                     Sau khi thêm key, <strong>khởi động lại Vite</strong> (Ctrl+C rồi chạy lại{' '}
                     <code className="bg-amber-100 px-1 rounded">npm run dev</code>) để biến env có hiệu lực.
                   </p>
+                </div>
+              )}
+
+              {/* Quota bị vượt */}
+              {hasKey && quotaError && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-5 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-red-800">Gemini API bị vượt quota</p>
+                      <p className="text-sm text-red-700 mt-1">
+                        Project của bạn đang bị giới hạn. Có thể do free tier hết quota hoặc chưa kích hoạt billing.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-sm text-red-700 space-y-1.5">
+                    <p className="font-semibold">Cách khắc phục:</p>
+                    <ol className="list-decimal list-inside space-y-1 text-xs">
+                      <li>Truy cập <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline font-bold">Google AI Studio → API keys</a> để kiểm tra project</li>
+                      <li>Hoặc thêm <code className="bg-red-100 px-1 rounded">VITE_GEMINI_MODEL=gemini-2.5-flash</code> vào <code className="bg-red-100 px-1 rounded">.env.local</code> rồi restart Vite</li>
+                      <li>Hoặc tạo API key mới từ project khác có free tier còn quota</li>
+                    </ol>
+                  </div>
+                  <a
+                    href="https://ai.google.dev/gemini-api/docs/rate-limits"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 hover:text-red-900"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Xem thông tin quota Gemini →
+                  </a>
                 </div>
               )}
 
