@@ -250,13 +250,16 @@ public class AuthService {
     }
 
     /**
-     * Bước 1: Gửi OTP phục hồi mật khẩu sau khi kiểm tra email tồn tại trong hệ thống.
+     * Bước 1: Gửi OTP phục hồi mật khẩu.
+     *
+     * <p><b>Anti-enumeration</b>: luôn trả thành công bất kể email có tồn tại hay không.
+     * Nếu email không có trong hệ thống, log cảnh báo và return sớm — KHÔNG ném exception.
+     * Điều này ngăn kẻ tấn công brute-force endpoint để dò danh sách email đã đăng ký.
      */
     public void requestPasswordResetOtp(String email) {
-        boolean exists = profileRepository.existsByEmailInAuth(email);
-        if (!exists) {
-            throw new BusinessException("USER_NOT_FOUND",
-                    "Email không tồn tại trong hệ thống", HttpStatus.NOT_FOUND);
+        if (!profileRepository.existsByEmailInAuth(email)) {
+            log.warn("Reset password OTP yêu cầu cho email không tồn tại (bị bỏ qua): {}", email);
+            return;
         }
         otpService.sendResetPasswordOtp(email);
     }

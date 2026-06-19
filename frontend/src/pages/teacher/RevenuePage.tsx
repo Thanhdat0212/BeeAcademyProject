@@ -26,10 +26,10 @@ import {
   Bell, LogOut, Menu, X,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, DollarSign, Clock, CheckCircle2,
-  TrendingUp, Calendar, Receipt, ArrowRight, Megaphone, Database,
+  TrendingUp, Calendar, Receipt, ArrowRight, Megaphone, Database, UserCircle, Lock,
 } from 'lucide-react';
 
-type PayoutStatus = 'pending' | 'processing' | 'paid';
+type PayoutStatus = 'PENDING' | 'PROCESSING' | 'PAID';
 type RevenueSplit = RevenueSplitResponse;
 type PayoutPeriod = PayoutPeriodResponse & { monthYearDisplay: string };
 
@@ -53,6 +53,8 @@ const NAV_ITEMS = [
   { icon: Megaphone,       label: 'Khiếu nại',          path: '/teacher/complaints',},
   { icon: BarChart2,       label: 'Doanh thu',          path: '/teacher/revenue',  },
   { icon: Landmark,        label: 'TK ngân hàng',       path: '/teacher/bank',     },
+  { icon: UserCircle,      label: 'Hồ sơ',              path: '/teacher/profile',  },
+  { icon: Lock,            label: 'Tài khoản',           path: '/teacher/account',  },
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -82,17 +84,17 @@ function formatDate(iso: string): string {
 // ═══════════════════════════════════════════════════════════════════
 function PayoutStatusBadge({ status }: { status: PayoutStatus }) {
   const config = {
-    pending: {
+    PENDING: {
       icon: <Clock className="w-3.5 h-3.5" />,
       label: 'Chờ cuối kỳ',
       className: 'bg-amber-500/10 text-amber-600',
     },
-    processing: {
+    PROCESSING: {
       icon: <ArrowRight className="w-3.5 h-3.5" />,
       label: 'Đang chuyển',
       className: 'bg-blue-500/10 text-blue-600',
     },
-    paid: {
+    PAID: {
       icon: <CheckCircle2 className="w-3.5 h-3.5" />,
       label: 'Đã nhận',
       className: 'bg-green-500/10 text-green-600',
@@ -122,7 +124,7 @@ export default function TeacherRevenuePage() {
         setPeriods(periodsData.map(p => ({
           ...p,
           monthYearDisplay: formatMonthYear(p.monthYear),
-          status: p.status.toLowerCase() as PayoutStatus,
+          status: p.status,
         })));
       })
       .finally(() => setLoading(false));
@@ -150,7 +152,7 @@ export default function TeacherRevenuePage() {
   // Dùng useMemo vì re-compute không cần thiết khi sidebar mở/đóng
   const stats = useMemo(() => {
     // Tính từ periods.status để xác định kỳ đã chuyển hay chưa
-    const paidPeriodIds = new Set(periods.filter(p => p.status === 'paid').map(p => p.id));
+    const paidPeriodIds = new Set(periods.filter(p => p.status === 'PAID').map(p => p.id));
 
     let totalReceived = 0;   // Đã nhận về (từ kỳ paid)
     let totalPending = 0;    // Đang chờ chuyển (từ kỳ pending/processing)
@@ -189,7 +191,7 @@ export default function TeacherRevenuePage() {
   // ── Danh sách giao dịch đã lọc ──────────────────────────────────
   // Sort theo occurredAt DESC để giao dịch mới nhất lên đầu
   const filteredSplits = useMemo(() => {
-    const paidPeriodIds = new Set(periods.filter(p => p.status === 'paid').map(p => p.id));
+    const paidPeriodIds = new Set(periods.filter(p => p.status === 'PAID').map(p => p.id));
 
     return splits
       .filter(s => {
@@ -298,9 +300,9 @@ export default function TeacherRevenuePage() {
               <Bell className="w-5 h-5" />
             </button>
             <img
-              src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
+              src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
               alt="Teacher avatar"
-              className="w-9 h-9 rounded-full border-2 border-primary/30"
+              className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
             />
           </div>
         </header>
@@ -495,7 +497,7 @@ export default function TeacherRevenuePage() {
                         filteredSplits.map((s, idx) => {
                           // Xác định trạng thái: kỳ này đã paid hay chưa
                           const period = periods.find(p => p.id === s.payoutPeriodId);
-                          const isPaid = period?.status === 'paid';
+                          const isPaid = period?.status === 'PAID';
 
                           return (
                             <tr
@@ -524,7 +526,7 @@ export default function TeacherRevenuePage() {
                               <td className="px-4 py-3">
                                 <div className="flex flex-col gap-1">
                                   <span className="text-xs text-on-surface">{periodLabelMap.get(s.payoutPeriodId) ?? '—'}</span>
-                                  <PayoutStatusBadge status={isPaid ? 'paid' : 'pending'} />
+                                  <PayoutStatusBadge status={isPaid ? 'PAID' : 'PENDING'} />
                                 </div>
                               </td>
                             </tr>
@@ -580,7 +582,7 @@ export default function TeacherRevenuePage() {
                     </div>
 
                     {/* Chi tiết chuyển khoản — chỉ hiện khi paid */}
-                    {period.status === 'paid' && (
+                    {period.status === 'PAID' && (
                       <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-4 mb-3">
                         <p className="text-xs font-bold text-green-700 uppercase tracking-wide mb-2">
                           Chi tiết chuyển khoản

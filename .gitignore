@@ -59,3 +59,6 @@ Thông tin trang web.txt
 *.png
 ChiaCode/
 .codegraph/
+
+# ── File tạm Office (Excel/Word khóa khi đang mở) ────────
+~$*

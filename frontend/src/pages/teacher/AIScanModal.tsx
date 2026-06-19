@@ -1,23 +1,25 @@
 /**
  * AIScanModal — Phase 3
- * Upload PDF → Gemini đọc + trích xuất câu hỏi → preview → bulk import
+ * Upload PDF → backend gọi Gemini (server-side key) → trích xuất câu hỏi → preview → bulk import
+ *
+ * API key Gemini được giữ ở backend (GEMINI_API_KEY trong backend/.env),
+ * không bao giờ expose ra JS bundle client-side.
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from '@google/genai';
 import { notify } from '../../lib/toast';
 import * as questionService from '../../api/questionService';
 import type { CreateQuestionRequest } from '../../api/questionService';
-import { isApiError } from '../../api/client';
+import { isApiError, apiClient, unwrap } from '../../api/client';
 import { listCategories } from '../../api/courseService';
 import { listMyCourses, getCourseDetail } from '../../api/teacherCourseService';
 import type { TeacherCourseResponse, TeacherChapterResponse } from '../../api/teacherCourseService';
-import type { Category } from '../../types/api';
+import type { Category, ApiResponse } from '../../types/api';
 import {
-  X, Upload, FileText, ChevronDown, Loader2,
-  CheckCircle2, AlertCircle, Sparkles, KeyRound,
-  ExternalLink, Trash2, RotateCcw, Lock,
+  X, FileText, ChevronDown, Loader2,
+  CheckCircle2, AlertCircle, Sparkles,
+  RotateCcw, Lock,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -33,44 +35,7 @@ interface ParsedQuestion {
   error?: string;
 }
 
-// ─── Gemini prompt ────────────────────────────────────────────────────────────
-
-const EXTRACT_PROMPT = `Đây là tài liệu chứa câu hỏi thi/kiểm tra/bài tập. Hãy trích xuất TẤT CẢ câu hỏi và trả về một JSON array thuần (không có markdown, không có giải thích thêm).
-
-Định dạng mỗi phần tử:
-{
-  "content": "Nội dung câu hỏi (giữ nguyên, không chỉnh sửa)",
-  "type": "multiple_choice" hoặc "true_false",
-  "difficulty": "easy" hoặc "medium" hoặc "hard",
-  "choices": [
-    { "content": "Nội dung đáp án", "isCorrect": true },
-    { "content": "Nội dung đáp án", "isCorrect": false }
-  ],
-  "explanation": "Giải thích nếu có trong tài liệu, hoặc null"
-}
-
-Quy tắc quan trọng:
-- type = "true_false" CHỈ khi câu hỏi có đúng 2 đáp án Đúng/Sai
-- type = "multiple_choice" cho câu hỏi có 2-4 lựa chọn A/B/C/D
-- Mỗi câu phải có ĐÚNG 1 phần tử isCorrect: true
-- difficulty dựa vào mức độ phức tạp của câu hỏi
-- Nếu không xác định được đáp án đúng, đặt đáp án đầu tiên là đúng
-- Chỉ trả về JSON array, bắt đầu bằng [ và kết thúc bằng ]`;
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = e => {
-      const result = e.target!.result as string;
-      // Bỏ prefix "data:application/pdf;base64,"
-      resolve(result.split(',')[1]);
-    };
-    reader.onerror = () => reject(new Error('Không đọc được file'));
-    reader.readAsDataURL(file);
-  });
-}
 
 function getErrorMessage(err: unknown, fallback: string): string {
   if (isApiError(err)) return err.message;
@@ -82,12 +47,16 @@ function wasNetworkErrorAlreadyToasted(err: unknown): boolean {
   return message.startsWith('Không thể kết nối') || message.startsWith('Mất kết nối');
 }
 
-function responseText(response: unknown): string {
-  const value = (response as { text?: unknown }).text;
-  if (typeof value === 'function') {
-    return String((value as () => unknown).call(response) ?? '');
-  }
-  return String(value ?? '');
+/** Gọi backend proxy để upload PDF → Gemini, trả raw text. */
+async function callAiScanBackend(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await apiClient.post<ApiResponse<string>>(
+    '/api/teacher/ai/scan-pdf',
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  );
+  return unwrap(res.data);
 }
 
 function parseGeminiResponse(raw: string): ParsedQuestion[] {
@@ -176,9 +145,6 @@ type Step = 'setup' | 'scanning' | 'preview' | 'done';
 
 export default function AIScanModal({ open, onClose, onImported }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const apiKey  = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
-  const geminiModel = (import.meta.env.VITE_GEMINI_MODEL as string | undefined)?.trim() || 'gemini-2.0-flash';
-  const hasKey  = Boolean(apiKey?.trim());
 
   // Context
   const [categories,  setCategories]  = useState<Category[]>([]);
@@ -201,13 +167,13 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
 
   // Load metadata on open
   useEffect(() => {
-    if (!open || !hasKey) return;
+    if (!open) return;
     setLoadingMeta(true);
     Promise.all([listCategories(), listMyCourses(0, 100).then(p => p.items)])
       .then(([cats, crs]) => { setCategories(cats); setCourses(crs); })
       .catch(() => {})
       .finally(() => setLoadingMeta(false));
-  }, [open, hasKey]);
+  }, [open]);
 
   // Load chapters + lock category khi chọn course
   useEffect(() => {
@@ -226,7 +192,7 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
   }, [courseId]);
 
   function handleClose() {
-    if (step === 'scanning') return; // Không đóng khi đang scan
+    if (step === 'scanning') return;
     setStep('setup');
     setFileName(''); setQuestions([]); setResult(null); setProgress('');
     setCategoryId(''); setGrade(''); setCourseId(''); setChapterId('');
@@ -253,45 +219,24 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
 
     setFileName(file.name);
     setStep('scanning');
-    setProgress('Đang đọc file PDF...');
+    setProgress('Đang gửi PDF đến server...');
 
     try {
-      const base64 = await fileToBase64(file);
-      setProgress('Đang gửi đến Gemini AI...');
-
-      const ai = new GoogleGenAI({ apiKey: apiKey! });
-      const response = await ai.models.generateContent({
-        model: geminiModel,
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType: 'application/pdf',
-                  data: base64,
-                },
-              },
-              { text: EXTRACT_PROMPT },
-            ],
-          },
-        ],
-      });
+      setProgress('Đang phân tích bằng Gemini AI...');
+      const rawText = await callAiScanBackend(file);
 
       setProgress('Đang xử lý kết quả...');
-      const rawText = responseText(response);
-      const parsed  = parseGeminiResponse(rawText);
+      const parsed = parseGeminiResponse(rawText);
       setQuestions(parsed);
       setStep('preview');
     } catch (err) {
-      const msg = getErrorMessage(err, 'Không xác định');
-      notify.error(msg.includes('API_KEY') ? 'API key không hợp lệ' : `Lỗi AI: ${msg}`);
+      notify.error(getErrorMessage(err, 'Không thể xử lý PDF. Thử lại sau.'));
       setStep('setup');
       setFileName('');
     } finally {
       setProgress('');
     }
-  }, [apiKey, categoryId, grade, geminiModel]);
+  }, [categoryId, grade]);
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -385,41 +330,8 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
             {/* Body */}
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
-              {/* API Key chưa cấu hình */}
-              {!hasKey && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3">
-                  <div className="flex items-start gap-3">
-                    <KeyRound className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-bold text-amber-800">Cần cấu hình Gemini API Key</p>
-                      <p className="text-sm text-amber-700 mt-1">
-                        Tính năng này dùng Google Gemini AI để đọc PDF. Bạn cần thêm API key vào file{' '}
-                        <code className="bg-amber-100 px-1 rounded text-xs">frontend/.env.local</code>.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="bg-amber-100 rounded-lg p-3 font-mono text-xs text-amber-900">
-                    VITE_GEMINI_API_KEY=your_key_here
-                  </div>
-                  <a
-                    href="https://aistudio.google.com/app/apikey"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-sm font-bold text-amber-700 hover:text-amber-900"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Lấy API key miễn phí tại Google AI Studio →
-                  </a>
-                  <p className="text-xs text-amber-600">
-                    Sau khi thêm key, <strong>khởi động lại Vite</strong> (Ctrl+C rồi chạy lại{' '}
-                    <code className="bg-amber-100 px-1 rounded">npm run dev</code>) để biến env có hiệu lực.
-                  </p>
-                </div>
-              )}
-
-              {/* Đã có key — hiện form */}
-              {hasKey && (
-                <>
+              {/* Form scan PDF — API key quản lý bởi backend */}
+              <>
                   {/* Step 1 — Chọn khóa học + môn + chương */}
                   <div>
                     <p className="text-sm font-bold text-on-surface mb-2">
@@ -676,8 +588,7 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
                       </div>
                     </motion.div>
                   )}
-                </>
-              )}
+              </>
             </div>
 
             {/* Footer */}

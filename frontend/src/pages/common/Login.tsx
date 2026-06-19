@@ -8,8 +8,12 @@ import { login as loginApi } from '../../api/authService';
 import { isApiError } from '../../api/client';
 import { resolveRoleHome } from '../../lib/utils';
 
-function buildGoogleOAuthUrl(): string {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+function buildGoogleOAuthUrl(): string | null {
+  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim().replace(/\/+$/, '');
+  if (!supabaseUrl || supabaseUrl === 'undefined' || !supabaseUrl.startsWith('http')) {
+    notify.error('Thiếu cấu hình Supabase URL. Vui lòng kiểm tra file frontend/.env.local.');
+    return null;
+  }
   const params = new URLSearchParams({
     provider: 'google',
     redirect_to: `${window.location.origin}/auth/callback`,
@@ -29,7 +33,10 @@ export default function Login() {
   // Ví dụ: handleAddToCart() truyền { from: '/courses/abc' } khi chưa đăng nhập
   const redirectTo = (location.state as { from?: string })?.from ?? '/courses';
 
-  const handleGoogleLogin = () => { window.location.href = buildGoogleOAuthUrl(); };
+  const handleGoogleLogin = () => {
+    const url = buildGoogleOAuthUrl();
+    if (url) window.location.href = url;
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -129,6 +129,21 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Bắt lỗi vi phạm state transition nghiệp vụ mà model chủ động ném
+     * (vd: nộp duyệt khóa học khi đang ở trạng thái không cho phép).
+     *
+     * <p>Đây là lỗi "người dùng làm sai theo luật nghiệp vụ", không phải bug
+     * server → trả 400 Bad Request với message rõ ràng thay vì 500.
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException ex) {
+        log.warn("Illegal state transition: {}", ex.getMessage());
+        return ResponseEntity
+                .badRequest()
+                .body(ErrorResponse.of("INVALID_STATE", ex.getMessage()));
+    }
+
+    /**
      * Catch-all cho mọi lỗi KHÔNG MONG MUỐN (NullPointer, DB exception,...).
      *
      * <p>KHÔNG để stack trace lộ ra client - chỉ trả message chung chung,

@@ -14,4 +14,6 @@ public interface ExamConfigRepository extends JpaRepository<ExamConfig, UUID> {
     List<ExamConfig> findByCourseIdOrderBySlotIndexAsc(UUID courseId);
 
     Optional<ExamConfig> findByCourseIdAndSlotIndex(UUID courseId, Integer slotIndex);
+
+    Optional<ExamConfig> findByIdAndCourseId(UUID id, UUID courseId);
 }

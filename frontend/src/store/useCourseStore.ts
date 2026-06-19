@@ -1,22 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
-// ─── Cấu trúc Q&A hỏi đáp trong phòng học ─────────────────────────────────────
-export interface QAReply {
-  id: string;
-  authorName: string;
-  content: string;
-  date: string;
-}
-
-export interface QAItem {
-  id: string;
-  authorName: string;
-  content: string;
-  date: string;
-  replies: QAReply[];
-}
-
 interface CourseState {
   purchasedIds: string[];
   enrollCourses: (courseIds: string[]) => void;
@@ -38,10 +22,6 @@ interface CourseState {
   lessonNotes: Record<string, Record<string, string>>;
   saveLessonNote: (courseId: string, lessonId: string, note: string) => void;
 
-  // Hỏi đáp Q&A: mapping từ courseId -> danh sách các câu hỏi thảo luận
-  courseQA: Record<string, QAItem[]>;
-  addQAQuestion: (courseId: string, authorName: string, content: string) => void;
-  addQAReply: (courseId: string, questionId: string, authorName: string, content: string) => void;
 }
 
 export const useCourseStore = create<CourseState>()(
@@ -110,48 +90,6 @@ export const useCourseStore = create<CourseState>()(
         };
       }),
 
-      courseQA: {},
-      addQAQuestion: (courseId, authorName, content) => set((state) => {
-        const list = state.courseQA[courseId] ?? [];
-        const newQuestion: QAItem = {
-          id: `qa-${Date.now()}`,
-          authorName,
-          content,
-          date: new Date().toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }),
-          replies: []
-        };
-        return {
-          courseQA: {
-            ...state.courseQA,
-            [courseId]: [newQuestion, ...list] // câu hỏi mới lên đầu
-          }
-        };
-      }),
-
-      addQAReply: (courseId, questionId, authorName, content) => set((state) => {
-        const list = state.courseQA[courseId] ?? [];
-        const updatedList = list.map((qa) => {
-          if (qa.id === questionId) {
-            const newReply: QAReply = {
-              id: `reply-${Date.now()}`,
-              authorName,
-              content,
-              date: new Date().toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }),
-            };
-            return {
-              ...qa,
-              replies: [...qa.replies, newReply] // append reply xuống cuối câu hỏi
-            };
-          }
-          return qa;
-        });
-        return {
-          courseQA: {
-            ...state.courseQA,
-            [courseId]: updatedList
-          }
-        };
-      }),
     }),
     {
       name: 'bee-academy-course',

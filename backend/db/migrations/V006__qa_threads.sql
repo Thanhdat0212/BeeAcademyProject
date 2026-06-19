@@ -17,6 +17,30 @@ CREATE INDEX IF NOT EXISTS idx_qa_threads_course_id ON qa_threads(course_id);
 CREATE INDEX IF NOT EXISTS idx_qa_threads_status ON qa_threads(status);
 CREATE INDEX IF NOT EXISTS idx_qa_threads_last_activity ON qa_threads(last_activity_at DESC);
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'qa_threads' AND column_name = 'title'
+    ) THEN
+        ALTER TABLE qa_threads ALTER COLUMN title DROP NOT NULL;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'qa_threads' AND column_name = 'content'
+    ) THEN
+        ALTER TABLE qa_threads ALTER COLUMN content DROP NOT NULL;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'qa_threads' AND column_name = 'body'
+    ) THEN
+        ALTER TABLE qa_threads ALTER COLUMN body DROP NOT NULL;
+    END IF;
+END$$;
+
 CREATE TABLE IF NOT EXISTS qa_messages (
     id          UUID        PRIMARY KEY,
     thread_id   UUID        NOT NULL REFERENCES qa_threads(id) ON DELETE CASCADE,
@@ -28,3 +52,35 @@ CREATE TABLE IF NOT EXISTS qa_messages (
 
 CREATE INDEX IF NOT EXISTS idx_qa_messages_thread_id ON qa_messages(thread_id);
 CREATE INDEX IF NOT EXISTS idx_qa_messages_created_at ON qa_messages(created_at ASC);
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'qa_threads' AND column_name = 'content'
+    ) THEN
+        INSERT INTO qa_messages (id, thread_id, author_id, author_role, content, created_at)
+        SELECT gen_random_uuid(), t.id, t.student_id, 'student'::user_role, t.content, t.created_at
+        FROM qa_threads t
+        WHERE t.content IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM qa_messages m WHERE m.thread_id = t.id
+          );
+    END IF;
+END$$;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'qa_threads' AND column_name = 'body'
+    ) THEN
+        INSERT INTO qa_messages (id, thread_id, author_id, author_role, content, created_at)
+        SELECT gen_random_uuid(), t.id, t.student_id, 'student'::user_role, t.body, t.created_at
+        FROM qa_threads t
+        WHERE t.body IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM qa_messages m WHERE m.thread_id = t.id
+          );
+    END IF;
+END$$;
