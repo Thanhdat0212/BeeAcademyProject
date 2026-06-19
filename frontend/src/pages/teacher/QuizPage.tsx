@@ -24,7 +24,7 @@ import {
   Bell, LogOut, Menu, X, Save,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Megaphone, AlertTriangle, CheckCircle2,
-  Shuffle, Timer, Target, Layers, Database,
+  Shuffle, Timer, Target, Layers, Database, UserCircle, Lock,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -43,6 +43,8 @@ const NAV_ITEMS = [
   { icon: Megaphone,       label: 'Khiếu nại',          path: '/teacher/complaints'},
   { icon: BarChart2,       label: 'Doanh thu',          path: '/teacher/revenue'   },
   { icon: Landmark,        label: 'TK ngân hàng',       path: '/teacher/bank'      },
+  { icon: UserCircle,      label: 'Hồ sơ',              path: '/teacher/profile'   },
+  { icon: Lock,            label: 'Tài khoản',           path: '/teacher/account'   },
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -326,7 +328,7 @@ export default function TeacherQuizPage() {
               <img
                 src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'GV')}&background=7c3aed&color=fff&bold=true&size=64`}
                 alt="Avatar"
-                className="w-9 h-9 rounded-full border-2 border-primary/30"
+                className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
               />
             </div>
           </div>

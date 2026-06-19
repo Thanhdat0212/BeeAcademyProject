@@ -58,11 +58,13 @@ const TEACHER_MENU_ITEMS = [
   { icon: BookOpen,      label: 'Quản lý Quiz',         path: '/teacher/quiz'  },
   { icon: Database,      label: 'Ngân hàng câu hỏi',    path: '/teacher/questions' },
   { icon: BookOpen,      label: 'Quản lý Đề kiểm tra',  path: '/teacher/exam'  },
-  { icon: BookOpen,      label: 'Bảng điểm học sinh',   path: '/teacher/grades' },
+  { icon: BookOpen,      label: 'Chấm bài tự luận',     path: '/teacher/grades' },
   { icon: MessageSquare, label: 'Hỏi đáp (Q&A)',         path: '/teacher/qa'    },
   { icon: CreditCard,    label: 'Báo cáo doanh thu',    path: '/teacher/revenue'},
   { icon: CreditCard,    label: 'Tài khoản nhận tiền',  path: '/teacher/bank'   },
   { icon: Megaphone,     label: 'Khiếu nại/Hỗ trợ',     path: '/teacher/complaints' },
+  { icon: UserCircle,    label: 'Hồ sơ',                path: '/teacher/profile' },
+  { icon: Lock,          label: 'Tài khoản',            path: '/teacher/account'  },
   { icon: Camera,        label: 'Ảnh đại diện',         path: '/account/photo' },
 ] as const;
 

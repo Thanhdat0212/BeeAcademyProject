@@ -2,23 +2,36 @@ package com.beeacademy.backend.service;
 
 import com.beeacademy.backend.dto.request.ExamConfigRequest;
 import com.beeacademy.backend.dto.request.ExamQuestionRandomRequest;
+import com.beeacademy.backend.dto.request.GradeExamAttemptRequest;
+import com.beeacademy.backend.dto.request.SubmitExamRequest;
 import com.beeacademy.backend.dto.response.ExamConfigResponse;
 import com.beeacademy.backend.dto.response.QuestionStatsResponse;
+import com.beeacademy.backend.dto.response.StudentExamResultResponse;
+import com.beeacademy.backend.dto.response.StudentExamStartResponse;
+import com.beeacademy.backend.dto.response.StudentExamSummaryResponse;
+import com.beeacademy.backend.dto.response.TeacherExamAttemptResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Chapter;
 import com.beeacademy.backend.model.Course;
+import com.beeacademy.backend.model.ExamAttempt;
 import com.beeacademy.backend.model.ExamConfig;
 import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.model.Question;
 import com.beeacademy.backend.model.QuestionChoice;
+import com.beeacademy.backend.model.QuizConfig;
 import com.beeacademy.backend.repository.ChapterRepository;
 import com.beeacademy.backend.repository.CourseRepository;
+import com.beeacademy.backend.repository.EnrollmentRepository;
+import com.beeacademy.backend.repository.ExamAttemptRepository;
 import com.beeacademy.backend.repository.ExamConfigRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.repository.QuestionRepository;
+import com.beeacademy.backend.repository.QuizAttemptRepository;
+import com.beeacademy.backend.repository.QuizConfigRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,7 +43,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -40,10 +56,14 @@ import java.util.stream.IntStream;
 public class ExamService {
 
     private final ExamConfigRepository examRepository;
+    private final ExamAttemptRepository examAttemptRepository;
     private final CourseRepository courseRepository;
     private final ChapterRepository chapterRepository;
+    private final EnrollmentRepository enrollmentRepository;
     private final ProfileRepository profileRepository;
     private final QuestionRepository questionRepository;
+    private final QuizConfigRepository quizConfigRepository;
+    private final QuizAttemptRepository quizAttemptRepository;
     private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
@@ -159,6 +179,378 @@ public class ExamService {
                         "Chưa có bài kiểm tra cho vị trí này.", HttpStatus.NOT_FOUND));
         examRepository.delete(config);
     }
+
+    @Transactional(readOnly = true)
+    public List<StudentExamSummaryResponse> listStudentExams(UUID courseId, AuthenticatedUser me) {
+        verifyEnrollment(courseId, me.userId());
+        List<Chapter> chapters = chapterRepository.findByCourseIdOrderByPositionAsc(courseId);
+        Map<Integer, ExamConfig> examsBySlot = new HashMap<>();
+        examRepository.findByCourseIdOrderBySlotIndexAsc(courseId)
+                .forEach(exam -> examsBySlot.put(exam.getSlotIndex(), exam));
+
+        int slotCount = chapters.size() / 3;
+        List<StudentExamSummaryResponse> result = new ArrayList<>();
+        for (int slot = 0; slot < slotCount; slot++) {
+            List<Chapter> requiredChapters = chapters.subList(slot * 3, slot * 3 + 3);
+            result.add(buildStudentExamSummary(
+                    examsBySlot.get(slot), slot, requiredChapters, me.userId()));
+        }
+        return result;
+    }
+
+    @Transactional
+    public StudentExamStartResponse startStudentExam(UUID courseId, Integer slotIndex,
+                                                     AuthenticatedUser me) {
+        verifyEnrollment(courseId, me.userId());
+        ExamConfig config = examRepository.findByCourseIdAndSlotIndex(courseId, slotIndex)
+                .orElseThrow(() -> new BusinessException("EXAM_NOT_FOUND",
+                        "Giáo viên chưa cấu hình bài kiểm tra này.", HttpStatus.NOT_FOUND));
+        assertStudentExamUnlocked(courseId, slotIndex, me.userId());
+
+        int attemptCount = examAttemptRepository.countByStudentIdAndExamConfigId(
+                me.userId(), config.getId());
+        if (attemptCount >= config.getMaxAttempts()) {
+            throw new BusinessException("MAX_ATTEMPTS_REACHED",
+                    "Bạn đã hết lượt làm bài kiểm tra này.");
+        }
+
+        List<ExamConfigResponse.ExamQuestionResponse> questions = parseExamQuestions(config);
+        if (Boolean.TRUE.equals(config.getShuffleQuestions())) {
+            Collections.shuffle(questions);
+        }
+        List<SnapshotExamQuestion> snapshot = questions.stream()
+                .map(q -> toSnapshotQuestion(q, Boolean.TRUE.equals(config.getShuffleOptions())))
+                .toList();
+
+        Profile student = loadProfile(me.userId());
+        ExamAttempt attempt = ExamAttempt.start(student, config, toJson(snapshot), attemptCount + 1);
+        ExamAttempt saved = examAttemptRepository.save(attempt);
+
+        return new StudentExamStartResponse(
+                saved.getId(),
+                config.getId(),
+                config.getSlotIndex(),
+                config.getName(),
+                config.getDescription(),
+                config.getDurationMinutes(),
+                snapshot.size(),
+                saved.getAttemptNumber(),
+                snapshot.stream()
+                        .map(q -> new StudentExamStartResponse.QuestionForStudent(
+                                q.id(), q.text(), q.type(), q.options(), q.points()))
+                        .toList()
+        );
+    }
+
+    @Transactional
+    public StudentExamResultResponse submitStudentExam(UUID attemptId, AuthenticatedUser me,
+                                                       SubmitExamRequest req) {
+        ExamAttempt attempt = examAttemptRepository.findByIdAndStudentId(attemptId, me.userId())
+                .orElseThrow(() -> new ResourceNotFoundException("ExamAttempt", attemptId));
+        if (attempt.getSubmittedAt() != null) {
+            throw new BusinessException("ALREADY_SUBMITTED",
+                    "Bài kiểm tra này đã được nộp rồi.");
+        }
+
+        List<SnapshotExamQuestion> questions = readSnapshotQuestions(attempt.getQuestionsSnapshot());
+        Map<String, List<Integer>> answers = req.answers() != null ? req.answers() : Map.of();
+        double earned = 0.0;
+        double total = questions.stream()
+                .map(SnapshotExamQuestion::points)
+                .filter(Objects::nonNull)
+                .mapToDouble(Double::doubleValue)
+                .sum();
+        List<StudentExamResultResponse.QuestionResult> details = new ArrayList<>();
+
+        for (SnapshotExamQuestion question : questions) {
+            List<Integer> studentAnswers = normalizeAnswer(answers.get(question.id()));
+            List<Integer> correctAnswers = normalizeAnswer(question.correctIndices());
+            boolean correct = studentAnswers.equals(correctAnswers);
+            if (correct) {
+                earned += question.points() != null ? question.points() : 0.0;
+            }
+            boolean showAnswer = Boolean.TRUE.equals(attempt.getExamConfig().getShowAnswerAfterSubmit());
+            details.add(new StudentExamResultResponse.QuestionResult(
+                    question.id(),
+                    question.text(),
+                    studentAnswers,
+                    showAnswer ? correctAnswers : List.of(),
+                    correct,
+                    showAnswer ? question.explanation() : null,
+                    question.points()
+            ));
+        }
+
+        double scorePercent = total > 0 ? Math.round((earned / total) * 1000.0) / 10.0 : 0.0;
+        boolean passed = scorePercent >= attempt.getExamConfig().getPassScorePercent();
+        attempt.submit(toJson(answers), scorePercent, passed);
+        examAttemptRepository.save(attempt);
+
+        return new StudentExamResultResponse(
+                attempt.getId(),
+                attempt.getExamConfig().getId(),
+                attempt.getExamConfig().getSlotIndex(),
+                scorePercent,
+                passed,
+                Math.round(earned * 10.0) / 10.0,
+                Math.round(total * 10.0) / 10.0,
+                attempt.getAttemptNumber(),
+                details
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<TeacherExamAttemptResponse> listTeacherExamAttempts(AuthenticatedUser me) {
+        return examAttemptRepository.findSubmittedAttemptsForTeacher(me.userId()).stream()
+                .map(this::toTeacherExamAttemptResponse)
+                .toList();
+    }
+
+    @Transactional
+    public TeacherExamAttemptResponse gradeExamAttempt(
+            UUID attemptId,
+            AuthenticatedUser me,
+            GradeExamAttemptRequest request) {
+        ExamAttempt attempt = examAttemptRepository
+                .findSubmittedAttemptForTeacher(attemptId, me.userId())
+                .orElseThrow(() -> new ResourceNotFoundException("ExamAttempt", attemptId));
+
+        attempt.grade(request.scorePercent(), request.feedback());
+        ExamAttempt saved = examAttemptRepository.save(attempt);
+        log.info("Teacher {} graded exam attempt {} with score={}",
+                me.userId(), attemptId, request.scorePercent());
+        return toTeacherExamAttemptResponse(saved);
+    }
+
+    private TeacherExamAttemptResponse toTeacherExamAttemptResponse(ExamAttempt attempt) {
+        List<SnapshotExamQuestion> questions = readSnapshotQuestions(attempt.getQuestionsSnapshot());
+        Map<String, List<Integer>> answers = readAnswers(attempt.getAnswers());
+        List<TeacherExamAttemptResponse.QuestionReview> reviews = questions.stream()
+                .map(question -> {
+                    List<Integer> studentAnswers = normalizeAnswer(answers.get(question.id()));
+                    List<Integer> correctAnswers = normalizeAnswer(question.correctIndices());
+                    boolean correct = studentAnswers.equals(correctAnswers);
+                    double points = question.points() != null ? question.points() : 0.0;
+                    return new TeacherExamAttemptResponse.QuestionReview(
+                            question.id(),
+                            question.text(),
+                            question.type(),
+                            question.options(),
+                            studentAnswers,
+                            correctAnswers,
+                            correct,
+                            points,
+                            correct ? points : 0.0,
+                            question.explanation());
+                })
+                .toList();
+
+        Double autoScore = attempt.getScorePercent() != null
+                ? attempt.getScorePercent().doubleValue()
+                : null;
+        Double manualScore = attempt.getManualScorePercent() != null
+                ? attempt.getManualScorePercent().doubleValue()
+                : null;
+        Double effectiveScore = attempt.getEffectiveScorePercent() != null
+                ? attempt.getEffectiveScorePercent().doubleValue()
+                : null;
+
+        return new TeacherExamAttemptResponse(
+                attempt.getId(),
+                attempt.getStudent().getId(),
+                attempt.getStudent().getFullName(),
+                attempt.getExamConfig().getCourse().getId(),
+                attempt.getExamConfig().getCourse().getTitle(),
+                attempt.getExamConfig().getId(),
+                attempt.getExamConfig().getName(),
+                attempt.getExamConfig().getSlotIndex(),
+                attempt.getAttemptNumber(),
+                attempt.getStartedAt(),
+                attempt.getSubmittedAt(),
+                autoScore,
+                manualScore,
+                effectiveScore,
+                attempt.getExamConfig().getPassScorePercent(),
+                attempt.getPassed(),
+                attempt.getTeacherFeedback(),
+                attempt.getGradedAt(),
+                attempt.getGradedAt() == null ? "pending" : "graded",
+                reviews);
+    }
+
+    private Map<String, List<Integer>> readAnswers(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(
+                    json,
+                    new TypeReference<Map<String, List<Integer>>>() {});
+        } catch (Exception e) {
+            throw new BusinessException("INTERNAL_ERROR",
+                    "Không thể đọc đáp án bài kiểm tra.");
+        }
+    }
+
+    private StudentExamSummaryResponse buildStudentExamSummary(
+            ExamConfig config, int slotIndex, List<Chapter> requiredChapters, UUID studentId) {
+        Map<UUID, QuizConfig> quizByChapter = new HashMap<>();
+        quizConfigRepository.findByChapterIdIn(
+                requiredChapters.stream().map(Chapter::getId).toList())
+                .forEach(quiz -> quizByChapter.put(quiz.getChapter().getId(), quiz));
+
+        int passedQuizCount = 0;
+        List<StudentExamSummaryResponse.RequiredChapter> chapterDtos = new ArrayList<>();
+        for (Chapter chapter : requiredChapters) {
+            QuizConfig quiz = quizByChapter.get(chapter.getId());
+            boolean hasQuiz = quiz != null;
+            boolean quizPassed = hasQuiz && quizAttemptRepository
+                    .existsByStudentIdAndQuizConfigIdAndPassedTrue(studentId, quiz.getId());
+            if (quizPassed) passedQuizCount++;
+            chapterDtos.add(new StudentExamSummaryResponse.RequiredChapter(
+                    chapter.getId(), chapter.getTitle(), hasQuiz, quizPassed));
+        }
+
+        boolean configured = config != null;
+        int attemptsUsed = configured
+                ? examAttemptRepository.countByStudentIdAndExamConfigId(studentId, config.getId())
+                : 0;
+        ExamAttempt latestAttempt = configured
+                ? examAttemptRepository
+                        .findFirstByStudentIdAndExamConfigIdAndSubmittedAtIsNotNullOrderBySubmittedAtDesc(
+                                studentId, config.getId())
+                        .orElse(null)
+                : null;
+        boolean passed = latestAttempt != null && Boolean.TRUE.equals(latestAttempt.getPassed());
+        boolean prerequisitesMet = passedQuizCount == requiredChapters.size()
+                && chapterDtos.stream().allMatch(StudentExamSummaryResponse.RequiredChapter::hasQuiz);
+        boolean attemptsAvailable = configured && attemptsUsed < config.getMaxAttempts();
+        boolean unlocked = configured && prerequisitesMet && (attemptsAvailable || passed);
+        String lockedReason = null;
+        if (!configured) {
+            lockedReason = "Giáo viên chưa cấu hình bài kiểm tra.";
+        } else if (!prerequisitesMet) {
+            lockedReason = "Cần pass đủ 3 quiz chương liên tiếp để mở khóa.";
+        } else if (!attemptsAvailable && !passed) {
+            lockedReason = "Bạn đã hết lượt làm bài kiểm tra này.";
+        }
+
+        return new StudentExamSummaryResponse(
+                configured ? config.getId() : null,
+                slotIndex,
+                configured ? config.getName() : "Bài kiểm tra sau chương " + (slotIndex * 3 + 1) + "-" + (slotIndex * 3 + 3),
+                configured ? config.getDescription() : null,
+                configured ? config.getDurationMinutes() : null,
+                configured ? config.getPassScorePercent() : null,
+                configured ? config.getMaxAttempts() : null,
+                configured,
+                unlocked,
+                passed,
+                latestAttempt != null && latestAttempt.getEffectiveScorePercent() != null
+                        ? latestAttempt.getEffectiveScorePercent().doubleValue()
+                        : null,
+                attemptsUsed,
+                requiredChapters.size(),
+                passedQuizCount,
+                lockedReason,
+                chapterDtos
+        );
+    }
+
+    private void assertStudentExamUnlocked(UUID courseId, int slotIndex, UUID studentId) {
+        List<Chapter> chapters = chapterRepository.findByCourseIdOrderByPositionAsc(courseId);
+        int from = slotIndex * 3;
+        if (slotIndex < 0 || from + 3 > chapters.size()) {
+            throw new BusinessException("INVALID_SLOT",
+                    "Vị trí bài kiểm tra không hợp lệ.", HttpStatus.BAD_REQUEST);
+        }
+        StudentExamSummaryResponse summary = buildStudentExamSummary(
+                examRepository.findByCourseIdAndSlotIndex(courseId, slotIndex).orElse(null),
+                slotIndex,
+                chapters.subList(from, from + 3),
+                studentId);
+        if (!Boolean.TRUE.equals(summary.unlocked())) {
+            throw new BusinessException("EXAM_LOCKED",
+                    summary.lockedReason() != null ? summary.lockedReason() : "Bài kiểm tra đang bị khóa.",
+                    HttpStatus.FORBIDDEN);
+        }
+    }
+
+    private void verifyEnrollment(UUID courseId, UUID studentId) {
+        if (!enrollmentRepository.existsByStudentIdAndCourseId(studentId, courseId)) {
+            throw new BusinessException("NOT_ENROLLED",
+                    "Bạn chưa mua khóa học này.", HttpStatus.FORBIDDEN);
+        }
+    }
+
+    private List<ExamConfigResponse.ExamQuestionResponse> parseExamQuestions(ExamConfig config) {
+        try {
+            return new ArrayList<>(objectMapper.readValue(
+                    config.getQuestionsJson(),
+                    new TypeReference<List<ExamConfigResponse.ExamQuestionResponse>>() {}));
+        } catch (Exception e) {
+            throw new BusinessException("INVALID_EXAM",
+                    "Không thể đọc danh sách câu hỏi bài kiểm tra.");
+        }
+    }
+
+    private SnapshotExamQuestion toSnapshotQuestion(
+            ExamConfigResponse.ExamQuestionResponse question, boolean shuffleOptions) {
+        List<OptionWithOriginalIndex> options = IntStream.range(0, question.options().size())
+                .mapToObj(i -> new OptionWithOriginalIndex(question.options().get(i), i))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        if (shuffleOptions) {
+            Collections.shuffle(options);
+        }
+        List<String> optionTexts = options.stream()
+                .map(OptionWithOriginalIndex::text)
+                .toList();
+        List<Integer> correctIndices = IntStream.range(0, options.size())
+                .filter(i -> question.correctIndices().contains(options.get(i).originalIndex()))
+                .boxed()
+                .toList();
+        return new SnapshotExamQuestion(
+                question.id(),
+                question.text(),
+                question.type(),
+                optionTexts,
+                correctIndices,
+                question.explanation(),
+                question.points() != null ? question.points() : 0.0
+        );
+    }
+
+    private List<SnapshotExamQuestion> readSnapshotQuestions(String json) {
+        try {
+            return objectMapper.readValue(
+                    json,
+                    new TypeReference<List<SnapshotExamQuestion>>() {});
+        } catch (Exception e) {
+            throw new BusinessException("INTERNAL_ERROR",
+                    "Không thể đọc bài kiểm tra.");
+        }
+    }
+
+    private List<Integer> normalizeAnswer(List<Integer> values) {
+        if (values == null) return List.of();
+        return values.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
+    private record OptionWithOriginalIndex(String text, Integer originalIndex) {}
+
+    private record SnapshotExamQuestion(
+            String id,
+            String text,
+            String type,
+            List<String> options,
+            List<Integer> correctIndices,
+            String explanation,
+            Double points
+    ) {}
 
     private Course loadOwnedCourse(UUID courseId, UUID teacherId) {
         Course course = courseRepository.findWithCategoryAndTeacherById(courseId)

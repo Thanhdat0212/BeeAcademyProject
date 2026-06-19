@@ -21,14 +21,14 @@
 //   - ScoreCircle:   vòng tròn SVG hiển thị điểm số
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft, Star, Users, PlayCircle, FileText, CheckCircle2,
   Lock, ShoppingCart, Video, Menu, X, MessageSquare, BookOpen,
   ClipboardList, XCircle, Award, RotateCcw, ChevronLeft, ChevronRight,
-  Trophy, Loader2, Send, AlertCircle,
+  Trophy, Loader2, Send, AlertCircle, Plus, Minus,
 } from 'lucide-react';
 import DashboardHeader from '../../components/DashboardHeader';
 import type { Course, Lesson, QuizQuestion } from '../../data/mockCourses';
@@ -38,10 +38,18 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { useCourseStore } from '../../store/useCourseStore';
 // API integration (Giai đoạn 1C) - thay MOCK_COURSES bằng call BE thật
 import { getCourseDetail as courseServiceGetDetail } from '../../api/courseService';
-import { adaptCourseDetail } from '../../api/adapter';
+import { adaptCourseDetail, formatDurationSec } from '../../api/adapter';
 import { isApiError } from '../../api/client';
 import { listOrders, verifyPayment } from '../../api/orderService';
-import type { ChapterDetail } from '../../types/api';
+import {
+  addCourseDiscussionReply,
+  createCourseDiscussionThread,
+  listCourseDiscussionThreads,
+} from '../../api/courseDiscussionService';
+import { listStudentCourseExams } from '../../api/examService';
+import type { CourseDiscussionThread } from '../../api/courseDiscussionService';
+import type { StudentExamSummaryResponse } from '../../api/examService';
+import type { ChapterDetail, LessonDetail } from '../../types/api';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COMPONENT: ScoreCircle
@@ -826,6 +834,43 @@ function MarketingView({ course }: { course: Course }) {
 //   Video/PDF items: hiển thị icon type + dấu tích xanh nếu isCompleted
 //   Sidebar slide in/out từ bên phải với spring animation
 // ═══════════════════════════════════════════════════════════════════════════════
+function formatDiscussionDate(iso: string): string {
+  return new Date(iso).toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function avatarFor(name: string, avatarUrl?: string | null, size = 40): string {
+  return avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&size=${size}`;
+}
+
+function roleLabel(role: string): string {
+  if (role === 'teacher') return 'Giáo viên';
+  if (role === 'admin') return 'Admin';
+  if (role === 'parent') return 'Phụ huynh';
+  return 'Học viên';
+}
+
+function adaptLearningLesson(lesson: LessonDetail): Lesson {
+  const hasVideo = Boolean(lesson.videoUrl || lesson.videoEmbedUrl);
+  const type: Lesson['type'] = hasVideo ? 'video' : 'pdf';
+  return {
+    id: lesson.id,
+    title: lesson.title,
+    duration: formatDurationSec(lesson.durationSec),
+    type,
+    url: hasVideo
+      ? (lesson.videoUrl ?? lesson.videoEmbedUrl ?? '#')
+      : (lesson.documents?.[0]?.fileUrl ?? '#'),
+    isCompleted: false,
+    documents: lesson.documents ?? [],
+  };
+}
+
 function LearningView({ course, rawChapters, courseId }: {
   course: Course;
   rawChapters: ChapterDetail[];
@@ -854,13 +899,6 @@ function LearningView({ course, rawChapters, courseId }: {
   const saveQuizScore = useCourseStore((state) => state.saveQuizScore);
   const lessonNotes = useCourseStore((state) => state.lessonNotes);
   const saveLessonNote = useCourseStore((state) => state.saveLessonNote);
-  const courseQA = useCourseStore((state) => state.courseQA);
-  const addQAQuestion = useCourseStore((state) => state.addQAQuestion);
-  const addQAReply = useCourseStore((state) => state.addQAReply);
-
-  // Lấy thông tin user đăng nhập
-  const user = useAuthStore((state) => state.user);
-  const studentName = user?.name ?? 'Học viên Bee';
 
   // State cục bộ cho ghi chú
   const [noteText, setNoteText] = useState('');
@@ -868,6 +906,35 @@ function LearningView({ course, rawChapters, courseId }: {
   // State cục bộ cho Q&A
   const [qaInput, setQaInput] = useState('');
   const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
+  const [discussionThreads, setDiscussionThreads] = useState<CourseDiscussionThread[]>([]);
+  const [loadingDiscussion, setLoadingDiscussion] = useState(false);
+  const [postingQuestion, setPostingQuestion] = useState(false);
+  const [postingReplyId, setPostingReplyId] = useState<string | null>(null);
+  const [studentExams, setStudentExams] = useState<StudentExamSummaryResponse[]>([]);
+
+  const chapterSections = useMemo(() => (
+    rawChapters.length > 0
+      ? [...rawChapters]
+          .sort((a, b) => a.position - b.position)
+          .map(chapter => ({
+            ...chapter,
+            lessons: [...chapter.lessons]
+              .sort((a, b) => a.position - b.position)
+              .map(adaptLearningLesson),
+          }))
+      : [{
+          id: 'flat-lessons',
+          title: 'Nội dung khóa học',
+          description: null,
+          position: 1,
+          hasQuizConfig: false,
+          lessons: course.lessons ?? [],
+        }]
+  ), [rawChapters, course.lessons]);
+
+  const [expandedChapterIds, setExpandedChapterIds] = useState<Set<string>>(
+    () => new Set(chapterSections.slice(0, 1).map(chapter => chapter.id))
+  );
 
   // Cập nhật nội dung ghi chú khi chuyển bài học
   useEffect(() => {
@@ -878,39 +945,59 @@ function LearningView({ course, rawChapters, courseId }: {
     }
   }, [activeLesson, course.id, lessonNotes]);
 
-  // Khởi tạo Q&A thảo luận mẫu khi chưa có dữ liệu câu hỏi cho khóa học này
   useEffect(() => {
-    if (!courseQA[course.id]) {
-      const initialQuestions = [
-        {
-          author: 'Nguyễn Văn Hùng (Học viên)',
-          content: 'Thành phần cấu trúc hằng đẳng thức đáng nhớ số 3 (Hiệu hai bình phương), có mẹo nào giúp nhớ nhanh không bị nhầm với bình phương của một hiệu không ạ?'
-        },
-        {
-          author: 'Lê Minh Tuấn (Học viên)',
-          content: 'Thầy cô cho em hỏi bài tập tự luyện của Chương 1 có lời giải chi tiết từng bước không ạ? Có vài câu em chưa hiểu cách biến đổi.'
-        }
-      ];
+    if (!activeLesson) return;
 
-      initialQuestions.forEach((q) => {
-        useCourseStore.getState().addQAQuestion(course.id, q.author, q.content);
+    const activeChapter = chapterSections.find(chapter =>
+      chapter.lessons.some(lesson => lesson.id === activeLesson.id)
+    );
+    if (!activeChapter) return;
+
+    setExpandedChapterIds(prev => {
+      if (prev.has(activeChapter.id)) return prev;
+      const next = new Set(prev);
+      next.add(activeChapter.id);
+      return next;
+    });
+  }, [activeLesson, chapterSections]);
+
+  useEffect(() => {
+    if (activeTab !== 'qa') return;
+
+    let cancelled = false;
+    setLoadingDiscussion(true);
+    listCourseDiscussionThreads(course.id)
+      .then(items => {
+        if (!cancelled) setDiscussionThreads(items);
+      })
+      .catch(error => {
+        if (!cancelled) {
+          notify.error(error instanceof Error ? error.message : 'Không tải được thảo luận');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDiscussion(false);
       });
 
-      // Thêm phản hồi mẫu cho câu hỏi đầu tiên
-      setTimeout(() => {
-        const updatedList = useCourseStore.getState().courseQA[course.id] ?? [];
-        if (updatedList.length > 0) {
-          const firstQuestionId = updatedList[updatedList.length - 1].id;
-          useCourseStore.getState().addQAReply(
-            course.id,
-            firstQuestionId,
-            'Cô Trần Lan (Giảng viên)',
-            'Chào Hùng! Mẹo nhỏ là: "Hiệu hai bình phương" là hiệu của hai số mũ 2 riêng biệt: a² - b² = (a-b)(a+b). Còn "Bình phương của một hiệu" là bình phương toàn bộ biểu thức phép trừ: (a-b)². Hãy nhớ viết ra nháp vài lần để quen tay em nhé!'
-          );
-        }
-      }, 100);
-    }
-  }, [course.id, courseQA]);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, course.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listStudentCourseExams(course.id)
+      .then(items => {
+        if (!cancelled) setStudentExams(items);
+      })
+      .catch(() => {
+        if (!cancelled) setStudentExams([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [course.id]);
 
   // Tính toán tiến độ học tập thực tế dựa trên completedLessons
   const completedList = completedLessons[course.id] ?? [];
@@ -930,6 +1017,18 @@ function LearningView({ course, rawChapters, courseId }: {
   }
 
   // Callback từ QuizModal khi user nộp bài
+  function toggleChapter(chapterId: string) {
+    setExpandedChapterIds(prev => {
+      const next = new Set(prev);
+      if (next.has(chapterId)) {
+        next.delete(chapterId);
+      } else {
+        next.add(chapterId);
+      }
+      return next;
+    });
+  }
+
   function handleQuizComplete(lessonId: string, score: number) {
     saveQuizScore(course.id, lessonId, score);
   }
@@ -939,22 +1038,54 @@ function LearningView({ course, rawChapters, courseId }: {
     notify.success('Đã lưu ghi chú thành công!');
   };
 
-  const handleAddQuestion = () => {
-    if (!qaInput.trim()) return;
-    addQAQuestion(course.id, `${studentName} (Học viên)`, qaInput.trim());
-    setQaInput('');
-    notify.success('Đã đăng câu hỏi thảo luận thành công!');
+  function upsertDiscussionThread(thread: CourseDiscussionThread) {
+    setDiscussionThreads(prev => {
+      const exists = prev.some(item => item.id === thread.id);
+      const next = exists
+        ? prev.map(item => item.id === thread.id ? thread : item)
+        : [thread, ...prev];
+      return next.sort((a, b) =>
+        new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()
+      );
+    });
+  }
+
+  const handleAddQuestion = async () => {
+    const content = qaInput.trim();
+    if (!content) return;
+    try {
+      setPostingQuestion(true);
+      const thread = await createCourseDiscussionThread(course.id, {
+        lessonId: activeLesson?.id ?? null,
+        content,
+      });
+      upsertDiscussionThread(thread);
+      setQaInput('');
+      notify.success('Đã đăng câu hỏi thảo luận thành công!');
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Không đăng được câu hỏi');
+    } finally {
+      setPostingQuestion(false);
+    }
   };
 
-  const handleAddReply = (questionId: string) => {
+  const handleAddReply = async (questionId: string) => {
     const text = replyInputs[questionId] ?? '';
     if (!text.trim()) return;
-    addQAReply(course.id, questionId, `${studentName} (Học viên)`, text.trim());
-    setReplyInputs((prev) => ({ ...prev, [questionId]: '' }));
-    notify.success('Đã gửi phản hồi thành công!');
+    try {
+      setPostingReplyId(questionId);
+      const thread = await addCourseDiscussionReply(course.id, questionId, text.trim());
+      upsertDiscussionThread(thread);
+      setReplyInputs((prev) => ({ ...prev, [questionId]: '' }));
+      notify.success('Đã gửi phản hồi thành công!');
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Không gửi được phản hồi');
+    } finally {
+      setPostingReplyId(null);
+    }
   };
 
-  const questionsList = courseQA[course.id] ?? [];
+  const questionsList = discussionThreads;
 
   return (
     <div className="h-screen bg-surface flex flex-col font-sans overflow-hidden">
@@ -1184,27 +1315,38 @@ function LearningView({ course, rawChapters, courseId }: {
                     {/* Form câu hỏi mới */}
                     <div className="bg-surface-container p-5 rounded-2xl border border-outline-variant/30 space-y-3">
                       <h4 className="font-bold text-sm text-on-surface">Đặt câu hỏi thảo luận</h4>
+                      {activeLesson && (
+                        <p className="text-xs text-on-surface-variant font-medium">
+                          Bài hiện tại: <span className="text-on-surface">{activeLesson.title}</span>
+                        </p>
+                      )}
                       <div className="flex gap-3">
                         <textarea
                           value={qaInput}
                           onChange={(e) => setQaInput(e.target.value)}
-                          placeholder="Viết câu hỏi thắc mắc của bạn tại đây để giảng viên hỗ trợ..."
+                          placeholder="Viết câu hỏi thắc mắc của bạn tại đây để mọi người cùng trao đổi..."
                           className="flex-grow min-h-[90px] p-4 text-sm rounded-2xl bg-surface border border-outline-variant/40 focus:border-primary outline-none resize-none text-on-surface transition-all placeholder:text-on-surface-variant/40"
                         />
                       </div>
                       <div className="flex justify-end">
                         <button
                           onClick={handleAddQuestion}
-                          className="px-5 py-2.5 bg-primary hover:bg-primary/95 text-on-primary rounded-xl font-bold text-xs shadow-md transition-colors flex items-center gap-1.5"
+                          disabled={postingQuestion}
+                          className="px-5 py-2.5 bg-primary hover:bg-primary/95 text-on-primary rounded-xl font-bold text-xs shadow-md transition-colors flex items-center gap-1.5 disabled:opacity-60"
                         >
-                          <Send className="w-3.5 h-3.5" /> Gửi câu hỏi
+                          {postingQuestion ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                          Gửi câu hỏi
                         </button>
                       </div>
                     </div>
 
                     {/* Danh sách các câu hỏi Q&A */}
                     <div className="space-y-4">
-                      {questionsList.length === 0 ? (
+                      {loadingDiscussion ? (
+                        <div className="flex items-center justify-center py-10 text-on-surface-variant">
+                          <Loader2 className="w-6 h-6 animate-spin" />
+                        </div>
+                      ) : questionsList.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-10 opacity-60">
                           <MessageSquare className="w-12 h-12 mb-4 text-on-surface-variant" />
                           <p className="font-semibold text-on-surface text-sm">Chưa có câu hỏi nào.</p>
@@ -1214,14 +1356,22 @@ function LearningView({ course, rawChapters, courseId }: {
                           <div key={qa.id} className="bg-surface border border-outline-variant/20 p-5 rounded-2xl space-y-4 shadow-sm">
                             <div className="flex gap-3 items-start">
                               <img
-                                src={`https://ui-avatars.com/api/?name=${encodeURIComponent(qa.authorName)}&background=random&size=40`}
+                                src={avatarFor(qa.authorName, qa.authorAvatarUrl, 40)}
                                 alt={qa.authorName}
                                 className="w-10 h-10 rounded-full flex-shrink-0 shadow-sm"
                               />
                               <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <span className="font-bold text-sm text-on-surface">{qa.authorName}</span>
-                                  <span className="text-[10px] text-on-surface-variant/60">{qa.date}</span>
+                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
+                                    {roleLabel(qa.authorRole)}
+                                  </span>
+                                  {qa.lessonTitle && (
+                                    <span className="text-[10px] text-on-surface-variant/70 line-clamp-1">
+                                      {qa.lessonTitle}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-on-surface-variant/60">{formatDiscussionDate(qa.createdAt)}</span>
                                 </div>
                                 <p className="text-on-surface text-sm mt-2 leading-relaxed font-semibold">
                                   {qa.content}
@@ -1235,14 +1385,17 @@ function LearningView({ course, rawChapters, courseId }: {
                                 {qa.replies.map((reply) => (
                                   <div key={reply.id} className="flex gap-2.5 items-start">
                                     <img
-                                      src={`https://ui-avatars.com/api/?name=${encodeURIComponent(reply.authorName)}&background=random&size=32`}
+                                      src={avatarFor(reply.authorName, reply.authorAvatarUrl, 32)}
                                       alt={reply.authorName}
                                       className="w-8 h-8 rounded-full flex-shrink-0"
                                     />
                                     <div className="min-w-0 flex-1 bg-surface-container/20 p-3 rounded-xl">
-                                      <div className="flex items-center gap-2">
+                                      <div className="flex flex-wrap items-center gap-2">
                                         <span className="font-bold text-xs text-on-surface">{reply.authorName}</span>
-                                        <span className="text-[9px] text-on-surface-variant/50">{reply.date}</span>
+                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
+                                          {roleLabel(reply.authorRole)}
+                                        </span>
+                                        <span className="text-[9px] text-on-surface-variant/50">{formatDiscussionDate(reply.createdAt)}</span>
                                       </div>
                                       <p className="text-xs text-on-surface-variant mt-1 leading-relaxed font-medium">
                                         {reply.content}
@@ -1269,9 +1422,10 @@ function LearningView({ course, rawChapters, courseId }: {
                               />
                               <button
                                 onClick={() => handleAddReply(qa.id)}
-                                className="px-3.5 py-2 bg-secondary-container hover:bg-secondary-container/95 text-on-secondary-container rounded-xl font-bold text-xs transition-colors whitespace-nowrap"
+                                disabled={postingReplyId === qa.id}
+                                className="px-3.5 py-2 bg-secondary-container hover:bg-secondary-container/95 text-on-secondary-container rounded-xl font-bold text-xs transition-colors whitespace-nowrap disabled:opacity-60"
                               >
-                                Phản hồi
+                                {postingReplyId === qa.id ? 'Đang gửi...' : 'Phản hồi'}
                               </button>
                             </div>
                           </div>
@@ -1322,112 +1476,143 @@ function LearningView({ course, rawChapters, courseId }: {
                 </button>
               </div>
 
-              <div className="flex-grow overflow-y-auto p-3 space-y-1.5">
-                {course.lessons?.map(lesson => {
-                  const isActive = activeLesson?.id === lesson.id;
-                  const courseScores = quizScores[course.id] ?? {};
-                  const quizScore = courseScores[lesson.id]; // undefined nếu chưa làm
-                  const isQuiz = lesson.type === 'quiz';
+              <div className="flex-grow overflow-y-auto px-3 py-4 space-y-4">
+                {chapterSections.map((chapter, chapterIndex) => {
+                  const isExpanded = expandedChapterIds.has(chapter.id);
+                  const examSlotIndex = Math.floor(chapterIndex / 3);
+                  const exam = studentExams.find(item => item.slotIndex === examSlotIndex);
+                  const shouldShowExam = (chapterIndex + 1) % 3 === 0 && exam;
 
-                  // ── Quiz item trong sidebar ──────────────────────────────
-                  if (isQuiz) {
-                    const hasScore = quizScore !== undefined;
-                    return (
-                      <button
-                        key={lesson.id}
-                        onClick={() => handleLessonClick(lesson)}
-                        className={`w-full text-left p-4 rounded-2xl flex gap-3 transition-all border group ${
-                          hasScore
-                            ? 'bg-amber-500/5 border-amber-500/20 hover:bg-amber-500/10'
-                            : 'bg-surface hover:bg-amber-500/5 border-transparent hover:border-amber-500/20'
-                        }`}
-                      >
-                        <div className="mt-0.5 flex-shrink-0">
-                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                            hasScore ? 'bg-amber-500 text-white' : 'bg-amber-500/10 text-amber-500 group-hover:bg-amber-500/20'
-                          }`}>
-                            <ClipboardList className="w-4.5 h-4.5" />
-                          </div>
-                        </div>
-                        <div className="flex-grow pr-1 min-w-0">
-                          <h4 className="font-semibold text-sm leading-tight text-on-surface mb-1 line-clamp-2">
-                            {lesson.title}
-                          </h4>
-                          <div className="flex items-center gap-2">
-                            {hasScore ? (
-                              <>
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                                  quizScore >= 70 ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'
-                                }`}>
-                                  {quizScore}%
-                                </span>
-                                <span className="text-xs text-on-surface-variant">Đã làm</span>
-                              </>
-                            ) : (
-                              <span className="text-xs text-amber-600 font-medium">{lesson.duration}</span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex-shrink-0 self-center">
-                          <span className="text-xs font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full">
-                            Quiz
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  }
-
-                  // ── Video/PDF item trong sidebar ─────────────────────────
-                  const isCompleted = completedList.includes(lesson.id);
                   return (
-                    <button
-                      key={lesson.id}
-                      onClick={() => handleLessonClick(lesson)}
-                      className={`w-full text-left p-4 rounded-2xl flex gap-3 transition-all border ${
-                        isActive
-                          ? 'bg-primary/10 border-primary/30 shadow-sm'
-                          : 'bg-surface hover:bg-surface-container border-transparent'
-                      }`}
-                    >
-                      <div className="mt-0.5 flex-shrink-0">
-                        {isCompleted
-                          ? <CheckCircle2 className="w-5 h-5 text-green-500" />
-                          : lesson.type === 'video'
-                          ? <PlayCircle className={`w-5 h-5 ${isActive ? 'text-primary' : 'text-on-surface-variant'}`} />
-                          : <FileText className={`w-5 h-5 ${isActive ? 'text-blue-500' : 'text-on-surface-variant'}`} />
-                        }
-                      </div>
-                      <div className="flex-grow pr-1 min-w-0">
-                        <h4 className={`font-semibold text-sm leading-tight mb-1 line-clamp-2 ${isActive ? 'text-primary' : 'text-on-surface'}`}>
-                          {lesson.title}
-                        </h4>
-                        <span className="text-xs text-on-surface-variant">{lesson.duration}</span>
-                      </div>
-                    </button>
+                    <div key={chapter.id} className="space-y-2">
+                    <section className="border-b border-outline-variant/30 last:border-b-0 pb-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleChapter(chapter.id)}
+                        aria-expanded={isExpanded}
+                        className="w-full rounded-xl px-2.5 py-2 flex items-start justify-between gap-3 text-left hover:bg-surface-container transition-colors"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs font-extrabold uppercase tracking-wide text-on-surface-variant">
+                            Chương {chapterIndex + 1}
+                          </p>
+                          <h4 className="text-sm font-extrabold text-on-surface leading-snug line-clamp-2">
+                            {chapter.title}
+                          </h4>
+                        </div>
+                        <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-on-surface hover:bg-surface-container-high">
+                          {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                        </span>
+                      </button>
+
+                      <AnimatePresence initial={false}>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2, ease: 'easeInOut' }}
+                            className="overflow-hidden"
+                          >
+                            <div className="space-y-1 pl-3 pt-1">
+                              {chapter.lessons.map((lesson, lessonIndex) => {
+                                const isActive = activeLesson?.id === lesson.id;
+                                const isCompleted = completedList.includes(lesson.id);
+
+                                return (
+                                  <button
+                                    key={lesson.id}
+                                    onClick={() => handleLessonClick(lesson)}
+                                    className={`w-full text-left rounded-xl border px-3 py-2.5 flex gap-3 transition-all ${
+                                      isActive
+                                        ? 'bg-primary/10 border-primary/30 shadow-sm'
+                                        : 'bg-surface hover:bg-surface-container border-transparent'
+                                    }`}
+                                  >
+                                    <div className="mt-0.5 flex-shrink-0">
+                                      {isCompleted
+                                        ? <CheckCircle2 className="w-4.5 h-4.5 text-green-500" />
+                                        : lesson.type === 'video'
+                                        ? <PlayCircle className={`w-4.5 h-4.5 ${isActive ? 'text-primary' : 'text-on-surface-variant'}`} />
+                                        : <FileText className={`w-4.5 h-4.5 ${isActive ? 'text-blue-500' : 'text-on-surface-variant'}`} />
+                                      }
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className={`text-sm font-semibold leading-snug line-clamp-2 ${isActive ? 'text-primary' : 'text-on-surface'}`}>
+                                        Bài {lessonIndex + 1}: {lesson.title.replace(/^Bài\s*\d+\s*[:.-]?\s*/i, '')}
+                                      </p>
+                                      <p className="text-xs text-on-surface-variant mt-0.5">{lesson.duration}</p>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+
+                              {chapter.hasQuizConfig && chapter.id !== 'flat-lessons' && (
+                                <Link
+                                  to={`/courses/${courseId}/chapters/${chapter.id}/quiz`}
+                                  className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 flex items-center gap-3 bg-surface hover:bg-amber-500/5 hover:border-amber-500/20 transition-all group"
+                                >
+                                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-500 group-hover:bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                                    <ClipboardList className="w-4 h-4" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-on-surface line-clamp-1">Quiz chương {chapterIndex + 1}</p>
+                                    <p className="text-xs text-amber-600 font-medium">Làm quiz ngay</p>
+                                  </div>
+                                </Link>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </section>
+
+                    {shouldShowExam && (
+                      exam.unlocked ? (
+                        <Link
+                          to={`/courses/${courseId}/exams/${exam.slotIndex}`}
+                          className={`w-full text-left rounded-2xl border px-3 py-3 flex items-start gap-3 transition-all ${
+                            exam.passed
+                              ? 'bg-green-500/5 border-green-500/25 hover:bg-green-500/10'
+                              : 'bg-primary/5 border-primary/25 hover:bg-primary/10'
+                          }`}
+                        >
+                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                            exam.passed ? 'bg-green-500/15 text-green-600' : 'bg-primary/15 text-primary'
+                          }`}>
+                            {exam.passed ? <CheckCircle2 className="w-4.5 h-4.5" /> : <ClipboardList className="w-4.5 h-4.5" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-sm font-extrabold line-clamp-2 ${exam.passed ? 'text-green-700' : 'text-primary'}`}>
+                              {exam.name}
+                            </p>
+                            <p className="mt-0.5 text-xs font-medium text-on-surface-variant">
+                              {exam.passed
+                                ? `Đã đạt ${exam.latestScorePercent ?? 0}%`
+                                : `Mở khóa sau ${exam.passedQuizCount}/${exam.requiredQuizCount} quiz · Làm bài ngay`}
+                            </p>
+                          </div>
+                        </Link>
+                      ) : (
+                        <div className="w-full rounded-2xl border border-outline-variant/40 bg-surface-container/50 px-3 py-3 flex items-start gap-3 opacity-90">
+                          <div className="w-8 h-8 rounded-xl bg-surface-container-high text-on-surface-variant flex items-center justify-center flex-shrink-0">
+                            <Lock className="w-4.5 h-4.5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-extrabold text-on-surface line-clamp-2">{exam.name}</p>
+                            <p className="mt-0.5 text-xs font-medium text-on-surface-variant">
+                              {exam.lockedReason ?? `Cần pass ${exam.requiredQuizCount} quiz chương`}
+                            </p>
+                            <p className="mt-1 text-[11px] font-bold text-on-surface-variant">
+                              Đã pass {exam.passedQuizCount}/{exam.requiredQuizCount} quiz
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    )}
+                    </div>
                   );
                 })}
-
-                {/* Quiz theo chương — chỉ hiện chương GV đã cấu hình quiz (hasQuizConfig=true) */}
-                {rawChapters.some(ch => ch.hasQuizConfig) && (
-                  <div className="mt-3 pt-3 border-t border-outline-variant/30">
-                    <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider px-1 mb-2">Quiz theo chương</p>
-                    {rawChapters.filter(ch => ch.hasQuizConfig).map(ch => (
-                      <Link
-                        key={ch.id}
-                        to={`/courses/${courseId}/chapters/${ch.id}/quiz`}
-                        className="w-full text-left p-3 rounded-2xl flex items-center gap-3 bg-surface hover:bg-amber-500/5 border border-transparent hover:border-amber-500/20 transition-all group mb-1.5"
-                      >
-                        <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-500 group-hover:bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-                          <ClipboardList className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-on-surface line-clamp-1">{ch.title}</p>
-                          <p className="text-xs text-amber-600 font-medium">Làm quiz ngay →</p>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                )}
               </div>
             </motion.div>
           )}

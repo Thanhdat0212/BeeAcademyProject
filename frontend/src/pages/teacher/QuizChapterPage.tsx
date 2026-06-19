@@ -24,7 +24,7 @@ import {
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Megaphone, Database, CheckCircle2,
   ChevronDown, Shuffle, Timer, AlertTriangle,
-  Circle, ListChecks, Zap, TrendingUp, Minus,
+  Circle, ListChecks, Zap, TrendingUp, Minus, UserCircle, Lock,
 } from 'lucide-react';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
@@ -41,6 +41,8 @@ const NAV_ITEMS = [
   { icon: Megaphone,       label: 'Khiếu nại',          path: '/teacher/complaints'},
   { icon: BarChart2,       label: 'Doanh thu',          path: '/teacher/revenue'   },
   { icon: Landmark,        label: 'TK ngân hàng',       path: '/teacher/bank'      },
+  { icon: UserCircle,      label: 'Hồ sơ',              path: '/teacher/profile'   },
+  { icon: Lock,            label: 'Tài khoản',           path: '/teacher/account'   },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -323,7 +325,7 @@ export default function QuizChapterPage() {
                 <p className="text-sm font-bold text-on-surface leading-none">{user?.name ?? 'Giáo viên'}</p>
                 <p className="text-xs text-on-surface-variant mt-0.5">Giáo viên</p>
               </div>
-              <img src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'GV')}&background=7c3aed&color=fff&bold=true&size=64`} alt="avatar" className="w-9 h-9 rounded-full border-2 border-primary/30" />
+              <img src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'GV')}&background=7c3aed&color=fff&bold=true&size=64`} alt="avatar" className="w-9 h-9 rounded-full object-cover border-2 border-primary/30" />
             </div>
           </div>
         </header>

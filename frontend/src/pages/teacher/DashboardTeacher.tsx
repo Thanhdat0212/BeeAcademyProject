@@ -14,6 +14,7 @@ import {
   CheckCircle2, PlusCircle,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Megaphone, Database, Loader2, PackageOpen,
+  UserCircle, Lock,
 } from 'lucide-react';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -70,11 +71,13 @@ const NAV_ITEMS = [
   { icon: PenSquare,       label: 'Quiz chương',       path: '/teacher/quiz'      },
   { icon: Database,        label: 'Ngân hàng câu hỏi', path: '/teacher/questions' },
   { icon: GraduationCap,   label: 'Bài kiểm tra',      path: '/teacher/exam'      },
-  { icon: ClipboardList,   label: 'Chấm điểm',         path: '/teacher/grades'    },
+  { icon: ClipboardList,   label: 'Chấm tự luận',      path: '/teacher/grades'    },
   { icon: HelpCircle,      label: 'Hỏi & Đáp',         path: '/teacher/qa'        },
   { icon: Megaphone,       label: 'Khiếu nại',         path: '/teacher/complaints'},
   { icon: BarChart2,       label: 'Doanh thu',         path: '/teacher/revenue'   },
   { icon: Landmark,        label: 'TK ngân hàng',      path: '/teacher/bank'      },
+  { icon: UserCircle,      label: 'Hồ sơ',             path: '/teacher/profile'   },
+  { icon: Lock,            label: 'Tài khoản',         path: '/teacher/account'   },
 ];
 
 // ─── StatCard ────────────────────────────────────────────────────────────────
@@ -328,9 +331,9 @@ export default function DashboardTeacher() {
                 <p className="text-xs text-on-surface-variant mt-0.5">Giáo viên</p>
               </div>
               <img
-                src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
+                src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
                 alt="avatar"
-                className="w-9 h-9 rounded-full border-2 border-primary/30"
+                className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
               />
             </div>
           </div>

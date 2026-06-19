@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -19,6 +20,8 @@ import java.util.UUID;
 public interface QuizConfigRepository extends JpaRepository<QuizConfig, UUID> {
 
     Optional<QuizConfig> findByChapterId(UUID chapterId);
+
+    List<QuizConfig> findByChapterIdIn(Collection<UUID> chapterIds);
 
     boolean existsByChapterId(UUID chapterId);
 

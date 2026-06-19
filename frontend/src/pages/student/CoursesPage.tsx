@@ -114,7 +114,7 @@ export default function CoursesPage() {
         size: 24,
       });
       // Map BE shape → UI shape một lần duy nhất ở đây
-      setCourses(page.items.map(adaptCourseSummary));
+      setCourses(page.items.map(s => adaptCourseSummary(s)));
     } catch (err) {
       const message = isApiError(err)
         ? err.message

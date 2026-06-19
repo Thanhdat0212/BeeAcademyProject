@@ -66,6 +66,9 @@ interface AuthState {
    * `user` chấp nhận shape UserSummary từ API, store tự map sang User UI.
    */
   loginWithTokens: (payload: AuthTokenPayload) => void;
+
+  /** Cập nhật token sau khi refresh, giữ nguyên dữ liệu phiên đang dùng. */
+  refreshSession: (payload: AuthTokenPayload) => void;
  
   /** Cập nhật user info (sau khi PUT /api/me). */
   updateUser: (partial: Partial<User>) => void;
@@ -120,6 +123,14 @@ export const useAuthStore = create<AuthState>()(
           refreshToken: payload.refreshToken,
           linkedStudents: [], // reset danh sách con khi login account mới
         }),
+
+      refreshSession: (payload) =>
+        set((state) => ({
+          isLoggedIn: true,
+          user: toUiUser(payload.user) ?? state.user,
+          accessToken: payload.accessToken,
+          refreshToken: payload.refreshToken,
+        })),
 
       updateUser: (partial) =>
         set((state) => ({

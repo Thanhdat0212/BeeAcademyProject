@@ -13,11 +13,18 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
 import { apiClient, unwrap } from '../../api/client';
 import type { ApiResponse, PageResponse } from '../../types/api';
+import {
+  listAdminComplaints,
+  updateAdminComplaintStatus,
+  adminReplyComplaint,
+  type ComplaintThread,
+  type ComplaintSummary,
+} from '../../api/complaintService';
 import {
   LayoutDashboard, BookOpen, Users, ShoppingBag,
   FileText, TrendingUp, TrendingDown, DollarSign,
@@ -25,20 +32,19 @@ import {
   CheckCircle2, Clock, XCircle, PlusCircle, Calculator, Wallet, BarChart2, Settings,
   AlertTriangle, Search, Filter, Download, Send, Check, Ban, MessageSquare, AlertCircle, Calendar, Hash, Megaphone, CheckCircle, ShieldAlert, Edit2, RotateCcw
 } from 'lucide-react';
-import { MOCK_COURSES } from '../../data/mockCourses';
+import {
+  getAdminOverview,
+  getAdminPayouts,
+  getAdminPayoutStats,
+  confirmPayout,
+  type AdminOverview,
+  type AdminPayoutRow,
+  type AdminPayoutStats,
+} from '../../api/adminService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // KIỂU DỮ LIỆU (Types & Interfaces)
 // ─────────────────────────────────────────────────────────────────────────────
-
-interface Order {
-  id: string;
-  student: string;
-  course: string;
-  amount: number;
-  date: string;
-  status: 'success' | 'pending' | 'failed';
-}
 
 interface UserAccount {
   id: string;
@@ -61,32 +67,18 @@ interface CourseApproval {
   reason?: string;
 }
 
-interface TeacherPayout {
-  id: string;
-  teacherName: string;
-  bankName: string;
-  bankAccount: string;
-  bankAccountHolder: string;
-  totalRevenue: number;
-  platformFee: number;
-  teacherShare: number;
-  status: 'paid' | 'pending' | 'overdue';
-  overdueDays?: number;
-  paymentDate?: string;
-  txnHash?: string;
-  notes?: string;
-}
-
 interface Complaint {
   id: string;
   senderName: string;
-  senderRole: 'student' | 'parent';
+  senderRole: 'student' | 'parent' | 'teacher';
   title: string;
   type: 'payment' | 'content' | 'system' | 'other';
   content: string;
   createdAt: string;
-  status: 'pending' | 'resolved' | 'rejected';
+  status: 'pending' | 'in_progress' | 'resolved' | 'rejected';
   responseNote?: string;
+  messageCount?: number;
+  lastActivityAt?: string;
 }
 
 interface SystemAnnouncement {
@@ -115,19 +107,75 @@ interface AdminUser {
 interface UserStats { students: number; teachers: number; parents: number; total: number; }
 interface PendingCourseSummary { id: string; title: string; teacherName: string; submittedAt: string; }
 
+function formatApiDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function mapComplaintType(category: string): Complaint['type'] {
+  if (category === 'payment') return 'payment';
+  if (category === 'technical' || category === 'system') return 'system';
+  if (
+    category === 'course_content' ||
+    category === 'content' ||
+    category === 'course_review' ||
+    category === 'teacher' ||
+    category === 'grading' ||
+    category === 'student_report'
+  ) {
+    return 'content';
+  }
+  return 'other';
+}
+
+function mapComplaintThread(thread: ComplaintThread): Complaint {
+  const firstMessage = thread.messages[0];
+  const lastAdminMessage = [...thread.messages]
+    .reverse()
+    .find(message => message.authorRole === 'admin');
+
+  return {
+    id: thread.id,
+    senderName: thread.senderName,
+    senderRole: thread.senderRole === 'teacher' ? 'teacher'
+      : thread.senderRole === 'parent' ? 'parent'
+      : 'student',
+    title: thread.title,
+    type: mapComplaintType(thread.category),
+    content: firstMessage?.content ?? '',
+    createdAt: formatApiDateTime(thread.createdAt),
+    status: thread.status,
+    responseNote: lastAdminMessage?.content,
+    messageCount: thread.messages.length,
+    lastActivityAt: formatApiDateTime(thread.lastActivityAt),
+  };
+}
+
+function mapComplaintSummary(summary: ComplaintSummary): Complaint {
+  return {
+    id: summary.id,
+    senderName: summary.senderName,
+    senderRole: summary.senderRole === 'teacher' ? 'teacher'
+      : summary.senderRole === 'parent' ? 'parent'
+      : 'student',
+    title: summary.title,
+    type: mapComplaintType(summary.category),
+    content: '',
+    createdAt: formatApiDateTime(summary.createdAt),
+    status: summary.status,
+    lastActivityAt: formatApiDateTime(summary.lastActivityAt),
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DỮ LIỆU KHỞI TẠO MOCK (Initial Mock Data — sẽ được thay dần bằng API)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MOCK_ORDERS: Order[] = [
-  { id: 'ORD-001', student: 'Nguyễn Văn An',   course: 'Toán Đại Số Nâng Cao',     amount: 499000, date: '18/05/2026', status: 'success' },
-  { id: 'ORD-002', student: 'Trần Thị Bích',   course: 'Vật Lý Khám Phá Điện Từ',  amount: 550000, date: '18/05/2026', status: 'success' },
-  { id: 'ORD-003', student: 'Lê Minh Cường',   course: 'Hóa Học Cơ Bản',           amount: 400000, date: '17/05/2026', status: 'pending' },
-  { id: 'ORD-004', student: 'Phạm Thị Dung',   course: 'Văn Học Dân Gian',          amount: 350000, date: '17/05/2026', status: 'success' },
-  { id: 'ORD-005', student: 'Hoàng Quốc Đạt',  course: 'Lịch Sử Kháng Chiến',      amount: 299000, date: '16/05/2026', status: 'failed'  },
-  { id: 'ORD-006', student: 'Vũ Ngọc Hà',      course: 'Toán Hình Học Không Gian',  amount: 450000, date: '16/05/2026', status: 'success' },
-  { id: 'ORD-007', student: 'Đỗ Thanh Hùng',   course: 'Địa Lý Khí Hậu Vùng Miền', amount: 250000, date: '15/05/2026', status: 'success' },
-];
 
 const INITIAL_USERS: UserAccount[] = [
   { id: 'USR-001', name: 'Nguyễn Văn An', email: 'an.nv@beeacademy.edu.vn', role: 'student', status: 'active', createdAt: '10/01/2026' },
@@ -145,13 +193,6 @@ const INITIAL_COURSES_APPROVAL: CourseApproval[] = [
   { id: 'CRS-APV-004', title: 'KHTN Lớp 6 - Lý & Hóa Căn Bản', teacherName: 'Thầy Trần Hữu Nam', subject: 'KHTN', grade: 'Lớp 6', price: 299000, submittedAt: '12/05/2026', status: 'revision_required', reason: 'Thiếu file tài liệu bài tập chương 3 và âm thanh video bài 2 bị rè.' },
 ];
 
-const INITIAL_PAYOUTS: TeacherPayout[] = [
-  { id: 'PAY-001', teacherName: 'Thầy Trần Hữu Nam', bankName: 'Vietcombank', bankAccount: '1023456789', bankAccountHolder: 'TRAN HUU NAM', totalRevenue: 25000000, platformFee: 5000000, teacherShare: 20000000, status: 'pending' },
-  { id: 'PAY-002', teacherName: 'Cô Nguyễn Thị Hoa', bankName: 'Techcombank', bankAccount: '1903456789012', bankAccountHolder: 'NGUYEN THI HOA', totalRevenue: 18000000, platformFee: 3600000, teacherShare: 14400000, status: 'overdue', overdueDays: 3 },
-  { id: 'PAY-003', teacherName: 'Thầy Mike Robinson', bankName: 'BIDV', bankAccount: '2151000123456', bankAccountHolder: 'MIKE ROBINSON', totalRevenue: 15000000, platformFee: 3000000, teacherShare: 12000000, status: 'paid', paymentDate: '10/05/2026', txnHash: 'FT261309852230', notes: 'Đã thanh toán lương kỳ 1 tháng 5/2026.' },
-  { id: 'PAY-004', teacherName: 'Cô Lê Thị Kim Anh', bankName: 'Agribank', bankAccount: '3100205123456', bankAccountHolder: 'LE THI KIM ANH', totalRevenue: 8000000, platformFee: 1600000, teacherShare: 6400000, status: 'pending' },
-  { id: 'PAY-005', teacherName: 'Thầy Phạm Thanh Sơn', bankName: 'MB Bank', bankAccount: '0990123456789', bankAccountHolder: 'PHAM THANH SON', totalRevenue: 12000000, platformFee: 2400000, teacherShare: 9600000, status: 'overdue', overdueDays: 5 },
-];
 
 const INITIAL_COMPLAINTS: Complaint[] = [
   { id: 'CMP-001', senderName: 'Nguyễn Văn An', senderRole: 'student', title: 'Không mở được Quiz chương 4', type: 'system', content: 'Em đã hoàn thành 100% bài giảng của chương 3 và 4 nhưng Quiz chương 4 vẫn báo là bị khóa, nhờ Admin mở giúp.', createdAt: '20/05/2026', status: 'pending' },
@@ -172,16 +213,20 @@ export default function DashboardAdmin() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const logout = useAuthStore(state => state.logout);
 
   // Lấy tab hoạt động từ URL query (?tab=...), mặc định là 'overview'
-  const activeTab = searchParams.get('tab') || 'overview';
+  const activeTab = location.pathname === '/admin/complaints'
+    ? 'complaints'
+    : searchParams.get('tab') || 'overview';
 
   // State quản lý dữ liệu động của toàn trang
   const [users, setUsers] = useState<UserAccount[]>(INITIAL_USERS);
   const [coursesApproval, setCoursesApproval] = useState<CourseApproval[]>(INITIAL_COURSES_APPROVAL);
-  const [payouts, setPayouts] = useState<TeacherPayout[]>(INITIAL_PAYOUTS);
-  const [complaints, setComplaints] = useState<Complaint[]>(INITIAL_COMPLAINTS);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [loadingComplaints, setLoadingComplaints] = useState(false);
+  const [updatingComplaint, setUpdatingComplaint] = useState(false);
   const [announcements, setAnnouncements] = useState<SystemAnnouncement[]>(INITIAL_ANNOUNCEMENTS);
 
   // State cấu hình hệ thống
@@ -198,7 +243,7 @@ export default function DashboardAdmin() {
   const [courseReason, setCourseReason] = useState('');
 
   // Modal Đối soát chuyển khoản
-  const [payoutModal, setPayoutModal] = useState<{ isOpen: boolean; payout: TeacherPayout | null }>({ isOpen: false, payout: null });
+  const [payoutModal, setPayoutModal] = useState<{ isOpen: boolean; payout: AdminPayoutRow | null }>({ isOpen: false, payout: null });
   const [payoutForm, setPayoutForm] = useState({ txnHash: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
 
   // Modal Xử lý khiếu nại
@@ -220,13 +265,18 @@ export default function DashboardAdmin() {
   const [filterComplaintStatus, setFilterComplaintStatus] = useState<string>('all');
 
   // ── STATE & CALLBACKS API THẬT (phải đặt sau filter state) ───────
-  const [apiUsers,       setApiUsers]       = useState<AdminUser[]>([]);
-  const [loadingUsers,   setLoadingUsers]   = useState(false);
-  const [userStats,      setUserStats]      = useState<UserStats | null>(null);
-  const [pendingCourses, setPendingCourses] = useState<PendingCourseSummary[]>([]);
-  const [loadingPending, setLoadingPending] = useState(false);
-  const [userPage,       setUserPage]       = useState(0);
-  const [userTotalPages, setUserTotalPages] = useState(0);
+  const [apiUsers,        setApiUsers]        = useState<AdminUser[]>([]);
+  const [loadingUsers,    setLoadingUsers]    = useState(false);
+  const [userStats,       setUserStats]       = useState<UserStats | null>(null);
+  const [pendingCourses,  setPendingCourses]  = useState<PendingCourseSummary[]>([]);
+  const [loadingPending,  setLoadingPending]  = useState(false);
+  const [userPage,        setUserPage]        = useState(0);
+  const [userTotalPages,  setUserTotalPages]  = useState(0);
+  const [overview,        setOverview]        = useState<AdminOverview | null>(null);
+  const [loadingOverview, setLoadingOverview] = useState(false);
+  const [apiPayouts,      setApiPayouts]      = useState<AdminPayoutRow[]>([]);
+  const [payoutStats,     setPayoutStats]     = useState<AdminPayoutStats | null>(null);
+  const [loadingPayouts,  setLoadingPayouts]  = useState(false);
 
   const loadUsers = useCallback(async (page = 0) => {
     setLoadingUsers(true);
@@ -260,52 +310,62 @@ export default function DashboardAdmin() {
     finally { setLoadingPending(false); }
   }, []);
 
-  useEffect(() => { Promise.all([loadUserStats(), loadPendingCourses()]); }, [loadUserStats, loadPendingCourses]);
+  const loadComplaints = useCallback(async () => {
+    setLoadingComplaints(true);
+    try {
+      const data = await listAdminComplaints();
+      setComplaints(data.map(mapComplaintSummary));
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Khong tai duoc hop thu khieu nai');
+    } finally {
+      setLoadingComplaints(false);
+    }
+  }, []);
+
+  const loadOverview = useCallback(async () => {
+    setLoadingOverview(true);
+    try {
+      const data = await getAdminOverview();
+      setOverview(data);
+    } catch { notify.error('Không tải được dữ liệu tổng quan'); }
+    finally { setLoadingOverview(false); }
+  }, []);
+
+  const loadPayouts = useCallback(async () => {
+    setLoadingPayouts(true);
+    try {
+      const data = await getAdminPayouts();
+      setApiPayouts(data);
+    } catch {}
+    finally { setLoadingPayouts(false); }
+  }, []);
+
+  const loadPayoutStats = useCallback(async () => {
+    try {
+      const data = await getAdminPayoutStats();
+      setPayoutStats(data);
+    } catch {}
+  }, []);
+
+  useEffect(() => { Promise.all([loadOverview(), loadUserStats(), loadPendingCourses(), loadComplaints()]); }, [loadOverview, loadUserStats, loadPendingCourses, loadComplaints]);
   useEffect(() => { if (activeTab === 'users') loadUsers(0); }, [activeTab, loadUsers]);
+  useEffect(() => { if (activeTab === 'payouts') { loadPayouts(); loadPayoutStats(); } }, [activeTab, loadPayouts, loadPayoutStats]);
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchUser), 300);
     return () => clearTimeout(t);
   }, [searchUser]);
 
   // ───────────────────────────────────────────────────────────────────────────
-  // TÍNH TOÁN CÁC THÔNG SỐ TÀI CHÍNH DỰA TRÊN STATE ĐỘNG (UC34 & UC37)
+  // TÍNH TOÁN CÁC THÔNG SỐ TÀI CHÍNH DỰA TRÊN API THẬT (UC34 & UC37)
   // ───────────────────────────────────────────────────────────────────────────
-  const financialStats = useMemo(() => {
-    const totalGMV = payouts.reduce((sum, p) => sum + p.totalRevenue, 0);
-    const totalPlatformFee = payouts.reduce((sum, p) => sum + p.platformFee, 0);
-    
-    // Tổng số tiền giáo viên đã thanh toán
-    const totalPaidToTeachers = payouts
-      .filter(p => p.status === 'paid')
-      .reduce((sum, p) => sum + p.teacherShare, 0);
-
-    // Tổng số tiền giáo viên chờ thanh toán
-    const totalUnpaidTeacherShare = payouts
-      .filter(p => p.status !== 'paid')
-      .reduce((sum, p) => sum + p.teacherShare, 0);
-
-    // Tổng tiền công ty đang giữ = Toàn bộ platform_fee thu được + Số tiền giáo viên chưa chuyển khoản
-    const totalFundsHeld = totalPlatformFee + totalUnpaidTeacherShare;
-    
-    // Cảnh báo số lượng giáo viên quá hạn thanh toán
-    const overdueCount = payouts.filter(p => p.status === 'overdue').length;
-
-    return {
-      totalGMV,
-      totalPlatformFee,
-      totalPaidToTeachers,
-      totalFundsHeld,
-      totalPendingPayout: totalUnpaidTeacherShare,
-      overdueCount
-    };
-  }, [payouts]);
-
-  // Tổng số học viên (mock dynamic)
-  const totalStudentsCount = useMemo(() => {
-    const studentsInCourses = MOCK_COURSES.reduce((sum, c) => sum + c.students, 0);
-    const registeredUsersCount = users.filter(u => u.role === 'student').length;
-    return studentsInCourses + registeredUsersCount;
-  }, [users]);
+  const financialStats = useMemo(() => ({
+    totalGMV:             overview?.totalGmv ?? 0,
+    totalPlatformFee:     overview?.totalPlatformFee ?? 0,
+    totalPaidToTeachers:  (overview?.totalGmv ?? 0) - (overview?.totalPlatformFee ?? 0) - (overview?.totalPendingPayout ?? 0),
+    totalFundsHeld:       overview?.totalFundsHeld ?? 0,
+    totalPendingPayout:   overview?.totalPendingPayout ?? 0,
+    overdueCount:         overview?.overdueTeacherCount ?? 0,
+  }), [overview]);
 
   // Đăng xuất
   function handleLogout() {
@@ -316,7 +376,11 @@ export default function DashboardAdmin() {
 
   // Chuyển Tab qua URL search param
   function changeTab(tabId: string) {
-    setSearchParams({ tab: tabId });
+    if (location.pathname === '/admin') {
+      setSearchParams({ tab: tabId });
+    } else {
+      navigate(`/admin?tab=${encodeURIComponent(tabId)}`);
+    }
     setIsSidebarOpen(false);
   }
 
@@ -398,26 +462,29 @@ export default function DashboardAdmin() {
   // WORKFLOW 3: ĐỐI SOÁT & THANH TOÁN (UC39, UC40)
   // ───────────────────────────────────────────────────────────────────────────
   const filteredPayouts = useMemo(() => {
-    return payouts.filter(p => {
+    return apiPayouts.filter(p => {
       const matchSearch = p.teacherName.toLowerCase().includes(searchPayout.toLowerCase());
-      const matchStatus = filterPayoutStatus === 'all' || p.status === filterPayoutStatus;
+      const matchStatus = filterPayoutStatus === 'all'
+        || (filterPayoutStatus === 'paid' && p.status === 'PAID')
+        || (filterPayoutStatus === 'overdue' && p.overdue)
+        || (filterPayoutStatus === 'pending' && p.status !== 'PAID');
       return matchSearch && matchStatus;
     });
-  }, [payouts, searchPayout, filterPayoutStatus]);
+  }, [apiPayouts, searchPayout, filterPayoutStatus]);
 
   // UC39: Xuất báo cáo thanh toán doanh thu đến GV dưới dạng CSV (Excel-compatible)
   function handleExportCSV() {
-    const headers = ['Mã thanh toán', 'Tên giáo viên', 'Ngân hàng', 'Số tài khoản', 'Chủ tài khoản', 'Tổng doanh thu (đ)', 'Phí nền tảng (đ)', 'Thực nhận (đ)', 'Trạng thái'];
-    const rows = payouts.map(p => [
-      p.id,
+    const headers = ['Kỳ thanh toán', 'Tên giáo viên', 'Ngân hàng', 'Số tài khoản', 'Chủ tài khoản', 'Tổng doanh thu (đ)', 'Phí nền tảng (đ)', 'Thực nhận (đ)', 'Trạng thái'];
+    const rows = apiPayouts.map(p => [
+      p.periodId,
       p.teacherName,
-      p.bankName,
-      `'${p.bankAccount}`, // Tránh Excel tự động convert thành số mũ khoa học
-      p.bankAccountHolder,
-      p.totalRevenue,
+      p.bankName ?? '',
+      `'${p.accountNumber ?? ''}`, // Tránh Excel tự động convert thành số mũ khoa học
+      p.accountHolder ?? '',
+      p.totalGross,
       p.platformFee,
-      p.teacherShare,
-      p.status === 'paid' ? 'Đã thanh toán' : p.status === 'overdue' ? 'Trễ hạn' : 'Chờ thanh toán'
+      p.teacherAmount,
+      p.status === 'PAID' ? 'Đã thanh toán' : p.overdue ? 'Trễ hạn' : 'Chờ thanh toán'
     ]);
     
     // Định dạng CSV hỗ trợ tiếng Việt có dấu trong Excel (dùng UTF-8 BOM \uFEFF)
@@ -434,13 +501,13 @@ export default function DashboardAdmin() {
     notify.success('Xuất file báo cáo thanh toán thành công!');
   }
 
-  function handleOpenPayoutModal(payout: TeacherPayout) {
+  function handleOpenPayoutModal(payout: AdminPayoutRow) {
     setPayoutModal({ isOpen: true, payout });
     setPayoutForm({ txnHash: '', notes: '', paymentDate: new Date().toISOString().split('T')[0] });
   }
 
   // UC40: Xác nhận đã chuyển khoản ngân hàng thủ công cho giáo viên
-  function handleConfirmPayout(e: React.FormEvent) {
+  async function handleConfirmPayout(e: React.FormEvent) {
     e.preventDefault();
     if (!payoutForm.txnHash.trim()) {
       notify.error('Vui lòng nhập Mã giao dịch ngân hàng!');
@@ -449,21 +516,18 @@ export default function DashboardAdmin() {
     const payout = payoutModal.payout;
     if (!payout) return;
 
-    setPayouts(prev => prev.map(p => {
-      if (p.id === payout.id) {
-        return {
-          ...p,
-          status: 'paid' as const,
-          txnHash: payoutForm.txnHash,
-          notes: payoutForm.notes,
-          paymentDate: payoutForm.paymentDate
-        };
-      }
-      return p;
-    }));
-
-    notify.success(`Đã xác nhận thanh toán thành công ${payout.teacherShare.toLocaleString('vi-VN')}đ cho ${payout.teacherName}!`);
-    setPayoutModal({ isOpen: false, payout: null });
+    try {
+      const updated = await confirmPayout(payout.periodId, {
+        transferRef: payoutForm.txnHash.trim(),
+        transferContent: payoutForm.notes.trim() || undefined,
+      });
+      setApiPayouts(prev => prev.map(p => p.periodId === updated.periodId ? updated : p));
+      notify.success(`Đã xác nhận thanh toán thành công ${payout.teacherAmount.toLocaleString('vi-VN')}đ cho ${payout.teacherName}!`);
+      setPayoutModal({ isOpen: false, payout: null });
+      loadOverview();
+    } catch (err: unknown) {
+      notify.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Không xác nhận được thanh toán');
+    }
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -473,13 +537,32 @@ export default function DashboardAdmin() {
     return complaints.filter(c => filterComplaintStatus === 'all' || c.status === filterComplaintStatus);
   }, [complaints, filterComplaintStatus]);
 
-  function handleResolveComplaint(status: 'resolved' | 'rejected') {
+  async function handleResolveComplaint(status: 'resolved' | 'rejected') {
     if (!complaintReply.trim()) {
       notify.error('Vui lòng nhập nội dung xử lý/phản hồi!');
       return;
     }
     const complaint = complaintModal.complaint;
     if (!complaint) return;
+
+    setUpdatingComplaint(true);
+    try {
+      if (complaintReply.trim()) {
+        await adminReplyComplaint(complaint.id, complaintReply.trim());
+      }
+      const updated = await updateAdminComplaintStatus(complaint.id, status);
+      const mapped = mapComplaintThread(updated);
+      setComplaints(prev => prev.map(c => c.id === mapped.id ? mapped : c));
+      notify.success(status === 'resolved' ? 'Da giai quyet khieu nai thanh cong!' : 'Da bac bo khieu nai!');
+      setComplaintModal({ isOpen: false, complaint: null });
+      setComplaintReply('');
+      return;
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Khong the cap nhat khieu nai');
+      return;
+    } finally {
+      setUpdatingComplaint(false);
+    }
 
     setComplaints(prev => prev.map(c => {
       if (c.id === complaint.id) {
@@ -589,9 +672,9 @@ export default function DashboardAdmin() {
                     {financialStats.overdueCount}
                   </span>
                 )}
-                {item.tabId === 'courses' && coursesApproval.filter(c => c.status === 'pending').length > 0 && (
+                {item.tabId === 'courses' && pendingCourses.length > 0 && (
                   <span className="ml-auto w-5 h-5 rounded-full bg-secondary-container text-on-secondary-container font-mono text-[10px] flex items-center justify-center font-bold">
-                    {coursesApproval.filter(c => c.status === 'pending').length}
+                    {pendingCourses.length}
                   </span>
                 )}
                 {item.tabId === 'complaints' && complaints.filter(c => c.status === 'pending').length > 0 && (
@@ -798,31 +881,32 @@ export default function DashboardAdmin() {
                               <th className="text-left px-6 py-3 font-bold text-on-surface-variant text-xs uppercase">Học sinh</th>
                               <th className="text-left px-4 py-3 font-bold text-on-surface-variant text-xs uppercase hidden md:table-cell">Khóa học</th>
                               <th className="text-left px-4 py-3 font-bold text-on-surface-variant text-xs uppercase">Số tiền</th>
-                              <th className="text-left px-4 py-3 font-bold text-on-surface-variant text-xs uppercase">Trạng thái</th>
+                              <th className="text-left px-4 py-3 font-bold text-on-surface-variant text-xs uppercase">Ngày</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {MOCK_ORDERS.map((order, idx) => (
+                            {loadingOverview ? (
+                              <tr>
+                                <td colSpan={4} className="px-6 py-10 text-center text-on-surface-variant text-xs">Đang tải...</td>
+                              </tr>
+                            ) : (overview?.recentOrders ?? []).length === 0 ? (
+                              <tr>
+                                <td colSpan={4} className="px-6 py-10 text-center text-on-surface-variant text-xs">Chưa có đơn hàng nào.</td>
+                              </tr>
+                            ) : (overview?.recentOrders ?? []).map((order, idx) => (
                               <tr key={order.id} className={`border-b border-outline-variant/10 hover:bg-surface-container/30 transition-colors ${idx % 2 !== 0 ? 'bg-surface-container-low/20' : ''}`}>
                                 <td className="px-6 py-3.5">
-                                  <p className="font-bold text-on-surface">{order.student}</p>
-                                  <p className="text-[10px] text-on-surface-variant font-mono">{order.id}</p>
+                                  <p className="font-bold text-on-surface">{order.studentName}</p>
+                                  <p className="text-[10px] text-on-surface-variant font-mono">{order.paymentRef}</p>
                                 </td>
                                 <td className="px-4 py-3.5 text-on-surface-variant hidden md:table-cell">
-                                  <span className="line-clamp-1 max-w-[200px]">{order.course}</span>
+                                  <span className="line-clamp-1 max-w-[200px]">{order.courseTitles}</span>
                                 </td>
                                 <td className="px-4 py-3.5 font-extrabold text-on-surface">
                                   {order.amount.toLocaleString('vi-VN')}đ
                                 </td>
-                                <td className="px-4 py-3.5">
-                                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                    order.status === 'success' ? 'bg-green-100 text-green-700' :
-                                    order.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
-                                  }`}>
-                                    {order.status === 'success' && 'Thành công'}
-                                    {order.status === 'pending' && 'Chờ xử lý'}
-                                    {order.status === 'failed' && 'Lỗi'}
-                                  </span>
+                                <td className="px-4 py-3.5 text-xs text-on-surface-variant">
+                                  {new Date(order.paidAt).toLocaleDateString('vi-VN')}
                                 </td>
                               </tr>
                             ))}
@@ -840,14 +924,16 @@ export default function DashboardAdmin() {
                         </span>
                       </div>
                       <div className="space-y-4">
-                        {[...MOCK_COURSES].sort((a, b) => b.students - a.students).slice(0, 5).map((course, idx, arr) => {
-                          const maxStudents = arr[0].students;
-                          const percent = (course.students / maxStudents) * 100;
+                        {(overview?.topCourses ?? []).length === 0 ? (
+                          <p className="text-xs text-on-surface-variant text-center py-4">Chưa có dữ liệu.</p>
+                        ) : (overview?.topCourses ?? []).map((course, idx, arr) => {
+                          const maxCount = arr[0].enrollmentCount || 1;
+                          const percent = (course.enrollmentCount / maxCount) * 100;
                           return (
                             <div key={course.id} className="space-y-1">
                               <div className="flex justify-between items-center text-xs">
                                 <span className="font-bold text-on-surface line-clamp-1 flex-1 pr-3">{course.title}</span>
-                                <span className="font-extrabold text-on-surface-variant">{course.students.toLocaleString('vi-VN')} em</span>
+                                <span className="font-extrabold text-on-surface-variant">{course.enrollmentCount.toLocaleString('vi-VN')} em</span>
                               </div>
                               <div className="h-2 bg-surface-container-high rounded-full overflow-hidden">
                                 <motion.div
@@ -858,8 +944,8 @@ export default function DashboardAdmin() {
                                 />
                               </div>
                               <div className="flex justify-between items-center text-[10px] text-on-surface-variant">
-                                <span>Giáo viên: {course.instructor}</span>
-                                <span className="font-bold text-primary">{course.subject} · {course.grade}</span>
+                                <span>Giáo viên: {course.teacherName}</span>
+                                <span className="font-bold text-primary">{course.categoryName}</span>
                               </div>
                             </div>
                           );
@@ -882,7 +968,7 @@ export default function DashboardAdmin() {
                         <BookOpen className="w-7 h-7 text-primary mb-2" />
                         <p className="font-bold text-sm">Duyệt khóa học</p>
                         <p className="text-xs text-on-surface-variant mt-1">
-                          {coursesApproval.filter(c => c.status === 'pending').length} bài chờ duyệt
+                          {pendingCourses.length} bài chờ duyệt
                         </p>
                       </button>
                       
@@ -1150,8 +1236,10 @@ export default function DashboardAdmin() {
                   {/* Bảng báo cáo doanh thu tổng quan */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-5 shadow-sm">
-                      <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">Tổng doanh thu nền tảng (GMV)</p>
-                      <h3 className="text-2xl font-black text-on-surface">{financialStats.totalGMV.toLocaleString('vi-VN')}đ</h3>
+                      <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">Tổng doanh thu tháng này (GMV)</p>
+                      <h3 className="text-2xl font-black text-on-surface">
+                        {payoutStats ? payoutStats.currentMonthGross.toLocaleString('vi-VN') : '…'}đ
+                      </h3>
                       <p className="text-[10px] text-green-600 mt-1 font-semibold flex items-center gap-0.5">
                         <TrendingUp className="w-3 h-3" />
                         Doanh thu từ VNPay & MoMo
@@ -1159,16 +1247,20 @@ export default function DashboardAdmin() {
                     </div>
 
                     <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-5 shadow-sm">
-                      <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">Phí vận hành giữ lại (Platform Fee {platformFeePercent}%)</p>
-                      <h3 className="text-2xl font-black text-primary">{financialStats.totalPlatformFee.toLocaleString('vi-VN')}đ</h3>
+                      <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">Phí vận hành giữ lại (Platform Fee)</p>
+                      <h3 className="text-2xl font-black text-primary">
+                        {payoutStats ? payoutStats.netPlatformFee.toLocaleString('vi-VN') : '…'}đ
+                      </h3>
                       <p className="text-[10px] text-on-surface-variant mt-1">Doanh thu ròng của công ty</p>
                     </div>
 
                     <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-5 shadow-sm">
-                      <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">Tổng chi hoa hồng giáo viên (80%)</p>
-                      <h3 className="text-2xl font-black text-green-600">{(financialStats.totalGMV - financialStats.totalPlatformFee).toLocaleString('vi-VN')}đ</h3>
+                      <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1">Tổng cần chuyển cho giáo viên</p>
+                      <h3 className="text-2xl font-black text-green-600">
+                        {payoutStats ? payoutStats.pendingTeacherAmount.toLocaleString('vi-VN') : '…'}đ
+                      </h3>
                       <p className="text-[10px] text-on-surface-variant mt-1">
-                        Đã chuyển: {financialStats.totalPaidToTeachers.toLocaleString('vi-VN')}đ
+                        Các kỳ PENDING chưa thanh toán
                       </p>
                     </div>
                   </div>
@@ -1231,28 +1323,36 @@ export default function DashboardAdmin() {
                           </tr>
                         </thead>
                         <tbody>
-                          {filteredPayouts.map(p => (
-                            <tr key={p.id} className="border-b border-outline-variant/10 hover:bg-surface-container/20 transition-colors">
+                          {loadingPayouts ? (
+                            <tr>
+                              <td colSpan={5} className="px-6 py-10 text-center text-on-surface-variant text-xs">Đang tải...</td>
+                            </tr>
+                          ) : filteredPayouts.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-6 py-10 text-center text-on-surface-variant text-xs">Không có dữ liệu.</td>
+                            </tr>
+                          ) : filteredPayouts.map(p => (
+                            <tr key={p.periodId} className="border-b border-outline-variant/10 hover:bg-surface-container/20 transition-colors">
                               <td className="px-6 py-3.5">
                                 <p className="font-bold text-on-surface">{p.teacherName}</p>
                                 <p className="text-xs text-on-surface-variant font-medium">
-                                  {p.bankName} · <span className="font-mono text-on-surface font-semibold">{p.bankAccount}</span> ({p.bankAccountHolder})
+                                  {p.monthYear} · {p.bankName ?? 'Chưa có TK'}{p.accountNumber ? <> · <span className="font-mono text-on-surface font-semibold">{p.accountNumber}</span></> : null}
                                 </p>
                               </td>
-                              <td className="px-4 py-3.5 text-on-surface-variant font-medium">{p.totalRevenue.toLocaleString('vi-VN')}đ</td>
-                              <td className="px-4 py-3.5 font-extrabold text-on-surface">{p.teacherShare.toLocaleString('vi-VN')}đ</td>
+                              <td className="px-4 py-3.5 text-on-surface-variant font-medium">{p.totalGross.toLocaleString('vi-VN')}đ</td>
+                              <td className="px-4 py-3.5 font-extrabold text-on-surface">{p.teacherAmount.toLocaleString('vi-VN')}đ</td>
                               <td className="px-4 py-3.5">
                                 <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                  p.status === 'paid' ? 'bg-green-100 text-green-700' :
-                                  p.status === 'overdue' ? 'bg-red-100 text-red-700 animate-pulse' : 'bg-amber-100 text-amber-700'
+                                  p.status === 'PAID' ? 'bg-green-100 text-green-700' :
+                                  p.overdue ? 'bg-red-100 text-red-700 animate-pulse' : 'bg-amber-100 text-amber-700'
                                 }`}>
-                                  {p.status === 'paid' && 'Đã thanh toán'}
-                                  {p.status === 'overdue' && `Trễ hạn ${p.overdueDays} ngày`}
-                                  {p.status === 'pending' && 'Chờ thanh toán'}
+                                  {p.status === 'PAID' && 'Đã thanh toán'}
+                                  {p.overdue && p.status !== 'PAID' && 'Trễ hạn'}
+                                  {!p.overdue && p.status !== 'PAID' && 'Chờ thanh toán'}
                                 </span>
                               </td>
                               <td className="px-6 py-3.5 text-right">
-                                {p.status !== 'paid' ? (
+                                {p.status !== 'PAID' ? (
                                   <button
                                     onClick={() => handleOpenPayoutModal(p)}
                                     className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
@@ -1261,8 +1361,8 @@ export default function DashboardAdmin() {
                                   </button>
                                 ) : (
                                   <div className="text-xs text-on-surface-variant font-semibold">
-                                    <p className="text-green-600 font-bold">Ngày chuyển: {p.paymentDate}</p>
-                                    <p className="font-mono text-[10px] mt-0.5">Mã: {p.txnHash}</p>
+                                    <p className="text-green-600 font-bold">Ngày chuyển: {p.paidAt ? new Date(p.paidAt).toLocaleDateString('vi-VN') : '—'}</p>
+                                    <p className="font-mono text-[10px] mt-0.5">Mã: {p.transferRef ?? '—'}</p>
                                   </div>
                                 )}
                               </td>
@@ -1282,7 +1382,7 @@ export default function DashboardAdmin() {
                 <div className="bg-surface-container-lowest border border-outline-variant/40 rounded-2xl p-6 shadow-sm space-y-6">
                   <div className="flex justify-between items-center">
                     <div>
-                      <h2 className="text-lg font-bold">Hộp thư khiếu nại từ Học sinh & Phụ huynh</h2>
+                      <h2 className="text-lg font-bold">Hộp thư khiếu nại từ người dùng</h2>
                       <p className="text-xs text-on-surface-variant mt-0.5">Tiếp nhận khiếu nại chất lượng nội dung hoặc các lỗi cổng thanh toán, xem xét và phản hồi.</p>
                     </div>
                     <div className="relative">
@@ -1293,6 +1393,7 @@ export default function DashboardAdmin() {
                       >
                         <option value="all">Tất cả trạng thái</option>
                         <option value="pending">Chờ xử lý</option>
+                        <option value="in_progress">Đang xử lý</option>
                         <option value="resolved">Đã giải quyết</option>
                         <option value="rejected">Bị bác bỏ</option>
                       </select>
@@ -1313,7 +1414,13 @@ export default function DashboardAdmin() {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredComplaints.length === 0 ? (
+                        {loadingComplaints ? (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-10 text-center text-on-surface-variant">
+                              Dang tai hop thu khieu nai...
+                            </td>
+                          </tr>
+                        ) : filteredComplaints.length === 0 ? (
                           <tr>
                             <td colSpan={5} className="px-6 py-10 text-center text-on-surface-variant">
                               Không tìm thấy khiếu nại nào.
@@ -1325,7 +1432,7 @@ export default function DashboardAdmin() {
                               <td className="px-6 py-3.5">
                                 <p className="font-bold text-on-surface">{c.senderName}</p>
                                 <p className="text-xs text-on-surface-variant font-medium">
-                                  {c.senderRole === 'student' ? 'Học sinh' : 'Phụ huynh'} · {c.createdAt}
+                                  {c.senderRole === 'teacher' ? 'Giáo viên' : c.senderRole === 'parent' ? 'Phụ huynh' : 'Học sinh'} · {c.createdAt}
                                 </p>
                               </td>
                               <td className="px-4 py-3.5">
@@ -1346,9 +1453,11 @@ export default function DashboardAdmin() {
                               <td className="px-4 py-3.5">
                                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${
                                   c.status === 'pending' ? 'bg-amber-100 text-amber-700 animate-pulse' :
+                                  c.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
                                   c.status === 'resolved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                                 }`}>
                                   {c.status === 'pending' && 'Chờ giải quyết'}
+                                  {c.status === 'in_progress' && 'Đang xử lý'}
                                   {c.status === 'resolved' && 'Đã xử lý'}
                                   {c.status === 'rejected' && 'Đã bác bỏ'}
                                 </span>
@@ -1358,7 +1467,7 @@ export default function DashboardAdmin() {
                                   onClick={() => { setComplaintModal({ isOpen: true, complaint: c }); setComplaintReply(c.responseNote || ''); }}
                                   className="px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-xl text-xs font-bold transition-colors"
                                 >
-                                  {c.status === 'pending' ? 'Xử lý ngay' : 'Xem chi tiết'}
+                                  {c.status === 'pending' || c.status === 'in_progress' ? 'Xử lý ngay' : 'Xem chi tiết'}
                                 </button>
                               </td>
                             </tr>
@@ -1641,10 +1750,11 @@ export default function DashboardAdmin() {
               
               <div className="my-4 p-3 bg-surface-container-low rounded-2xl border border-outline-variant/15 space-y-1 text-xs">
                 <p className="font-semibold text-on-surface">Giáo viên: <span className="font-bold">{payoutModal.payout?.teacherName}</span></p>
-                <p className="font-semibold text-on-surface">Ngân hàng: <span className="font-bold">{payoutModal.payout?.bankName}</span></p>
-                <p className="font-semibold text-on-surface">Số tài khoản: <span className="font-mono font-bold text-primary">{payoutModal.payout?.bankAccount}</span></p>
-                <p className="font-semibold text-on-surface">Chủ tài khoản: <span className="font-bold">{payoutModal.payout?.bankAccountHolder}</span></p>
-                <p className="font-semibold text-on-surface">Số tiền cần chuyển: <span className="font-black text-green-600 text-sm">{payoutModal.payout?.teacherShare.toLocaleString('vi-VN')}đ</span></p>
+                <p className="font-semibold text-on-surface">Kỳ thanh toán: <span className="font-bold">{payoutModal.payout?.monthYear}</span></p>
+                <p className="font-semibold text-on-surface">Ngân hàng: <span className="font-bold">{payoutModal.payout?.bankName ?? '—'}</span></p>
+                <p className="font-semibold text-on-surface">Số tài khoản: <span className="font-mono font-bold text-primary">{payoutModal.payout?.accountNumber ?? '—'}</span></p>
+                <p className="font-semibold text-on-surface">Chủ tài khoản: <span className="font-bold">{payoutModal.payout?.accountHolder ?? '—'}</span></p>
+                <p className="font-semibold text-on-surface">Số tiền cần chuyển: <span className="font-black text-green-600 text-sm">{payoutModal.payout?.teacherAmount.toLocaleString('vi-VN')}đ</span></p>
               </div>
 
               <form onSubmit={handleConfirmPayout} className="space-y-4">
@@ -1742,7 +1852,7 @@ export default function DashboardAdmin() {
 
               <div className="my-4 space-y-3">
                 <div className="text-xs space-y-1 font-semibold">
-                  <p className="text-on-surface-variant">Người gửi: <span className="text-on-surface font-extrabold">{complaintModal.complaint?.senderName}</span> ({complaintModal.complaint?.senderRole === 'student' ? 'Học sinh' : 'Phụ huynh'})</p>
+                  <p className="text-on-surface-variant">Người gửi: <span className="text-on-surface font-extrabold">{complaintModal.complaint?.senderName}</span> ({complaintModal.complaint?.senderRole === 'teacher' ? 'Giáo viên' : complaintModal.complaint?.senderRole === 'parent' ? 'Phụ huynh' : 'Học sinh'})</p>
                   <p className="text-on-surface-variant">Ngày gửi: <span className="text-on-surface font-medium">{complaintModal.complaint?.createdAt}</span></p>
                   <p className="text-on-surface-variant">Tiêu đề: <span className="text-on-surface font-extrabold text-sm">{complaintModal.complaint?.title}</span></p>
                 </div>
@@ -1759,7 +1869,7 @@ export default function DashboardAdmin() {
                     required
                     value={complaintReply}
                     onChange={(e) => setComplaintReply(e.target.value)}
-                    disabled={complaintModal.complaint?.status !== 'pending'}
+                    disabled={complaintModal.complaint?.status === 'resolved' || complaintModal.complaint?.status === 'rejected'}
                     placeholder="Nhập hướng xử lý, đính kèm kết quả hoặc cam kết bồi hoàn/sửa đổi nội dung học..."
                     className="w-full px-3 py-2 bg-surface-container border border-outline-variant/30 rounded-xl text-sm focus:outline-none focus:border-primary disabled:opacity-75 disabled:cursor-not-allowed"
                   />
@@ -1767,17 +1877,19 @@ export default function DashboardAdmin() {
               </div>
 
               <div className="flex gap-2">
-                {complaintModal.complaint?.status === 'pending' ? (
+                {complaintModal.complaint?.status === 'pending' || complaintModal.complaint?.status === 'in_progress' ? (
                   <>
                     <button
                       onClick={() => handleResolveComplaint('resolved')}
-                      className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors"
+                      disabled={updatingComplaint}
+                      className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Duyệt giải quyết
                     </button>
                     <button
                       onClick={() => handleResolveComplaint('rejected')}
-                      className="py-2 px-4 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-sm font-bold transition-colors"
+                      disabled={updatingComplaint}
+                      className="py-2 px-4 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Bác bỏ
                     </button>

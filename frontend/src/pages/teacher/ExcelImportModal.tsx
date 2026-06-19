@@ -310,6 +310,17 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
   const validRows  = rows.filter(r => !r.error);
   const errorRows  = rows.filter(r => r.error);
 
+  function handleCourseChange(nextCourseId: string) {
+    setCourseId(nextCourseId);
+    setChapterId('');
+
+    if (!nextCourseId) return;
+
+    const selectedCourse = courses.find(c => c.id === nextCourseId);
+    if (selectedCourse?.categoryId) setCategoryId(selectedCourse.categoryId);
+    setGrade(selectedCourse?.grades?.[0] ? String(selectedCourse.grades[0]) : '');
+  }
+
   async function handleImport() {
     if (!categoryId) { notify.error('Vui lòng chọn môn học'); return; }
     if (!grade) { notify.error('Vui lòng chọn lớp'); return; }
@@ -409,6 +420,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                 </p>
                 {(() => {
                   const isCategoryLocked = Boolean(courseId);
+                  const isGradeLocked = Boolean(courseId);
                   return (
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                       {/* Khóa học — chọn trước để auto-fill môn */}
@@ -417,7 +429,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                         <div className="relative">
                           <select
                             value={courseId}
-                            onChange={e => { setCourseId(e.target.value); setChapterId(''); }}
+                            onChange={e => handleCourseChange(e.target.value)}
                             disabled={loadingMeta}
                             className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary disabled:opacity-50"
                           >
@@ -459,13 +471,20 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                         <div className="relative">
                           <select
                             value={grade} onChange={e => setGrade(e.target.value)}
-                            className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary"
+                            disabled={isGradeLocked}
+                            className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             <option value="">-- Chọn lớp --</option>
                             {[6, 7, 8, 9].map(g => <option key={g} value={g}>Lớp {g}</option>)}
                           </select>
-                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+                          {isGradeLocked
+                            ? <Lock className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-primary/60" />
+                            : <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+                          }
                         </div>
+                        {isGradeLocked && (
+                          <p className="text-xs text-primary/70 mt-1">Lấy từ khóa học</p>
+                        )}
                       </div>
 
                       {/* Chương */}

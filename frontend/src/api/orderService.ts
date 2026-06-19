@@ -5,6 +5,11 @@ export type OrderStatus = 'PENDING' | 'PAID' | 'CANCELLED' | 'EXPIRED';
 export interface OrderItemResponse {
   courseId: string;
   priceAtPurchase: number;
+  courseTitle: string;
+  thumbnailUrl: string | null;
+  teacherName: string | null;
+  categoryName: string | null;
+  grades: number[];
 }
 
 export interface OrderResponse {

@@ -18,6 +18,7 @@ import AccountPage from './pages/student/AccountPage';
 import AvatarPage from './pages/student/AvatarPage';
 import ComplaintsPage from './pages/student/ComplaintsPage';
 import StudentQuizPage from './pages/student/StudentQuizPage';
+import StudentExamPage from './pages/student/StudentExamPage';
 import DashboardAdmin from './pages/admin/DashboardAdmin';
 import DashboardTeacher from './pages/teacher/DashboardTeacher';
 import TeacherCoursesPage from './pages/teacher/CoursesPage';
@@ -30,6 +31,8 @@ import TeacherRevenuePage from './pages/teacher/RevenuePage';
 import TeacherBankPage from './pages/teacher/BankPage';
 import TeacherComplaintsPage from './pages/teacher/ComplaintsPage';
 import QuestionBankPage from './pages/teacher/QuestionBankPage';
+import TeacherProfilePage from './pages/teacher/ProfilePage';
+import TeacherAccountPage from './pages/teacher/AccountPage';
 import ApprovalsPage from './pages/admin/ApprovalsPage';
 import CourseReviewPage from './pages/admin/CourseReviewPage';
 import OAuthCallbackPage from './pages/common/OAuthCallbackPage';
@@ -58,6 +61,7 @@ export default function App() {
         <Route path="/courses" element={<CoursesPage />} />
         <Route path="/courses/:id" element={<CourseDetailPage />} />
         <Route path="/courses/:courseId/chapters/:chapterId/quiz" element={<ProtectedRoute><StudentQuizPage /></ProtectedRoute>} />
+        <Route path="/courses/:courseId/exams/:slotIndex" element={<ProtectedRoute><StudentExamPage /></ProtectedRoute>} />
         <Route path="/checkout"      element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
         <Route path="/payment-result" element={<ProtectedRoute><PaymentResultPage /></ProtectedRoute>} />
         <Route path="/orders"        element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
@@ -88,9 +92,12 @@ export default function App() {
         <Route path="/teacher/revenue"    element={<ProtectedRoute role="teacher"><TeacherRevenuePage /></ProtectedRoute>} />
         <Route path="/teacher/bank"       element={<ProtectedRoute role="teacher"><TeacherBankPage /></ProtectedRoute>} />
         <Route path="/teacher/questions"  element={<ProtectedRoute role="teacher"><QuestionBankPage /></ProtectedRoute>} />
+        <Route path="/teacher/profile"    element={<ProtectedRoute role="teacher"><TeacherProfilePage /></ProtectedRoute>} />
+        <Route path="/teacher/account"    element={<ProtectedRoute role="teacher"><TeacherAccountPage /></ProtectedRoute>} />
 
         {/* ── Admin (chỉ role=admin) ── */}
         <Route path="/admin"                     element={<ProtectedRoute role="admin"><DashboardAdmin /></ProtectedRoute>} />
+        <Route path="/admin/complaints"          element={<ProtectedRoute role="admin"><DashboardAdmin /></ProtectedRoute>} />
         <Route path="/admin/approvals"           element={<ProtectedRoute role="admin"><ApprovalsPage /></ProtectedRoute>} />
         <Route path="/admin/approvals/:courseId" element={<ProtectedRoute role="admin"><CourseReviewPage /></ProtectedRoute>} />
         <Route path="/admin/teachers"   element={<ProtectedRoute role="admin"><ComingSoonPage title="Quản lý giáo viên"    subtitle="Danh sách và thông tin giáo viên" /></ProtectedRoute>} />

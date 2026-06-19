@@ -22,6 +22,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -149,7 +151,9 @@ public class OrderService {
             log.info("Order created: {} orderCode={} ref={} checkoutUrl={}",
                 order.getId(), order.getOrderCode(), order.getPaymentRef(), checkoutUrl);
 
-            return OrderResponse.from(order, checkoutUrl);
+            Map<UUID, Course> coursesById = courses.stream()
+                    .collect(Collectors.toMap(Course::getId, Function.identity()));
+            return OrderResponse.from(order, checkoutUrl, coursesById);
 
         } catch (BusinessException e) {
             throw e;
@@ -177,7 +181,7 @@ public class OrderService {
         }
 
         if (order.getStatus() == OrderStatus.PAID) {
-            return OrderResponse.from(order, null);
+            return OrderResponse.from(order, null, loadCourseMap(List.of(order)));
         }
 
         // Bước 1: Gọi PayOS API — chỉ bọc lỗi network/JSON trong try-catch
@@ -209,7 +213,7 @@ public class OrderService {
         }
 
         Order refreshed = orderRepository.findById(orderId).orElse(order);
-        return OrderResponse.from(refreshed, null);
+        return OrderResponse.from(refreshed, null, loadCourseMap(List.of(refreshed)));
     }
 
     @Transactional(readOnly = true)
@@ -220,14 +224,30 @@ public class OrderService {
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException("FORBIDDEN", "Bạn không có quyền xem đơn hàng này");
         }
-        return OrderResponse.from(order, null);
+        return OrderResponse.from(order, null, loadCourseMap(List.of(order)));
     }
 
     @Transactional(readOnly = true)
     public List<OrderResponse> listOrders(UUID userId) {
-        return orderRepository.findByUserIdWithItems(userId).stream()
-            .map(o -> OrderResponse.from(o, null))
+        List<Order> orders = orderRepository.findByUserIdWithItems(userId);
+        Map<UUID, Course> coursesById = loadCourseMap(orders);
+        return orders.stream()
+            .map(o -> OrderResponse.from(o, null, coursesById))
             .toList();
+    }
+
+    private Map<UUID, Course> loadCourseMap(Collection<Order> orders) {
+        Set<UUID> courseIds = orders.stream()
+                .flatMap(order -> order.getItems().stream())
+                .map(OrderItem::getCourseId)
+                .collect(Collectors.toSet());
+
+        if (courseIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return courseRepository.findByIdIn(courseIds).stream()
+                .collect(Collectors.toMap(Course::getId, Function.identity()));
     }
 
     @Transactional

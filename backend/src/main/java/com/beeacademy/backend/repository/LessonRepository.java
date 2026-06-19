@@ -25,6 +25,18 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
     Optional<Lesson> findByIdAndChapterId(UUID lessonId, UUID chapterId);
 
     /**
+     * Load lesson kèm chapter + course để verify lesson thuộc đúng khóa học của Q&A.
+     */
+    @Query("""
+           SELECT l
+           FROM Lesson l
+           JOIN FETCH l.chapter ch
+           JOIN FETCH ch.course c
+           WHERE l.id = :lessonId
+           """)
+    Optional<Lesson> findWithChapterAndCourseById(@Param("lessonId") UUID lessonId);
+
+    /**
      * Tất cả lessons của một chapter, sắp xếp theo position ASC.
      * Dùng để tính position tiếp theo khi thêm lesson mới.
      */

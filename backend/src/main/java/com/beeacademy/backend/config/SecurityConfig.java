@@ -107,8 +107,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**").hasRole("admin")
 
                         // ----- Student Quiz -----
-                        // Học sinh, phụ huynh xem tiến độ, giáo viên không cần route này
-                        .requestMatchers("/api/student/**").authenticated()
+                        // Chỉ student mới được gọi — phụ huynh xem qua /api/parent/**,
+                        // teacher/admin không cần route này (defense-in-depth song song @PreAuthorize).
+                        .requestMatchers("/api/student/**").hasRole("student")
 
                         // ----- Tất cả route còn lại cần JWT hợp lệ -----
                         .anyRequest().authenticated()

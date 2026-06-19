@@ -55,6 +55,11 @@ public class QaService {
 
         Course course = courseRepository.findWithCategoryAndTeacherById(req.courseId())
                 .orElseThrow(() -> new ResourceNotFoundException("Course", req.courseId()));
+        if (course.getTeacher() == null) {
+            throw new BusinessException("COURSE_TEACHER_MISSING",
+                    "Khóa học này chưa được gán giáo viên để nhận câu hỏi.",
+                    HttpStatus.CONFLICT);
+        }
         if (!enrollmentRepository.existsByStudentIdAndCourseId(me.userId(), course.getId())) {
             throw new BusinessException("NOT_ENROLLED",
                     "Bạn cần ghi danh khóa học trước khi đặt câu hỏi.",
@@ -63,7 +68,7 @@ public class QaService {
 
         Lesson lesson = null;
         if (req.lessonId() != null) {
-            lesson = lessonRepository.findById(req.lessonId())
+            lesson = lessonRepository.findWithChapterAndCourseById(req.lessonId())
                     .orElseThrow(() -> new ResourceNotFoundException("Lesson", req.lessonId()));
             if (!lesson.getChapter().getCourse().getId().equals(course.getId())) {
                 throw new BusinessException("INVALID_LESSON",
@@ -71,7 +76,7 @@ public class QaService {
             }
         }
 
-        QaThread saved = qaThreadRepository.save(
+        QaThread saved = qaThreadRepository.saveAndFlush(
                 QaThread.create(student, course, lesson, req.content()));
         return QaThreadResponse.fromEntity(saved);
     }
@@ -86,7 +91,7 @@ public class QaService {
             throwForbidden();
         }
         thread.addStudentMessage(student, req.content());
-        return QaThreadResponse.fromEntity(qaThreadRepository.save(thread));
+        return QaThreadResponse.fromEntity(qaThreadRepository.saveAndFlush(thread));
     }
 
     @Transactional
@@ -97,7 +102,7 @@ public class QaService {
         QaThread thread = loadThread(threadId);
         verifyTeacherOwner(thread, me.userId());
         thread.addTeacherMessage(teacher, req.content());
-        return QaThreadResponse.fromEntity(qaThreadRepository.save(thread));
+        return QaThreadResponse.fromEntity(qaThreadRepository.saveAndFlush(thread));
     }
 
     @Transactional
@@ -110,7 +115,7 @@ public class QaService {
         } else {
             thread.reopen();
         }
-        return QaThreadResponse.fromEntity(qaThreadRepository.save(thread));
+        return QaThreadResponse.fromEntity(qaThreadRepository.saveAndFlush(thread));
     }
 
     private QaThread loadThread(UUID threadId) {
