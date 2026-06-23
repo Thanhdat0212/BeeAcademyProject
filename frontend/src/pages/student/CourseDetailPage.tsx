@@ -22,7 +22,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft, Star, Users, PlayCircle, FileText, CheckCircle2,
@@ -531,7 +531,7 @@ function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalProps) {
 //   'syllabus'   — Nội dung khóa học (danh sách bài học với icon type)
 //   'instructor' — Thông tin giảng viên (avatar + bio)
 // ═══════════════════════════════════════════════════════════════════════════════
-function MarketingView({ course }: { course: Course }) {
+function MarketingView({ course, onStartPreview }: { course: Course; onStartPreview?: () => void }) {
   const [activeTab, setActiveTab] = useState<'overview' | 'syllabus' | 'instructor'>('overview');
 
   const addToCart = useCartStore(state => state.addToCart);
@@ -540,6 +540,14 @@ function MarketingView({ course }: { course: Course }) {
   const enrollCourses = useCourseStore(state => state.enrollCourses);
   const navigate = useNavigate();
   const [activating, setActivating] = useState(false);
+  const previewLessons = useMemo(
+    () => course.lessons?.filter(lesson => lesson.type !== 'quiz' && Boolean(lesson.isFree)) ?? [],
+    [course.lessons],
+  );
+  const primaryPreviewLesson = previewLessons.find(lesson => lesson.type === 'video') ?? previewLessons[0] ?? null;
+  const previewCtaLabel = primaryPreviewLesson?.type === 'video'
+    ? 'Xem video học thử'
+    : 'Xem nội dung học thử';
 
   function handleAddToCart() {
     // Guard 1: chưa đăng nhập → redirect sang /login
@@ -705,9 +713,16 @@ function MarketingView({ course }: { course: Course }) {
                           </div>
                           <div className="flex-grow">
                             <h4 className="font-bold text-on-surface text-base">{lesson.title}</h4>
-                            <span className="text-sm text-on-surface-variant">
-                              {lesson.type === 'video' ? 'Video' : lesson.type === 'pdf' ? 'Tài liệu' : 'Bài kiểm tra'}
-                            </span>
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                              <span className="text-sm text-on-surface-variant">
+                                {lesson.type === 'video' ? 'Video' : lesson.type === 'pdf' ? 'Tài liệu' : 'Bài kiểm tra'}
+                              </span>
+                              {lesson.isFree && lesson.type !== 'quiz' && (
+                                <span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-extrabold text-amber-600">
+                                  Học thử miễn phí
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <div className="text-sm font-semibold text-on-surface-variant bg-surface-container px-3 py-1 rounded-lg flex-shrink-0">
                             {lesson.duration}
@@ -747,9 +762,19 @@ function MarketingView({ course }: { course: Course }) {
                 <img src={course.image} alt={course.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                 <div className="absolute inset-0 bg-black/20" />
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg cursor-pointer hover:scale-110 transition-transform">
-                    <PlayCircle className="w-8 h-8 ml-1" />
-                  </div>
+                  {primaryPreviewLesson && onStartPreview ? (
+                    <button
+                      type="button"
+                      onClick={onStartPreview}
+                      className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg cursor-pointer hover:scale-110 transition-transform"
+                    >
+                      <PlayCircle className="w-8 h-8 ml-1" />
+                    </button>
+                  ) : (
+                    <div className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg">
+                      <PlayCircle className="w-8 h-8 ml-1" />
+                    </div>
+                  )}
                 </div>
               </div>
               {/* Giá: hiển thị giá gốc + giá gạch ngang (giả lập 1.5x) */}
@@ -765,6 +790,28 @@ function MarketingView({ course }: { course: Course }) {
                 <ShoppingCart className="w-6 h-6" />
                 Thêm vào giỏ hàng
               </button>
+              {primaryPreviewLesson && onStartPreview && (
+                <div className="mb-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
+                      <PlayCircle className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-extrabold text-on-surface">Nội dung học thử</p>
+                      <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
+                        Xem trước {previewLessons.length} bài miễn phí trước khi quyết định mua khóa học.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onStartPreview}
+                    className="mt-4 w-full rounded-xl bg-amber-500 px-4 py-3 text-sm font-extrabold text-white transition-colors hover:bg-amber-500/90"
+                  >
+                    {previewCtaLabel}
+                  </button>
+                </div>
+              )}
               {isLoggedIn && (
                 <button
                   onClick={handleActivate}
@@ -857,7 +904,8 @@ function roleLabel(role: string): string {
 
 function adaptLearningLesson(lesson: LessonDetail): Lesson {
   const hasVideo = Boolean(lesson.videoUrl || lesson.videoEmbedUrl);
-  const type: Lesson['type'] = hasVideo ? 'video' : 'pdf';
+  const hasDocuments = (lesson.documents?.length ?? 0) > 0;
+  const type: Lesson['type'] = hasVideo || !hasDocuments ? 'video' : 'pdf';
   return {
     id: lesson.id,
     title: lesson.title,
@@ -866,20 +914,32 @@ function adaptLearningLesson(lesson: LessonDetail): Lesson {
     url: hasVideo
       ? (lesson.videoUrl ?? lesson.videoEmbedUrl ?? '#')
       : (lesson.documents?.[0]?.fileUrl ?? '#'),
+    isFree: lesson.isFree,
     isCompleted: false,
     documents: lesson.documents ?? [],
   };
 }
 
-function LearningView({ course, rawChapters, courseId }: {
+function canOpenLesson(course: Course, lesson: Lesson): boolean {
+  return course.isEnrolled || Boolean(lesson.isFree);
+}
+
+function LearningView({ course, rawChapters, courseId, onExitPreview }: {
   course: Course;
   rawChapters: ChapterDetail[];
   courseId: string;
+  onExitPreview?: () => void;
 }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const isPreviewMode = !course.isEnrolled;
+  const addToCart = useCartStore(state => state.addToCart);
+  const isLoggedIn = useAuthStore(state => state.isLoggedIn);
+  const navigate = useNavigate();
 
   // BUG FIX: guard khi course không có lesson nào (tránh crash do undefined)
-  const firstLesson = course.lessons?.find(l => l.type !== 'quiz') ?? course.lessons?.[0] ?? null;
+  const firstLesson = course.lessons?.find(l => l.type !== 'quiz' && canOpenLesson(course, l))
+    ?? course.lessons?.find(l => canOpenLesson(course, l))
+    ?? null;
 
   // Khởi tạo activeLesson = bài đầu tiên không phải quiz
   const [activeLesson, setActiveLesson] = useState<Lesson | null>(firstLesson);
@@ -935,6 +995,14 @@ function LearningView({ course, rawChapters, courseId }: {
   const [expandedChapterIds, setExpandedChapterIds] = useState<Set<string>>(
     () => new Set(chapterSections.slice(0, 1).map(chapter => chapter.id))
   );
+
+  useEffect(() => {
+    setActiveLesson(firstLesson);
+    setActiveQuiz(null);
+    setActiveTab('overview');
+    setVideoUrlExpired(false);
+    setExpandedChapterIds(new Set(chapterSections.slice(0, 1).map(chapter => chapter.id)));
+  }, [chapterSections, course.id, firstLesson]);
 
   // Cập nhật nội dung ghi chú khi chuyển bài học
   useEffect(() => {
@@ -1008,12 +1076,30 @@ function LearningView({ course, rawChapters, courseId }: {
 
   // Router điều hướng click trong sidebar
   function handleLessonClick(lesson: Lesson) {
+    if (!canOpenLesson(course, lesson)) {
+      notify.error('Bài học này cần mua khóa học để mở khóa.');
+      return;
+    }
     if (lesson.type === 'quiz') {
       setActiveQuiz(lesson);
     } else {
       setActiveLesson(lesson);
       setVideoUrlExpired(false); // reset lỗi URL cũ khi chuyển sang bài mới
     }
+  }
+
+  function handleUnlockCourse() {
+    if (!isLoggedIn) {
+      navigate('/login', { state: { from: `/courses/${course.id}` } });
+      return;
+    }
+    addToCart({
+      id: course.id,
+      title: course.title,
+      priceVnd: parseInt((course.price ?? '0').replace(/\D/g, '')) || 0,
+      image: course.image,
+    });
+    notify.success(`Đã thêm "${course.title}" vào giỏ hàng!`);
   }
 
   // Callback từ QuizModal khi user nộp bài
@@ -1101,6 +1187,11 @@ function LearningView({ course, rawChapters, courseId }: {
           <h1 className="font-bold text-on-surface truncate max-w-[200px] sm:max-w-md text-sm">
             {course.title}
           </h1>
+          {isPreviewMode && (
+            <span className="hidden sm:inline-flex items-center rounded-full bg-amber-500/10 px-3 py-1 text-xs font-extrabold text-amber-600">
+              Học thử
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-4">
           {/* Thanh tiến độ tổng — Tính toán động từ store */}
@@ -1110,6 +1201,24 @@ function LearningView({ course, rawChapters, courseId }: {
               <div className="h-full bg-primary rounded-full" style={{ width: `${progressPercent}%` }} />
             </div>
           </div>
+          {isPreviewMode && onExitPreview && (
+            <button
+              onClick={onExitPreview}
+              className="hidden sm:inline-flex items-center gap-2 rounded-xl border border-outline-variant/50 bg-surface px-4 py-2 text-sm font-bold text-on-surface transition-colors hover:bg-surface-container"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Thông tin khóa học
+            </button>
+          )}
+          {isPreviewMode && (
+            <button
+              onClick={handleUnlockCourse}
+              className="hidden sm:inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-extrabold text-on-primary shadow-md shadow-primary/20 transition-colors hover:bg-primary/90"
+            >
+              <ShoppingCart className="h-4 w-4" />
+              Mua khóa
+            </button>
+          )}
           {/* Toggle sidebar mục lục */}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -1177,9 +1286,13 @@ function LearningView({ course, rawChapters, courseId }: {
               <div className="absolute inset-0 flex flex-col items-center justify-center text-white gap-3 px-8 text-center">
                 <img src={course.image} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
                 <AlertCircle className="w-14 h-14 text-yellow-400 relative z-10" />
-                <p className="text-base font-semibold relative z-10">Video chưa sẵn sàng</p>
+                <p className="text-base font-semibold relative z-10">
+                  {activeLesson.isFree ? 'Bài học thử chưa có video' : 'Video chưa sẵn sàng'}
+                </p>
                 <p className="text-sm text-white/60 relative z-10 max-w-xs">
-                  Nội dung đang được tải lên hoặc xử lý. Vui lòng tải lại trang sau ít phút.
+                  {activeLesson.isFree
+                    ? 'Giáo viên cần upload video hoặc gắn link YouTube/Vimeo cho bài học thử này.'
+                    : 'Nội dung đang được tải lên hoặc xử lý. Vui lòng tải lại trang sau ít phút.'}
                 </p>
                 <button
                   onClick={() => window.location.reload()}
@@ -1518,19 +1631,24 @@ function LearningView({ course, rawChapters, courseId }: {
                               {chapter.lessons.map((lesson, lessonIndex) => {
                                 const isActive = activeLesson?.id === lesson.id;
                                 const isCompleted = completedList.includes(lesson.id);
+                                const isLocked = !canOpenLesson(course, lesson);
 
                                 return (
                                   <button
                                     key={lesson.id}
                                     onClick={() => handleLessonClick(lesson)}
                                     className={`w-full text-left rounded-xl border px-3 py-2.5 flex gap-3 transition-all ${
-                                      isActive
+                                      isLocked
+                                        ? 'bg-surface-container/40 border-transparent opacity-75 hover:opacity-100'
+                                        : isActive
                                         ? 'bg-primary/10 border-primary/30 shadow-sm'
                                         : 'bg-surface hover:bg-surface-container border-transparent'
                                     }`}
                                   >
                                     <div className="mt-0.5 flex-shrink-0">
-                                      {isCompleted
+                                      {isLocked
+                                        ? <Lock className="w-4.5 h-4.5 text-on-surface-variant" />
+                                        : isCompleted
                                         ? <CheckCircle2 className="w-4.5 h-4.5 text-green-500" />
                                         : lesson.type === 'video'
                                         ? <PlayCircle className={`w-4.5 h-4.5 ${isActive ? 'text-primary' : 'text-on-surface-variant'}`} />
@@ -1541,25 +1659,49 @@ function LearningView({ course, rawChapters, courseId }: {
                                       <p className={`text-sm font-semibold leading-snug line-clamp-2 ${isActive ? 'text-primary' : 'text-on-surface'}`}>
                                         Bài {lessonIndex + 1}: {lesson.title.replace(/^Bài\s*\d+\s*[:.-]?\s*/i, '')}
                                       </p>
-                                      <p className="text-xs text-on-surface-variant mt-0.5">{lesson.duration}</p>
+                                      <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                                        <span className="text-xs text-on-surface-variant">{lesson.duration}</span>
+                                        {lesson.isFree && isPreviewMode && (
+                                          <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-extrabold text-amber-600">
+                                            Học thử
+                                          </span>
+                                        )}
+                                        {isLocked && (
+                                          <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-extrabold text-on-surface-variant">
+                                            Cần mua khóa
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   </button>
                                 );
                               })}
 
                               {chapter.hasQuizConfig && chapter.id !== 'flat-lessons' && (
-                                <Link
-                                  to={`/courses/${courseId}/chapters/${chapter.id}/quiz`}
-                                  className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 flex items-center gap-3 bg-surface hover:bg-amber-500/5 hover:border-amber-500/20 transition-all group"
-                                >
-                                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-500 group-hover:bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-                                    <ClipboardList className="w-4 h-4" />
+                                course.isEnrolled ? (
+                                  <Link
+                                    to={`/courses/${courseId}/chapters/${chapter.id}/quiz`}
+                                    className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 flex items-center gap-3 bg-surface hover:bg-amber-500/5 hover:border-amber-500/20 transition-all group"
+                                  >
+                                    <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-500 group-hover:bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                                      <ClipboardList className="w-4 h-4" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-semibold text-on-surface line-clamp-1">Quiz chương {chapterIndex + 1}</p>
+                                      <p className="text-xs text-amber-600 font-medium">Làm quiz ngay</p>
+                                    </div>
+                                  </Link>
+                                ) : (
+                                  <div className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 flex items-center gap-3 bg-surface-container/40 opacity-75">
+                                    <div className="w-7 h-7 rounded-lg bg-surface-container-high text-on-surface-variant flex items-center justify-center flex-shrink-0">
+                                      <Lock className="w-4 h-4" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-semibold text-on-surface line-clamp-1">Quiz chương {chapterIndex + 1}</p>
+                                      <p className="text-xs text-on-surface-variant font-medium">Cần mua khóa để làm quiz</p>
+                                    </div>
                                   </div>
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-semibold text-on-surface line-clamp-1">Quiz chương {chapterIndex + 1}</p>
-                                    <p className="text-xs text-amber-600 font-medium">Làm quiz ngay</p>
-                                  </div>
-                                </Link>
+                                )
                               )}
                             </div>
                           </motion.div>
@@ -1650,6 +1792,7 @@ function LearningView({ course, rawChapters, courseId }: {
 export default function CourseDetailPage() {
   // Đọc :id từ URL /courses/:id — id là UUID của BE
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const purchasedIds = useCourseStore((state) => state.purchasedIds);
 
   // ── State fetch từ API ──────────────────────────────────────────────────
@@ -1706,10 +1849,31 @@ export default function CourseDetailPage() {
 
   // Kiểm tra quyền truy cập từ backend (enrolled = đã mua / GV sở hữu / Admin)
   const isEnrolled = course.isEnrolled || purchasedIds.includes(course.id);
+  const courseWithAccess = { ...course, isEnrolled };
+  const hasFreePreviewLesson = courseWithAccess.lessons?.some(lesson =>
+    lesson.type !== 'quiz' && Boolean(lesson.isFree)
+  ) ?? false;
+  const isPreviewRequested = searchParams.get('preview') === '1';
+
+  function openPreview() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('preview', '1');
+      return next;
+    });
+  }
+
+  function closePreview() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('preview');
+      return next;
+    });
+  }
 
   // BUG FIX: guard khi đã enrolled nhưng course chưa có lesson nào
   // — tránh crash trong LearningView khi activeLesson = undefined bị dereference
-  if (isEnrolled && (!course.lessons || course.lessons.length === 0)) {
+  if ((isEnrolled || hasFreePreviewLesson) && (!courseWithAccess.lessons || courseWithAccess.lessons.length === 0)) {
     return (
       <div className="min-h-screen bg-surface flex flex-col items-center justify-center gap-4">
         <BookOpen className="w-14 h-14 text-on-surface-variant/30" />
@@ -1722,9 +1886,17 @@ export default function CourseDetailPage() {
     );
   }
 
-  return isEnrolled ? (
-    <LearningView course={course} rawChapters={rawChapters} courseId={id!} />
+  return isEnrolled || (hasFreePreviewLesson && isPreviewRequested) ? (
+    <LearningView
+      course={courseWithAccess}
+      rawChapters={rawChapters}
+      courseId={id!}
+      onExitPreview={isEnrolled ? undefined : closePreview}
+    />
   ) : (
-    <MarketingView course={{ ...course, isEnrolled }} />
+    <MarketingView
+      course={courseWithAccess}
+      onStartPreview={hasFreePreviewLesson ? openPreview : undefined}
+    />
   );
 }

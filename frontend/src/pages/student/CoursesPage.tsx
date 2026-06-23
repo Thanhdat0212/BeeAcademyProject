@@ -550,6 +550,11 @@ export default function CoursesPage() {
                                   <span className="bg-primary/90 backdrop-blur text-xs font-bold px-3 py-1.5 rounded-full text-on-primary shadow-sm">
                                     {course.subject}
                                   </span>
+                                  {course.hasFreePreview && (
+                                    <span className="bg-amber-500/90 backdrop-blur text-xs font-bold px-3 py-1.5 rounded-full text-white shadow-sm">
+                                      Học thử miễn phí
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                               <div className="p-6 flex flex-col flex-grow">
@@ -590,7 +595,7 @@ export default function CoursesPage() {
                                     to={`/courses/${course.id}`}
                                     className="px-5 py-2 rounded-xl font-bold text-sm text-primary bg-primary/10 hover:bg-primary hover:text-on-primary transition-colors"
                                   >
-                                    Mua Ngay
+                                    {course.hasFreePreview ? 'Xem thử miễn phí' : 'Mua ngay'}
                                   </Link>
                                 </div>
                               </div>
