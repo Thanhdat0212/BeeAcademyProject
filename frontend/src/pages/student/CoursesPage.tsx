@@ -1,32 +1,32 @@
-// ═══════════════════════════════════════════════════════════════════════════════
-// TRANG DANH SÁCH KHÓA HỌC — CoursesPage.tsx
-//
-// VỊ TRÍ TRONG HỆ THỐNG:
-//   URL: /courses
-//   Người dùng đến từ: Landing page, Header search (→ /courses?q=...), CheckoutPage
-//   Người dùng đi đến: CourseDetailPage (/courses/:id), CheckoutPage (/checkout)
-//
-// LUỒNG GIAI ĐOẠN 1C (đã tích hợp Backend):
-//   1. useEffect → listCategories() đổ dropdown bộ lọc môn học (8 categories thật).
-//   2. State filter (subject slug, grade, q) thay đổi → debounce 300ms → gọi
-//      searchCourses() lấy danh sách + phân trang.
-//   3. Enrolled section fetch từ GET /api/me/courses (enrollments thật).
-// ═══════════════════════════════════════════════════════════════════════════════
-
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Star, Users, PlayCircle, BookOpen, Filter, Search, Heart, Loader2 } from 'lucide-react';
+import {
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  Heart,
+  Loader2,
+  PlayCircle,
+  Search,
+  Star,
+  Users,
+} from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import DashboardHeader from '../../components/DashboardHeader';
 import PageBanner from '../../components/PageBanner';
 import type { Course as UiCourse } from '../../data/mockCourses';
 import { useCourseStore } from '../../store/useCourseStore';
-import { listCategories, searchCourses, getEnrolledCourses } from '../../api/courseService';
+import {
+  getEnrolledCourses,
+  inferGradeFromSearchQuery,
+  listCategories,
+  searchCourses,
+} from '../../api/courseService';
 import { adaptCourseSummary } from '../../api/adapter';
 import { isApiError } from '../../api/client';
 import type { Category } from '../../types/api';
 
-// Danh sách lớp 6-9 + "Tất cả" - cố định, không cần fetch
 const GRADE_OPTIONS = [
   { value: null, label: 'Tất cả' },
   { value: 6, label: 'Lớp 6' },
@@ -35,119 +35,270 @@ const GRADE_OPTIONS = [
   { value: 9, label: 'Lớp 9' },
 ] as const;
 
-// Sentinel value cho "Tất cả môn học" (BE filter bằng slug, null = không filter)
-const ALL_SUBJECTS_SLUG = '__all__';
+const PAGE_SIZE = 12;
+
+function parseSubjectParam(value: string | null): string | null {
+  const subject = value?.trim();
+  return subject ? subject : null;
+}
+
+function parseGradeParam(value: string | null): number | null {
+  if (!value) return null;
+  const grade = Number(value);
+  return Number.isInteger(grade) && grade >= 6 && grade <= 9 ? grade : null;
+}
+
+function parsePageParam(value: string | null): number {
+  if (!value) return 0;
+  const page = Number(value);
+  return Number.isInteger(page) && page > 1 ? page - 1 : 0;
+}
+
+function buildVisiblePages(currentPage: number, totalPages: number): number[] {
+  if (totalPages <= 0) return [];
+
+  const current = currentPage + 1;
+  const start = Math.max(1, current - 2);
+  const end = Math.min(totalPages, start + 4);
+  const adjustedStart = Math.max(1, end - 4);
+
+  return Array.from(
+    { length: end - adjustedStart + 1 },
+    (_, idx) => adjustedStart + idx,
+  );
+}
 
 export default function CoursesPage() {
-  // ── URL Params ──────────────────────────────────────────────────────────────
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const localSearchEditRef = useRef(false);
 
-  // ── State bộ lọc ─────────────────────────────────────────────────────────
-  // selectedSubjectSlug: null = "Tất cả", còn lại là category.slug (vd "toan-hoc")
-  const [selectedSubjectSlug, setSelectedSubjectSlug] = useState<string | null>(null);
-  const [selectedGrade, setSelectedGrade] = useState<number | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>(() => searchParams.get('q') ?? '');
-
-  // Debounced search query - chỉ thay đổi sau 300ms ngưng gõ → tránh spam BE
+  const [selectedSubjectSlug, setSelectedSubjectSlug] = useState<string | null>(
+    () => parseSubjectParam(searchParams.get('subject')),
+  );
+  const [selectedGrade, setSelectedGrade] = useState<number | null>(
+    () => parseGradeParam(searchParams.get('grade')),
+  );
+  const [currentPage, setCurrentPage] = useState<number>(
+    () => parsePageParam(searchParams.get('page')),
+  );
+  const [searchQuery, setSearchQuery] = useState<string>(
+    () => searchParams.get('q') ?? '',
+  );
   const [debouncedQuery, setDebouncedQuery] = useState<string>(searchQuery);
 
-  // ── Data từ Backend ──────────────────────────────────────────────────────
   const [categories, setCategories] = useState<Category[]>([]);
   const [courses, setCourses] = useState<UiCourse[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Zustand Store ──────────────────────────────────────────────────────────
   const favoritedIds = useCourseStore((state) => state.favoritedIds);
   const toggleFavorite = useCourseStore((state) => state.toggleFavorite);
   const completedLessons = useCourseStore((state) => state.completedLessons);
 
-  // ── Khóa học đã enroll — fetch từ API thật ────────────────────────────────
   const [enrolledCourses, setEnrolledCourses] = useState<UiCourse[]>([]);
 
   useEffect(() => {
     getEnrolledCourses()
-      .then(items => setEnrolledCourses(
-        items.map(s => {
-          const course = adaptCourseSummary(s, true);
+      .then((items) => setEnrolledCourses(
+        items.map((summary) => {
+          const course = adaptCourseSummary(summary, true);
           const completedList = completedLessons[course.id] ?? [];
           const totalLessons = course.lessons?.length ?? 0;
           const progress = totalLessons > 0
             ? Math.round((completedList.length / totalLessons) * 100)
             : 0;
           return { ...course, progress };
-        })
+        }),
       ))
       .catch(() => {
-        // Không hiện toast — nếu chưa mua khoá nào thì list rỗng là đúng
+        // Không cần chặn UX nếu user chưa có khóa học đã mua.
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Effect: fetch categories 1 lần khi mount ─────────────────────────────
   useEffect(() => {
     listCategories()
       .then(setCategories)
       .catch((err) => {
         console.error('Không tải được danh mục:', err);
-        // Không hiện toast - dropdown rỗng không phá UX, search vẫn dùng được
       });
   }, []);
 
-  // ── Effect: debounce searchQuery 300ms ───────────────────────────────────
   useEffect(() => {
-    const timeoutId = setTimeout(() => setDebouncedQuery(searchQuery), 300);
-    return () => clearTimeout(timeoutId);
+    const timeoutId = window.setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => window.clearTimeout(timeoutId);
   }, [searchQuery]);
 
-  // ── Fetch courses mỗi khi filter thay đổi (debounced) ────────────────────
-  // useCallback để không tạo lại function reference mỗi render (chỉ thay đổi khi filter đổi)
+  useEffect(() => {
+    const urlQuery = searchParams.get('q') ?? '';
+    const urlSubject = parseSubjectParam(searchParams.get('subject'));
+    const urlGrade = parseGradeParam(searchParams.get('grade'));
+    const urlPage = parsePageParam(searchParams.get('page'));
+
+    setSearchQuery((current) => (current === urlQuery ? current : urlQuery));
+    setDebouncedQuery((current) => (current === urlQuery ? current : urlQuery));
+    setSelectedSubjectSlug((current) => (current === urlSubject ? current : urlSubject));
+    setSelectedGrade((current) => (current === urlGrade ? current : urlGrade));
+    setCurrentPage((current) => (current === urlPage ? current : urlPage));
+    localSearchEditRef.current = false;
+  }, [searchParams]);
+
+  useEffect(() => {
+    const currentQuery = searchParams.get('q') ?? '';
+    const currentSubject = parseSubjectParam(searchParams.get('subject'));
+    const currentGrade = parseGradeParam(searchParams.get('grade'));
+    const currentUrlPage = parsePageParam(searchParams.get('page'));
+    const inputQuery = searchQuery.trim();
+
+    if (inputQuery !== debouncedQuery.trim()) {
+      return;
+    }
+
+    // Header/back navigation updates the URL before local state catches up.
+    // Direct edits inside this page opt into writing the new query back.
+    if (currentQuery !== inputQuery && !localSearchEditRef.current) {
+      return;
+    }
+
+    const nextQuery = debouncedQuery.trim();
+    const shouldResetPage =
+      currentQuery !== nextQuery ||
+      currentSubject !== selectedSubjectSlug ||
+      currentGrade !== selectedGrade;
+    const nextPage = shouldResetPage ? 0 : currentPage;
+
+    if (shouldResetPage && currentPage !== 0) {
+      setCurrentPage(0);
+    }
+
+    if (
+      currentQuery === nextQuery &&
+      currentSubject === selectedSubjectSlug &&
+      currentGrade === selectedGrade &&
+      currentUrlPage === nextPage
+    ) {
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams);
+
+    if (nextQuery) nextParams.set('q', nextQuery);
+    else nextParams.delete('q');
+
+    if (selectedSubjectSlug) nextParams.set('subject', selectedSubjectSlug);
+    else nextParams.delete('subject');
+
+    if (selectedGrade != null) nextParams.set('grade', String(selectedGrade));
+    else nextParams.delete('grade');
+
+    if (nextPage > 0) nextParams.set('page', String(nextPage + 1));
+    else nextParams.delete('page');
+
+    setSearchParams(nextParams, { replace: true });
+    localSearchEditRef.current = false;
+  }, [currentPage, debouncedQuery, searchParams, searchQuery, selectedGrade, selectedSubjectSlug, setSearchParams]);
+
+  const inferredQueryGrade = selectedGrade == null
+    ? inferGradeFromSearchQuery(debouncedQuery)
+    : undefined;
+  const effectiveGrade = selectedGrade ?? inferredQueryGrade ?? null;
+
   const fetchCourses = useCallback(async () => {
     setLoading(true);
     setError(null);
+
     try {
       const page = await searchCourses({
-        // Truyền undefined nếu null để axios bỏ qua param (không gửi ?subject=null)
         subject: selectedSubjectSlug ?? undefined,
-        grade: selectedGrade ?? undefined,
+        grade: effectiveGrade ?? undefined,
         q: debouncedQuery.trim() || undefined,
-        size: 24,
+        page: currentPage,
+        size: PAGE_SIZE,
       });
-      // Map BE shape → UI shape một lần duy nhất ở đây
-      setCourses(page.items.map(s => adaptCourseSummary(s)));
+
+      if (page.totalPages > 0 && currentPage >= page.totalPages) {
+        setCurrentPage(page.totalPages - 1);
+        return;
+      }
+
+      setCourses(page.items.map((item) => adaptCourseSummary(item)));
+      setTotalItems(page.totalItems);
+      setTotalPages(page.totalPages);
     } catch (err) {
       const message = isApiError(err)
         ? err.message
         : 'Không thể tải khóa học. Vui lòng thử lại.';
       setError(message);
       setCourses([]);
+      setTotalItems(0);
+      setTotalPages(0);
     } finally {
       setLoading(false);
     }
-  }, [selectedSubjectSlug, selectedGrade, debouncedQuery]);
+  }, [currentPage, debouncedQuery, effectiveGrade, selectedSubjectSlug]);
 
   useEffect(() => {
     fetchCourses();
   }, [fetchCourses]);
 
-  // Lọc bỏ khóa học đã enrolled khỏi danh sách khám phá
-  const availableCourses = useMemo(() => {
-    const enrolledIds = new Set(enrolledCourses.map((c) => c.id));
-    return courses.filter((c) => !enrolledIds.has(c.id));
-  }, [courses, enrolledCourses]);
+  const gradeMatchedCourses = useMemo(() => {
+    if (effectiveGrade == null) return courses;
+    const gradeLabel = `Lớp ${effectiveGrade}`;
+    return courses.filter((course) => course.grade === gradeLabel);
+  }, [courses, effectiveGrade]);
 
-  const handleClearFilters = () => {
-    setSelectedSubjectSlug(null);
-    setSelectedGrade(null);
-    setSearchQuery('');
+  const availableCourses = useMemo(() => {
+    const enrolledIds = new Set(enrolledCourses.map((course) => course.id));
+    return gradeMatchedCourses.filter((course) => !enrolledIds.has(course.id));
+  }, [gradeMatchedCourses, enrolledCourses]);
+
+  const selectedSubjectLabel = selectedSubjectSlug == null
+    ? 'Tất cả'
+    : categories.find((category) => category.slug === selectedSubjectSlug)?.name ?? selectedSubjectSlug;
+  const selectedGradeLabel = effectiveGrade == null ? 'Tất cả' : `Lớp ${effectiveGrade}`;
+  const visiblePages = useMemo(
+    () => buildVisiblePages(currentPage, totalPages),
+    [currentPage, totalPages],
+  );
+  const hiddenMatchedCount = gradeMatchedCourses.length - availableCourses.length;
+  const hasActiveFilters = Boolean(
+    debouncedQuery.trim() || selectedSubjectSlug || effectiveGrade != null,
+  );
+  const visibleTotalItems = effectiveGrade == null ? totalItems : gradeMatchedCourses.length;
+  const resultSummary = visibleTotalItems === 0
+    ? 'Chưa có khóa học phù hợp'
+    : `Tìm thấy ${visibleTotalItems.toLocaleString('vi-VN')} khóa học phù hợp`;
+
+  const handleSearchInput = (value: string) => {
+    localSearchEditRef.current = true;
+    setSearchQuery(value);
+    setCurrentPage(0);
   };
 
-  // Tên môn học hiện tại (để hiển thị trong empty state)
-  const selectedSubjectLabel =
-    selectedSubjectSlug == null
-      ? 'Tất cả'
-      : categories.find((c) => c.slug === selectedSubjectSlug)?.name ?? selectedSubjectSlug;
-  const selectedGradeLabel = selectedGrade == null ? 'Tất cả' : `Lớp ${selectedGrade}`;
+  const handleSelectSubject = (subject: string | null) => {
+    setSelectedSubjectSlug(subject);
+    setCurrentPage(0);
+  };
+
+  const handleSelectGrade = (grade: number | null) => {
+    localSearchEditRef.current = true;
+    if (inferGradeFromSearchQuery(searchQuery) != null) {
+      setSearchQuery('');
+      setDebouncedQuery('');
+    }
+    setSelectedGrade(grade);
+    setCurrentPage(0);
+  };
+
+  const handleClearFilters = () => {
+    localSearchEditRef.current = true;
+    setSelectedSubjectSlug(null);
+    setSelectedGrade(null);
+    setCurrentPage(0);
+    setSearchQuery('');
+  };
 
   return (
     <div className="min-h-screen bg-surface flex flex-col font-sans">
@@ -156,9 +307,6 @@ export default function CoursesPage() {
 
       <div className="flex-grow max-w-[1600px] mx-auto w-full px-4 md:px-10 py-8">
         <main>
-          {/* ══════════════════════════════════════════════════════════════════════
-              SECTION 1: KHÓA HỌC ĐÃ THAM GIA (giữ MOCK đến Module 3)
-          ════════════════════════════════════════════════════════════════════════ */}
           {enrolledCourses.length > 0 && (
             <section className="mb-16">
               <div className="flex items-center gap-3 mb-6">
@@ -196,7 +344,11 @@ export default function CoursesPage() {
                         <h3 className="text-lg font-bold mb-1.5 line-clamp-2 text-on-surface hover:text-primary transition-colors">{course.title}</h3>
                       </Link>
                       <button
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(course.id); }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleFavorite(course.id);
+                        }}
                         className="flex items-center gap-1 mb-2 group/fav"
                       >
                         <Heart className={`w-3.5 h-3.5 transition-all ${favoritedIds.includes(course.id) ? 'fill-red-500 text-red-500' : 'text-on-surface-variant/40 group-hover/fav:text-red-400'}`} />
@@ -211,7 +363,12 @@ export default function CoursesPage() {
                           <span className="text-on-surface">{course.progress}%</span>
                         </div>
                         <div className="w-full h-2 bg-surface-container-high rounded-full overflow-hidden">
-                          <motion.div initial={{ width: 0 }} animate={{ width: `${course.progress}%` }} transition={{ duration: 1, delay: 0.2 }} className="h-full bg-primary rounded-full" />
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${course.progress}%` }}
+                            transition={{ duration: 1, delay: 0.2 }}
+                            className="h-full bg-primary rounded-full"
+                          />
                         </div>
                       </div>
                     </div>
@@ -223,40 +380,40 @@ export default function CoursesPage() {
 
           {enrolledCourses.length > 0 && <hr className="border-outline-variant/30 mb-12" />}
 
-          {/* ══════════════════════════════════════════════════════════════════════
-              SECTION 2: KHÁM PHÁ KHÓA HỌC - lấy từ API thật
-          ════════════════════════════════════════════════════════════════════════ */}
           <section>
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-8">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-secondary-container text-on-secondary-container rounded-xl flex items-center justify-center">
                   <Filter className="w-6 h-6" />
                 </div>
-                <h2 className="text-2xl font-extrabold text-on-surface">Khám Phá Khóa Học</h2>
+                <div>
+                  <h2 className="text-2xl font-extrabold text-on-surface">Khám Phá Khóa Học</h2>
+                  <p className="text-sm text-on-surface-variant mt-1">
+                    {loading ? 'Đang cập nhật kết quả...' : resultSummary}
+                    {debouncedQuery ? ` cho "${debouncedQuery.trim()}"` : ''}
+                  </p>
+                </div>
               </div>
 
-              {/* Search mobile - desktop dùng search trong Header */}
               <div className="w-full lg:w-72 relative md:hidden">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-on-surface-variant" />
                 <input
                   type="text"
                   placeholder="Tìm khóa học..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => handleSearchInput(e.target.value)}
                   className="w-full pl-12 pr-4 py-3 rounded-xl bg-surface-container border border-outline-variant/50 focus:border-primary outline-none"
                 />
               </div>
             </div>
 
             <div className="flex flex-col lg:flex-row gap-8 items-start">
-              {/* ── SIDEBAR BỘ LỌC ───────────────────────────────────── */}
               <div className="w-full lg:w-64 flex-shrink-0 space-y-8 bg-surface-container-lowest p-6 rounded-[2rem] border border-outline-variant/40 shadow-sm sticky top-24">
-                {/* Môn học - đổ động từ /api/categories */}
                 <div>
                   <h3 className="font-bold text-lg mb-4 text-on-surface">Môn Học</h3>
                   <div className="flex flex-wrap gap-2">
                     <button
-                      onClick={() => setSelectedSubjectSlug(null)}
+                      onClick={() => handleSelectSubject(null)}
                       className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
                         selectedSubjectSlug === null
                           ? 'bg-primary text-on-primary shadow-md shadow-primary/20'
@@ -265,66 +422,89 @@ export default function CoursesPage() {
                     >
                       Tất cả
                     </button>
-                    {categories.map((cat) => (
+                    {categories.map((category) => (
                       <button
-                        key={cat.slug}
-                        onClick={() => setSelectedSubjectSlug(cat.slug)}
+                        key={category.slug}
+                        onClick={() => handleSelectSubject(category.slug)}
                         className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                          selectedSubjectSlug === cat.slug
+                          selectedSubjectSlug === category.slug
                             ? 'bg-primary text-on-primary shadow-md shadow-primary/20'
                             : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'
                         }`}
                       >
-                        {cat.name}
+                        {category.name}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Lớp học - cố định 6-9 */}
                 <div>
                   <h3 className="font-bold text-lg mb-4 text-on-surface">Lớp Học</h3>
                   <div className="flex flex-col gap-2">
-                    {GRADE_OPTIONS.map((g) => (
+                    {GRADE_OPTIONS.map((option) => (
                       <label
-                        key={g.label}
+                        key={option.label}
                         className="flex items-center gap-3 cursor-pointer group"
                       >
                         <div
                           className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
-                            selectedGrade === g.value
+                            selectedGrade === option.value
                               ? 'bg-primary border-primary'
                               : 'border-outline-variant group-hover:border-primary'
                           }`}
                         >
-                          {selectedGrade === g.value && (
+                          {selectedGrade === option.value && (
                             <div className="w-2.5 h-2.5 bg-on-primary rounded-sm" />
                           )}
                         </div>
                         <span
                           className={`font-medium ${
-                            selectedGrade === g.value
+                            selectedGrade === option.value
                               ? 'text-primary'
                               : 'text-on-surface-variant group-hover:text-on-surface'
                           }`}
                         >
-                          {g.label}
+                          {option.label}
                         </span>
                         <input
                           type="radio"
                           name="grade"
                           className="hidden"
-                          checked={selectedGrade === g.value}
-                          onChange={() => setSelectedGrade(g.value as number | null)}
+                          checked={selectedGrade === option.value}
+                          onChange={() => handleSelectGrade(option.value as number | null)}
                         />
                       </label>
                     ))}
                   </div>
                 </div>
+
+                {hasActiveFilters && (
+                  <button
+                    onClick={handleClearFilters}
+                    className="w-full px-4 py-3 rounded-xl bg-surface-container text-on-surface font-semibold hover:bg-surface-container-high transition-colors border border-outline-variant/50"
+                  >
+                    Xóa bộ lọc
+                  </button>
+                )}
               </div>
 
-              {/* ── GRID KHÓA HỌC ─────────────────────────────────── */}
               <div className="flex-1 w-full min-h-[400px]">
+                {!loading && !error && (
+                  <div className="mb-6 bg-surface-container-lowest border border-outline-variant/30 rounded-2xl px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-on-surface">{resultSummary}</p>
+                      <p className="text-sm text-on-surface-variant">
+                        Môn: <span className="text-on-surface">{selectedSubjectLabel}</span> · Lớp: <span className="text-on-surface">{selectedGradeLabel}</span>
+                        {debouncedQuery ? ` · Từ khóa: "${debouncedQuery.trim()}"` : ''}
+                      </p>
+                    </div>
+                    <p className="text-sm text-on-surface-variant">
+                      Trang <span className="font-semibold text-on-surface">{Math.min(currentPage + 1, Math.max(totalPages, 1))}</span> / <span className="font-semibold text-on-surface">{Math.max(totalPages, 1)}</span>
+                      {hiddenMatchedCount > 0 ? ` · ${hiddenMatchedCount} khóa học đã có trong mục của bạn` : ''}
+                    </p>
+                  </div>
+                )}
+
                 {loading ? (
                   <div className="w-full py-20 flex flex-col items-center justify-center bg-surface-container-lowest rounded-[2rem] border border-outline-variant/30 border-dashed">
                     <Loader2 className="w-10 h-10 text-primary animate-spin mb-4" />
@@ -340,94 +520,158 @@ export default function CoursesPage() {
                       Thử lại
                     </button>
                   </div>
-                ) : availableCourses.length > 0 ? (
-                  <motion.div layout className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
-                    <AnimatePresence>
-                      {availableCourses.map((course) => (
-                        <motion.div
-                          layout
-                          key={course.id}
-                          initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.9 }}
-                          transition={{ duration: 0.3 }}
-                          className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/40 hover:shadow-xl hover:border-primary/50 transition-all group flex flex-col h-full"
-                        >
-                          <div className="relative h-48 overflow-hidden">
-                            <Link to={`/courses/${course.id}`}>
-                              <img
-                                src={course.image}
-                                alt={course.title}
-                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                              />
-                            </Link>
-                            <div className="absolute top-4 left-4 flex gap-2 pointer-events-none">
-                              <span className="bg-surface/90 backdrop-blur text-xs font-bold px-3 py-1.5 rounded-full text-on-surface shadow-sm">
-                                {course.grade}
-                              </span>
-                              <span className="bg-primary/90 backdrop-blur text-xs font-bold px-3 py-1.5 rounded-full text-on-primary shadow-sm">
-                                {course.subject}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="p-6 flex flex-col flex-grow">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-1 text-sm font-semibold text-amber-500">
-                                <Star className="w-4 h-4 fill-amber-500" /> {course.rating}
-                              </div>
-                              <div className="flex items-center gap-1 text-sm font-medium text-on-surface-variant">
-                                <Users className="w-4 h-4" /> {course.students.toLocaleString('vi-VN')}
-                              </div>
-                            </div>
-                            <Link to={`/courses/${course.id}`}>
-                              <h3 className="text-xl font-bold mb-1.5 line-clamp-2 text-on-surface leading-tight hover:text-primary transition-colors">
-                                {course.title}
-                              </h3>
-                            </Link>
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                toggleFavorite(course.id);
-                              }}
-                              className="flex items-center gap-1 mb-3 group/fav"
+                ) : courses.length > 0 ? (
+                  <>
+                    {availableCourses.length > 0 ? (
+                      <motion.div layout className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
+                        <AnimatePresence>
+                          {availableCourses.map((course) => (
+                            <motion.div
+                              layout
+                              key={course.id}
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.9 }}
+                              transition={{ duration: 0.3 }}
+                              className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/40 hover:shadow-xl hover:border-primary/50 transition-all group flex flex-col h-full"
                             >
-                              <Heart className={`w-3.5 h-3.5 transition-all ${favoritedIds.includes(course.id) ? 'fill-red-500 text-red-500' : 'text-on-surface-variant/40 group-hover/fav:text-red-400'}`} />
-                              <span className={`text-xs font-medium transition-colors ${favoritedIds.includes(course.id) ? 'text-red-500' : 'text-on-surface-variant/40 group-hover/fav:text-red-400'}`}>
-                                {favoritedIds.includes(course.id) ? 'Đã yêu thích' : 'Yêu thích'}
-                              </span>
+                              <div className="relative h-48 overflow-hidden">
+                                <Link to={`/courses/${course.id}`}>
+                                  <img
+                                    src={course.image}
+                                    alt={course.title}
+                                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                                  />
+                                </Link>
+                                <div className="absolute top-4 left-4 flex gap-2 pointer-events-none">
+                                  <span className="bg-surface/90 backdrop-blur text-xs font-bold px-3 py-1.5 rounded-full text-on-surface shadow-sm">
+                                    {course.grade}
+                                  </span>
+                                  <span className="bg-primary/90 backdrop-blur text-xs font-bold px-3 py-1.5 rounded-full text-on-primary shadow-sm">
+                                    {course.subject}
+                                  </span>
+                                  {course.hasFreePreview && (
+                                    <span className="bg-amber-500/90 backdrop-blur text-xs font-bold px-3 py-1.5 rounded-full text-white shadow-sm">
+                                      Học thử miễn phí
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="p-6 flex flex-col flex-grow">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-1 text-sm font-semibold text-amber-500">
+                                    <Star className="w-4 h-4 fill-amber-500" /> {course.rating}
+                                  </div>
+                                  <div className="flex items-center gap-1 text-sm font-medium text-on-surface-variant">
+                                    <Users className="w-4 h-4" /> {course.students.toLocaleString('vi-VN')}
+                                  </div>
+                                </div>
+                                <Link to={`/courses/${course.id}`}>
+                                  <h3 className="text-xl font-bold mb-1.5 line-clamp-2 text-on-surface leading-tight hover:text-primary transition-colors">
+                                    {course.title}
+                                  </h3>
+                                </Link>
+                                <button
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    toggleFavorite(course.id);
+                                  }}
+                                  className="flex items-center gap-1 mb-3 group/fav"
+                                >
+                                  <Heart className={`w-3.5 h-3.5 transition-all ${favoritedIds.includes(course.id) ? 'fill-red-500 text-red-500' : 'text-on-surface-variant/40 group-hover/fav:text-red-400'}`} />
+                                  <span className={`text-xs font-medium transition-colors ${favoritedIds.includes(course.id) ? 'text-red-500' : 'text-on-surface-variant/40 group-hover/fav:text-red-400'}`}>
+                                    {favoritedIds.includes(course.id) ? 'Đã yêu thích' : 'Yêu thích'}
+                                  </span>
+                                </button>
+                                <p className="text-on-surface-variant text-sm mb-6 line-clamp-2 leading-relaxed">
+                                  {course.description}
+                                </p>
+                                <div className="mt-auto flex items-center justify-between pt-4 border-t border-outline-variant/30">
+                                  <span className="text-sm font-semibold text-on-surface-variant">
+                                    {course.instructor}
+                                  </span>
+                                  <Link
+                                    to={`/courses/${course.id}`}
+                                    className="px-5 py-2 rounded-xl font-bold text-sm text-primary bg-primary/10 hover:bg-primary hover:text-on-primary transition-colors"
+                                  >
+                                    {course.hasFreePreview ? 'Xem thử miễn phí' : 'Mua ngay'}
+                                  </Link>
+                                </div>
+                              </div>
+                            </motion.div>
+                          ))}
+                        </AnimatePresence>
+                      </motion.div>
+                    ) : (
+                      <div className="w-full py-20 flex flex-col items-center justify-center bg-surface-container-lowest rounded-[2rem] border border-outline-variant/30 border-dashed">
+                        <div className="w-20 h-20 bg-surface-container rounded-full flex items-center justify-center mb-4 text-on-surface-variant">
+                          <BookOpen className="w-10 h-10 opacity-50" />
+                        </div>
+                        <h3 className="text-xl font-bold text-on-surface mb-2">Trang này chỉ có khóa học bạn đã tham gia</h3>
+                        <p className="text-on-surface-variant text-center max-w-md">
+                          Hãy chuyển trang hoặc đổi bộ lọc để xem thêm các khóa học mới phù hợp với bạn.
+                        </p>
+                      </div>
+                    )}
+
+                    {totalPages > 1 && (
+                      <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <button
+                          onClick={() => setCurrentPage((page) => Math.max(0, page - 1))}
+                          disabled={currentPage === 0}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-outline-variant/50 bg-surface-container-lowest text-on-surface font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-container transition-colors"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                          Trang trước
+                        </button>
+
+                        <div className="flex items-center gap-2 flex-wrap justify-center">
+                          {visiblePages.map((pageNumber) => (
+                            <button
+                              key={pageNumber}
+                              onClick={() => setCurrentPage(pageNumber - 1)}
+                              className={`min-w-11 h-11 px-3 rounded-xl text-sm font-bold transition-colors ${
+                                currentPage === pageNumber - 1
+                                  ? 'bg-primary text-on-primary shadow-md shadow-primary/20'
+                                  : 'bg-surface-container-lowest text-on-surface hover:bg-surface-container border border-outline-variant/40'
+                              }`}
+                            >
+                              {pageNumber}
                             </button>
-                            <p className="text-on-surface-variant text-sm mb-6 line-clamp-2 leading-relaxed">
-                              {course.description}
-                            </p>
-                            <div className="mt-auto flex items-center justify-between pt-4 border-t border-outline-variant/30">
-                              <span className="text-sm font-semibold text-on-surface-variant">
-                                {course.instructor}
-                              </span>
-                              <Link
-                                to={`/courses/${course.id}`}
-                                className="px-5 py-2 rounded-xl font-bold text-sm text-primary bg-primary/10 hover:bg-primary hover:text-on-primary transition-colors"
-                              >
-                                Mua Ngay
-                              </Link>
-                            </div>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                  </motion.div>
+                          ))}
+                        </div>
+
+                        <button
+                          onClick={() => setCurrentPage((page) => Math.min(totalPages - 1, page + 1))}
+                          disabled={currentPage >= totalPages - 1}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-outline-variant/50 bg-surface-container-lowest text-on-surface font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-container transition-colors"
+                        >
+                          Trang sau
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  // Empty state
                   <div className="w-full py-20 flex flex-col items-center justify-center bg-surface-container-lowest rounded-[2rem] border border-outline-variant/30 border-dashed">
                     <div className="w-20 h-20 bg-surface-container rounded-full flex items-center justify-center mb-4 text-on-surface-variant">
                       <Search className="w-10 h-10 opacity-50" />
                     </div>
-                    <h3 className="text-xl font-bold text-on-surface mb-2">Không tìm thấy khóa học nào</h3>
+                    <h3 className="text-xl font-bold text-on-surface mb-2">
+                      {hiddenMatchedCount > 0 ? 'Bạn đã tham gia các khóa học phù hợp' : 'Không tìm thấy khóa học nào'}
+                    </h3>
                     <p className="text-on-surface-variant text-center max-w-md">
-                      Không có khóa học phù hợp với{' '}
-                      <strong className="text-primary">{selectedSubjectLabel}</strong> /{' '}
-                      <strong className="text-primary">{selectedGradeLabel}</strong>
-                      {debouncedQuery ? ` và từ khóa "${debouncedQuery}"` : ''}.
+                      {hiddenMatchedCount > 0
+                        ? 'Các kết quả phù hợp đã xuất hiện trong mục "Khóa Học Của Tôi". Hãy thử môn học, lớp hoặc từ khóa khác để khám phá thêm khóa học mới.'
+                        : (
+                          <>
+                            Không có khóa học phù hợp với{' '}
+                            <strong className="text-primary">{selectedSubjectLabel}</strong> /{' '}
+                            <strong className="text-primary">{selectedGradeLabel}</strong>
+                            {debouncedQuery ? ` và từ khóa "${debouncedQuery.trim()}"` : ''}.
+                          </>
+                        )}
                     </p>
                     <button
                       onClick={handleClearFilters}

@@ -1,13 +1,15 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
-  Bell, Search, ShoppingCart, X, BookOpen, TrendingUp, ChevronDown, LogOut
+  Bell, Search, ShoppingCart, X, BookOpen, TrendingUp, ChevronDown, LogOut, Loader2
 } from 'lucide-react';
 import DashboardSidebar from './DashboardSidebar';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCartStore } from '../store/useCartStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { MOCK_COURSES, Course } from '../data/mockCourses';
+import type { Course } from '../data/mockCourses';
+import { inferGradeFromSearchQuery, searchCourses } from '../api/courseService';
+import { adaptCourseSummary } from '../api/adapter';
 // ─── Highlight từ khớp trong text ────────────────────────────────────────────
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -28,13 +30,14 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
 interface SearchDropdownProps {
   query: string;
   results: Course[];
+  loading: boolean;
   highlightedIdx: number;
   onSelect: (course: Course) => void;
   onViewAll: () => void;
 }
 
-function SearchDropdown({ query, results, highlightedIdx, onSelect, onViewAll }: SearchDropdownProps) {
-  const isEmpty = results.length === 0;
+function SearchDropdown({ query, results, loading, highlightedIdx, onSelect, onViewAll }: SearchDropdownProps) {
+  const isEmpty = !loading && results.length === 0;
 
   return (
     <motion.div
@@ -44,7 +47,12 @@ function SearchDropdown({ query, results, highlightedIdx, onSelect, onViewAll }:
       transition={{ duration: 0.15 }}
       className="absolute top-full left-0 right-0 mt-2 bg-surface border border-outline-variant/40 rounded-2xl shadow-2xl shadow-black/10 overflow-hidden z-50"
     >
-      {isEmpty ? (
+      {loading ? (
+        <div className="p-6 text-center">
+          <Loader2 className="w-8 h-8 text-primary mx-auto mb-2 animate-spin" />
+          <p className="text-on-surface-variant font-medium text-sm">Đang tìm khóa học...</p>
+        </div>
+      ) : isEmpty ? (
         <div className="p-6 text-center">
           <Search className="w-8 h-8 text-on-surface-variant/30 mx-auto mb-2" />
           <p className="text-on-surface-variant font-medium text-sm">
@@ -132,6 +140,8 @@ export default function DashboardHeader() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightedIdx, setHighlightedIdx] = useState(-1);
+  const [results, setResults] = useState<Course[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -140,18 +150,6 @@ export default function DashboardHeader() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Lọc kết quả tìm kiếm từ MOCK_COURSES
-  const results = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (q.length < 1) return [];
-    return MOCK_COURSES.filter(c =>
-      c.title.toLowerCase().includes(q) ||
-      c.subject.toLowerCase().includes(q) ||
-      c.instructor.toLowerCase().includes(q) ||
-      c.grade.toLowerCase().includes(q) ||
-      c.description.toLowerCase().includes(q)
-    ).slice(0, 6);
-  }, [searchQuery]);
-
   // Click outside: đóng search dropdown
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -179,8 +177,50 @@ export default function DashboardHeader() {
     setHighlightedIdx(-1);
   }, [searchQuery]);
 
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 1) {
+      setResults([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSearchLoading(true);
+
+    const timeoutId = window.setTimeout(() => {
+      const inferredGrade = inferGradeFromSearchQuery(q);
+      searchCourses({ q, grade: inferredGrade, size: inferredGrade == null ? 6 : 24 })
+        .then(page => {
+          if (!cancelled) {
+            const courses = page.items.map(item => adaptCourseSummary(item));
+            const gradeLabel = inferredGrade == null ? null : `Lớp ${inferredGrade}`;
+            const filteredCourses = gradeLabel == null
+              ? courses
+              : courses.filter(course => course.grade === gradeLabel);
+            setResults(filteredCourses.slice(0, 6));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setResults([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearchLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [searchQuery]);
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     const total = results.length + 1; // +1 cho "Xem tất cả"
+    if (searchLoading && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter')) {
+      e.preventDefault();
+      return;
+    }
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
@@ -214,8 +254,16 @@ export default function DashboardHeader() {
   }
 
   function handleViewAll() {
-    if (!searchQuery.trim()) return;
-    navigate(`/courses?q=${encodeURIComponent(searchQuery.trim())}`);
+    const q = searchQuery.trim();
+    if (!q) return;
+
+    const params = new URLSearchParams({ q });
+    const inferredGrade = inferGradeFromSearchQuery(q);
+    if (inferredGrade != null) {
+      params.set('grade', String(inferredGrade));
+    }
+
+    navigate(`/courses?${params.toString()}`);
     setSearchQuery('');
     setShowDropdown(false);
     setHighlightedIdx(-1);
@@ -281,6 +329,7 @@ export default function DashboardHeader() {
               <SearchDropdown
                 query={searchQuery}
                 results={results}
+                loading={searchLoading}
                 highlightedIdx={highlightedIdx}
                 onSelect={handleSelectCourse}
                 onViewAll={handleViewAll}

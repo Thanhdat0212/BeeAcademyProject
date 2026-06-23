@@ -108,6 +108,7 @@ export interface CourseSummary {
   effectivePriceVnd: number;
   isOnSale: boolean;
   isFeatured: boolean;
+  hasFreePreview: boolean;
   totalChapters: number;
   totalLessons: number;
   totalDurationSec: number;

@@ -52,7 +52,16 @@ import java.util.concurrent.atomic.AtomicReference;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "Bearer ";
-    private static final long JWT_CLOCK_SKEW_SECONDS = 10;
+    // [Đồng bộ team3/develop · search-course] Nới clock skew JWT 10s -> 60s (chống reject token mới do lệch đồng hồ)
+    /**
+     * Supabase issue token bằng đồng hồ phía server của họ, còn backend local
+     * verify theo đồng hồ máy đang chạy Spring Boot. Trong môi trường dev lệch
+     * 20-30 giây là đủ làm token mới login bị reject với lỗi "can't be used before".
+     *
+     * Chấp nhận skew 60 giây để chống false-negative do đồng hồ local chưa sync.
+     * Đây không kéo dài tuổi thọ token, chỉ nới cửa sổ validate cho nbf/iat/exp.
+     */
+    private static final long JWT_CLOCK_SKEW_SECONDS = 60;
 
     // AtomicReference để hỗ trợ lazy retry thread-safe (không dùng synchronized trên mọi request)
     private final AtomicReference<JWTVerifier> es256VerifierRef = new AtomicReference<>(null);

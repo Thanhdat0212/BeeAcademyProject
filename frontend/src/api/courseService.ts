@@ -16,6 +16,22 @@ import type {
   SearchCoursesParams,
 } from '../types/api';
 
+// [Đồng bộ team3/develop · search-course] Suy ra lớp 6-9 từ ô tìm kiếm
+/**
+ * Query nhanh dạng "6", "7", "8", "9" được hiểu là tìm theo lớp tương ứng.
+ * Header autocomplete và trang /courses dùng chung để kết quả không lệch nhau.
+ */
+export function inferGradeFromSearchQuery(query: string): number | undefined {
+  const normalized = query
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd');
+  const match = normalized.match(/(?:^|\D)([6-9])(?:\D|$)/);
+  return match ? Number(match[1]) : undefined;
+}
+
 // ---------------------------------------------------------------------------
 //  UC06 - Tìm kiếm & lọc khoá học có phân trang
 // ---------------------------------------------------------------------------

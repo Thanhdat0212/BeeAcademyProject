@@ -10,9 +10,11 @@ import com.beeacademy.backend.model.Course;
 import com.beeacademy.backend.model.CourseDocument;
 import com.beeacademy.backend.model.Lesson;
 import com.beeacademy.backend.repository.CategoryRepository;
+import com.beeacademy.backend.repository.CourseContentCount;
 import com.beeacademy.backend.repository.CourseDocumentRepository;
 import com.beeacademy.backend.repository.CourseRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
+import com.beeacademy.backend.repository.LessonRepository;
 import com.beeacademy.backend.repository.QuizConfigRepository;
 import com.beeacademy.backend.repository.spec.CourseSpecifications;
 import com.beeacademy.backend.security.AuthenticatedUser;
@@ -25,9 +27,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Nghiệp vụ duyệt khoá học công khai (UC06-UC08).
@@ -46,6 +52,7 @@ public class CourseService {
     private final CourseRepository         courseRepository;
     private final CategoryRepository       categoryRepository;
     private final EnrollmentRepository     enrollmentRepository;
+    private final LessonRepository         lessonRepository;
     private final CourseDocumentRepository documentRepository;
     private final QuizConfigRepository     quizConfigRepository;
     private final SupabaseStorageClient    storageClient;
@@ -87,11 +94,14 @@ public class CourseService {
         log.debug("Search courses: subject={}, grade={}, q={}, found={}",
                 subjectSlug, grade, keyword, coursePage.getTotalElements());
 
+        Set<UUID> previewCourseIds = findCoursesWithFreePreview(coursePage.getContent());
+
         // Map qua DTO. Lưu ý: page query mặc định không JOIN FETCH category/teacher
         // → nếu truy cập course.getCategory().getName() sẽ trigger N+1.
         // GIẢI PHÁP: ở GĐ này dữ liệu nhỏ (9 mock courses) chấp nhận N+1.
         // Khi scale, thêm @EntityGraph trên một method findAll Specification tuỳ chỉnh.
-        return PageResponse.of(coursePage, CourseSummaryResponse::fromEntity);
+        return PageResponse.of(coursePage,
+                course -> CourseSummaryResponse.fromEntity(course, previewCourseIds.contains(course.getId())));
     }
 
     // ========================================================================
@@ -164,8 +174,10 @@ public class CourseService {
 
     /** Resolver: nếu lesson có videoStoragePath và user có quyền → generate signed URL. */
     private java.util.function.Function<Lesson, String> buildUrlResolver(boolean canSeeAll) {
-        if (!canSeeAll) return null;
         return lesson -> {
+            if (!canSeeAll && !Boolean.TRUE.equals(lesson.getIsFree())) {
+                return null;
+            }
             if (lesson.getVideoStoragePath() != null) {
                 try {
                     return storageClient.generateSignedUrl(VIDEO_BUCKET,
@@ -232,9 +244,12 @@ public class CourseService {
     @Transactional(readOnly = true)
     public List<CourseSummaryResponse> getMyCourses(AuthenticatedUser me) {
         if (me == null) return Collections.emptyList();
-        return courseRepository.findEnrolledByStudentId(me.userId())
+        List<Course> courses = courseRepository.findEnrolledByStudentId(me.userId());
+        Set<UUID> previewCourseIds = findCoursesWithFreePreview(courses);
+        return courses
                 .stream()
-                .map(CourseSummaryResponse::fromEntity)
+                .map(course -> CourseSummaryResponse.fromEntity(course,
+                        previewCourseIds.contains(course.getId())))
                 .toList();
     }
 
@@ -252,5 +267,21 @@ public class CourseService {
                 .stream()
                 .map(CategoryResponse::fromEntity)
                 .toList();
+    }
+
+    // [Đồng bộ team3/develop · trial-course] Tập courseId có ít nhất 1 bài học thử miễn phí
+    private Set<UUID> findCoursesWithFreePreview(List<Course> courses) {
+        if (courses == null || courses.isEmpty()) {
+            return Collections.emptySet();
+        }
+
+        List<UUID> courseIds = courses.stream()
+                .map(Course::getId)
+                .toList();
+
+        return lessonRepository.countFreePreviewByCourseIds(courseIds).stream()
+                .filter(count -> count.getItemCount() > 0)
+                .map(CourseContentCount::getCourseId)
+                .collect(Collectors.toCollection(HashSet::new));
     }
 }
