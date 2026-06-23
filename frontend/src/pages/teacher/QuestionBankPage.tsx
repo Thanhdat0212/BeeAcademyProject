@@ -19,8 +19,8 @@ import {
   ChevronDown, Zap, TrendingUp, Minus, Database,
   Save, Loader2, CheckCircle2, Circle, FileSpreadsheet, Sparkles, Lock,
 } from 'lucide-react';
-import ExcelImportModal from './ExcelImportModal';
-import AIScanModal from './AIScanModal';
+import ExcelImportModal from '../../components/teacher/ExcelImportModal';
+import AIScanModal from '../../components/teacher/AIScanModal';
 
 // ═══════════════════════════════════════════════════════════════════
 //  NAVIGATION
