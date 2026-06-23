@@ -36,9 +36,9 @@ public record LessonResponse(
                                              List<CourseDocument> docs) {
         boolean canSee = includeUrl || Boolean.TRUE.equals(lesson.getIsFree());
         String videoUrl = canSee
-                ? (signedUrl != null ? signedUrl : lesson.getVideoUrl())
+                ? firstNonBlank(signedUrl, lesson.getVideoUrl())
                 : null;
-        String embedUrl = canSee ? lesson.getVideoEmbedUrl() : null;
+        String embedUrl = canSee ? firstNonBlank(lesson.getVideoEmbedUrl()) : null;
 
         List<DocumentDto> docDtos = (docs != null && !docs.isEmpty())
                 ? docs.stream().map(DocumentDto::fromEntity).toList()
@@ -60,5 +60,15 @@ public record LessonResponse(
     public static LessonResponse fromEntityWithSignedUrl(Lesson lesson, boolean canSee,
                                                           String signedUrl) {
         return fromEntity(lesson, canSee, signedUrl, Collections.emptyList());
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) return null;
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 }

@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
  * @param effectivePriceVnd  giá thực tế phải trả (sale ?? price)
  * @param isOnSale        true nếu đang giảm giá
  * @param isFeatured      true nếu được nổi bật
+ * @param hasFreePreview  true nếu khóa có ít nhất 1 bài học được mở xem thử
  * @param totalChapters   tổng số chương
  * @param totalLessons    tổng số bài
  * @param totalDurationSec  tổng thời lượng giây
@@ -47,6 +48,7 @@ public record CourseSummaryResponse(
         Integer effectivePriceVnd,
         boolean isOnSale,
         Boolean isFeatured,
+        boolean hasFreePreview,
         Integer totalChapters,
         Integer totalLessons,
         Integer totalDurationSec
@@ -60,6 +62,10 @@ public record CourseSummaryResponse(
      * khi map page (nếu list 20 courses thì N=20 → 40 query extra).
      */
     public static CourseSummaryResponse fromEntity(Course course) {
+        return fromEntity(course, false);
+    }
+
+    public static CourseSummaryResponse fromEntity(Course course, boolean hasFreePreview) {
         // Boxing int[] → List<Integer> để JSON ra mảng JSON chuẩn
         List<Integer> grades = Arrays.stream(course.getGrades()).boxed().collect(Collectors.toList());
 
@@ -82,6 +88,7 @@ public record CourseSummaryResponse(
                 course.getEffectivePriceVnd(),
                 course.isOnSale(),
                 course.getIsFeatured(),
+                hasFreePreview,
                 course.getTotalChapters(),
                 course.getTotalLessons(),
                 course.getTotalDurationSec()

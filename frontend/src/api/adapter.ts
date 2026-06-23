@@ -109,6 +109,7 @@ function adaptLesson(lesson: ApiLesson): UiLesson {
     duration: formatDurationSec(lesson.durationSec),
     type,
     url,
+    isFree: lesson.isFree,
     isCompleted: false,
     questions: undefined, // luôn undefined — câu hỏi thật load qua StudentQuizPage
     documents: lesson.documents ?? [],
@@ -141,6 +142,7 @@ export function adaptCourseSummary(summary: ApiCourseSummary, isEnrolled = false
     students: 1000,
     instructor: summary.teacherName ?? 'Bee Academy',
     isEnrolled,
+    hasFreePreview: summary.hasFreePreview,
   };
 }
 
@@ -165,6 +167,7 @@ export function adaptCourseDetail(detail: ApiCourseDetail): UiCourse {
     students: 1000,
     instructor: detail.teacherName ?? 'Bee Academy',
     isEnrolled: detail.enrolled,  // ✅ từ backend: true nếu đã mua / GV sở hữu / Admin
+    hasFreePreview: detail.hasFreePreview,
     lessons: flattenChaptersToLessons(detail.chapters),
   };
 }
