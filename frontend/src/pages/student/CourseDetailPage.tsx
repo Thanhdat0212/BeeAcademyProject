@@ -21,7 +21,7 @@
 //   - ScoreCircle:   vòng tròn SVG hiển thị điểm số
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type SyntheticEvent } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -531,19 +531,35 @@ function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalProps) {
 //   'syllabus'   — Nội dung khóa học (danh sách bài học với icon type)
 //   'instructor' — Thông tin giảng viên (avatar + bio)
 // ═══════════════════════════════════════════════════════════════════════════════
-function MarketingView({ course, onStartPreview }: { course: Course; onStartPreview?: () => void }) {
+function MarketingView({
+  course,
+  onStartPreview,
+  onOpenLearning,
+}: {
+  course: Course;
+  onStartPreview?: () => void;
+  onOpenLearning?: (lessonId?: string) => void;
+}) {
   const [activeTab, setActiveTab] = useState<'overview' | 'syllabus' | 'instructor'>('overview');
 
   const addToCart = useCartStore(state => state.addToCart);
   const isLoggedIn = useAuthStore(state => state.isLoggedIn);
   const purchasedIds = useCourseStore(state => state.purchasedIds);
   const enrollCourses = useCourseStore(state => state.enrollCourses);
+  const completedLessons = useCourseStore(state => state.completedLessons);
+  const lessonDurations = useCourseStore(state => state.lessonDurations);
   const navigate = useNavigate();
   const [activating, setActivating] = useState(false);
   const previewLessons = useMemo(
     () => course.lessons?.filter(lesson => lesson.type !== 'quiz' && Boolean(lesson.isFree)) ?? [],
     [course.lessons],
   );
+  const completedList = completedLessons[course.id] ?? [];
+  const totalLessons = course.lessons?.length ?? 0;
+  const progressPercent = totalLessons > 0
+    ? Math.round((completedList.length / totalLessons) * 100)
+    : 0;
+  const isOwnedCourse = course.isEnrolled || purchasedIds.includes(course.id);
   const primaryPreviewLesson = previewLessons.find(lesson => lesson.type === 'video') ?? previewLessons[0] ?? null;
   const previewCtaLabel = primaryPreviewLesson?.type === 'video'
     ? 'Xem video học thử'
@@ -714,17 +730,37 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
                     </div>
                     {/* Danh sách bài học với icon theo type: video/pdf/quiz */}
                     <div className="space-y-3">
-                      {course.lessons?.map(lesson => (
-                        <div
+                      {course.lessons?.map(lesson => {
+                        const isLessonCompleted = completedList.includes(lesson.id);
+
+                        return (
+                        <button
+                          type="button"
                           key={lesson.id}
-                          className="p-4 rounded-2xl bg-surface hover:bg-surface-container transition-colors border border-outline-variant/30 flex items-center gap-4"
+                          onClick={() => {
+                            if (isOwnedCourse) {
+                              onOpenLearning?.(lesson.id);
+                            } else if (lesson.isFree && onStartPreview) {
+                              onStartPreview();
+                            }
+                          }}
+                          disabled={!isOwnedCourse && !(lesson.isFree && onStartPreview)}
+                          className={`w-full p-4 rounded-2xl transition-colors border flex items-center gap-4 text-left disabled:cursor-default ${
+                            isLessonCompleted
+                              ? 'bg-green-500/5 border-green-500/25 hover:bg-green-500/10'
+                              : 'bg-surface hover:bg-surface-container border-outline-variant/30 disabled:hover:bg-surface'
+                          }`}
                         >
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                            lesson.type === 'quiz'
+                            isLessonCompleted
+                              ? 'bg-green-500/15 text-green-600'
+                              : lesson.type === 'quiz'
                               ? 'bg-amber-500/10 text-amber-500'
                               : 'bg-surface-container-high text-on-surface-variant'
                           }`}>
-                            {lesson.type === 'video'
+                            {isLessonCompleted
+                              ? <CheckCircle2 className="w-5 h-5" />
+                              : lesson.type === 'video'
                               ? <PlayCircle className="w-5 h-5" />
                               : lesson.type === 'pdf'
                               ? <FileText className="w-5 h-5" />
@@ -732,11 +768,18 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
                             }
                           </div>
                           <div className="flex-grow">
-                            <h4 className="font-bold text-on-surface text-base">{lesson.title}</h4>
+                            <h4 className={`font-bold text-base ${isLessonCompleted ? 'text-green-700' : 'text-on-surface'}`}>
+                              {lesson.title}
+                            </h4>
                             <div className="mt-1 flex flex-wrap items-center gap-2">
                               <span className="text-sm text-on-surface-variant">
                                 {lesson.type === 'video' ? 'Video' : lesson.type === 'pdf' ? 'Tài liệu' : 'Bài kiểm tra'}
                               </span>
+                              {isLessonCompleted && (
+                                <span className="rounded-full bg-green-500/10 px-2.5 py-1 text-[11px] font-extrabold text-green-700">
+                                  Đã hoàn thành
+                                </span>
+                              )}
                               {lesson.isFree && lesson.type !== 'quiz' && (
                                 <span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-extrabold text-amber-600">
                                   Học thử miễn phí
@@ -745,10 +788,11 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
                             </div>
                           </div>
                           <div className="text-sm font-semibold text-on-surface-variant bg-surface-container px-3 py-1 rounded-lg flex-shrink-0">
-                            {lesson.duration}
+                            {getLessonDisplayDuration(course.id, lesson, lessonDurations)}
                           </div>
-                        </div>
-                      ))}
+                        </button>
+                        );
+                      })}
                     </div>
                   </motion.div>
                 )}
@@ -816,20 +860,59 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
                   </>
                 )}
               </div>
-              {/* Giá: hiển thị giá gốc + giá gạch ngang (giả lập 1.5x) */}
-              <div className="text-3xl font-extrabold text-primary mb-1 text-center">{course.price}</div>
-              <div className="text-center text-sm text-on-surface-variant line-through mb-6">
-                {(parseInt(course.price?.replace(/\D/g, '') ?? '0') * 1.5).toLocaleString('vi-VN')}đ
-              </div>
-              {/* CTA: handleAddToCart() — chỉ thêm vào giỏ khi đã đăng nhập */}
-              <button
-                onClick={handleAddToCart}
-                className="w-full py-4 bg-primary text-on-primary rounded-xl font-bold text-lg shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:-translate-y-1 transition-all flex items-center justify-center gap-2 mb-3"
-              >
-                <ShoppingCart className="w-6 h-6" />
-                Thêm vào giỏ hàng
-              </button>
-              {primaryPreviewLesson && onStartPreview && (
+              {isOwnedCourse ? (
+                <>
+                  <div className="mb-4 rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-green-500/10 text-green-600">
+                        <CheckCircle2 className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-extrabold text-on-surface">Bạn đã sở hữu khóa học này</p>
+                        <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
+                          {progressPercent > 0
+                            ? `Bạn đã hoàn thành ${completedList.length}/${totalLessons} bài học.`
+                            : 'Khóa học đã sẵn sàng để bạn bắt đầu học ngay.'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onOpenLearning()}
+                    className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-4 text-lg font-bold text-on-primary shadow-lg shadow-primary/30 transition-all hover:-translate-y-1 hover:shadow-primary/50"
+                  >
+                    <PlayCircle className="h-6 w-6" />
+                    {progressPercent > 0 ? 'Tiếp tục học' : 'Vào học ngay'}
+                  </button>
+                  <div className="mb-6 rounded-2xl bg-surface-container p-4">
+                    <div className="mb-2 flex items-center justify-between text-sm font-semibold">
+                      <span className="text-primary">Tiến độ học tập</span>
+                      <span className="text-on-surface">{progressPercent}%</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-surface-container-high">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${progressPercent}%` }} />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Giá: hiển thị giá gốc + giá gạch ngang (giả lập 1.5x) */}
+                  <div className="text-3xl font-extrabold text-primary mb-1 text-center">{course.price}</div>
+                  <div className="text-center text-sm text-on-surface-variant line-through mb-6">
+                    {(parseInt(course.price?.replace(/\D/g, '') ?? '0') * 1.5).toLocaleString('vi-VN')}đ
+                  </div>
+                  {/* CTA: handleAddToCart() — chỉ thêm vào giỏ khi đã đăng nhập */}
+                  <button
+                    onClick={handleAddToCart}
+                    className="w-full py-4 bg-primary text-on-primary rounded-xl font-bold text-lg shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:-translate-y-1 transition-all flex items-center justify-center gap-2 mb-3"
+                  >
+                    <ShoppingCart className="w-6 h-6" />
+                    Thêm vào giỏ hàng
+                  </button>
+                </>
+              )}
+              {!isOwnedCourse && primaryPreviewLesson && onStartPreview && (
                 <div className="mb-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
@@ -851,7 +934,7 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
                   </button>
                 </div>
               )}
-              {isLoggedIn && (
+              {!isOwnedCourse && isLoggedIn && (
                 <button
                   onClick={handleActivate}
                   disabled={activating}
@@ -990,10 +1073,20 @@ function canOpenLesson(course: Course, lesson: Lesson): boolean {
   return course.isEnrolled || Boolean(lesson.isFree);
 }
 
-function LearningView({ course, rawChapters, courseId, onExitPreview }: {
+function getLessonDisplayDuration(
+  courseId: string,
+  lesson: Lesson,
+  lessonDurations: Record<string, Record<string, number>>,
+): string {
+  const durationSec = lessonDurations[courseId]?.[lesson.id];
+  return durationSec && durationSec > 0 ? formatDurationSec(durationSec) : lesson.duration;
+}
+
+function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPreview }: {
   course: Course;
   rawChapters: ChapterDetail[];
   courseId: string;
+  initialLessonId?: string | null;
   onExitPreview?: () => void;
 }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -1003,7 +1096,11 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
   const navigate = useNavigate();
 
   // BUG FIX: guard khi course không có lesson nào (tránh crash do undefined)
-  const firstLesson = course.lessons?.find(l => l.type !== 'quiz' && canOpenLesson(course, l))
+  const requestedLesson = initialLessonId
+    ? course.lessons?.find(l => l.id === initialLessonId && l.type !== 'quiz' && canOpenLesson(course, l))
+    : null;
+  const firstLesson = requestedLesson
+    ?? course.lessons?.find(l => l.type !== 'quiz' && canOpenLesson(course, l))
     ?? course.lessons?.find(l => canOpenLesson(course, l))
     ?? null;
 
@@ -1020,7 +1117,10 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
 
   // Lấy dữ liệu và actions từ Zustand store
   const completedLessons = useCourseStore((state) => state.completedLessons);
+  const markLessonCompleted = useCourseStore((state) => state.markLessonCompleted);
   const toggleLessonCompleted = useCourseStore((state) => state.toggleLessonCompleted);
+  const lessonDurations = useCourseStore((state) => state.lessonDurations);
+  const saveLessonDuration = useCourseStore((state) => state.saveLessonDuration);
   const quizScores = useCourseStore((state) => state.quizScores);
   const saveQuizScore = useCourseStore((state) => state.saveQuizScore);
   const lessonNotes = useCourseStore((state) => state.lessonNotes);
@@ -1169,6 +1269,21 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
   }
 
   // Callback từ QuizModal khi user nộp bài
+  function handleVideoEnded() {
+    if (!activeLesson || completedList.includes(activeLesson.id)) {
+      return;
+    }
+    markLessonCompleted(course.id, activeLesson.id);
+    notify.success('Đã đánh dấu hoàn thành bài học!');
+  }
+
+  function handleVideoMetadataLoaded(event: SyntheticEvent<HTMLVideoElement>) {
+    if (!activeLesson) {
+      return;
+    }
+    saveLessonDuration(course.id, activeLesson.id, event.currentTarget.duration);
+  }
+
   function toggleChapter(chapterId: string) {
     setExpandedChapterIds(prev => {
       const next = new Set(prev);
@@ -1344,6 +1459,8 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
                   controls
                   controlsList="nodownload"
                   playsInline
+                  onLoadedMetadata={handleVideoMetadataLoaded}
+                  onEnded={handleVideoEnded}
                   onError={() => setVideoUrlExpired(true)}
                 />
               )
@@ -1661,6 +1778,12 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
                   const examSlotIndex = Math.floor(chapterIndex / 3);
                   const exam = studentExams.find(item => item.slotIndex === examSlotIndex);
                   const shouldShowExam = (chapterIndex + 1) % 3 === 0 && exam;
+                  const videoLessonsInChapter = chapter.lessons.filter(lesson => lesson.type === 'video');
+                  const completedVideoCount = videoLessonsInChapter.filter(lesson =>
+                    completedList.includes(lesson.id)
+                  ).length;
+                  const isChapterVideoCompleted = videoLessonsInChapter.length === 0 ||
+                    completedVideoCount === videoLessonsInChapter.length;
 
                   return (
                     <div key={chapter.id} className="space-y-2">
@@ -1726,7 +1849,9 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
                                         Bài {lessonIndex + 1}: {lesson.title.replace(/^Bài\s*\d+\s*[:.-]?\s*/i, '')}
                                       </p>
                                       <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                                        <span className="text-xs text-on-surface-variant">{lesson.duration}</span>
+                                        <span className="text-xs text-on-surface-variant">
+                                          {getLessonDisplayDuration(course.id, lesson, lessonDurations)}
+                                        </span>
                                         {lesson.isFree && isPreviewMode && (
                                           <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-extrabold text-amber-600">
                                             Học thử
@@ -1744,7 +1869,7 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
                               })}
 
                               {chapter.hasQuizConfig && chapter.id !== 'flat-lessons' && (
-                                course.isEnrolled ? (
+                                course.isEnrolled && isChapterVideoCompleted ? (
                                   <Link
                                     to={`/courses/${courseId}/chapters/${chapter.id}/quiz`}
                                     className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 flex items-center gap-3 bg-surface hover:bg-amber-500/5 hover:border-amber-500/20 transition-all group"
@@ -1764,7 +1889,11 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <p className="text-sm font-semibold text-on-surface line-clamp-1">Quiz chương {chapterIndex + 1}</p>
-                                      <p className="text-xs text-on-surface-variant font-medium">Cần mua khóa để làm quiz</p>
+                                      <p className="text-xs text-on-surface-variant font-medium">
+                                        {course.isEnrolled
+                                          ? `Hoàn thành ${completedVideoCount}/${videoLessonsInChapter.length} video để mở quiz`
+                                          : 'Cần mua khóa để làm quiz'}
+                                      </p>
                                     </div>
                                   </div>
                                 )
@@ -1920,10 +2049,14 @@ export default function CourseDetailPage() {
     lesson.type !== 'quiz' && Boolean(lesson.isFree)
   ) ?? false;
   const isPreviewRequested = searchParams.get('preview') === '1';
+  const isLearningRequested = searchParams.get('learn') === '1';
+  const requestedLessonId = searchParams.get('lesson');
 
   function openPreview() {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
+      next.delete('learn');
+      next.delete('lesson');
       next.set('preview', '1');
       return next;
     });
@@ -1933,6 +2066,30 @@ export default function CourseDetailPage() {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete('preview');
+      next.delete('lesson');
+      return next;
+    });
+  }
+
+  function openLearning(lessonId?: string) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('preview');
+      next.set('learn', '1');
+      if (lessonId) {
+        next.set('lesson', lessonId);
+      } else {
+        next.delete('lesson');
+      }
+      return next;
+    });
+  }
+
+  function closeLearning() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('learn');
+      next.delete('lesson');
       return next;
     });
   }
@@ -1952,17 +2109,19 @@ export default function CourseDetailPage() {
     );
   }
 
-  return isEnrolled || (hasFreePreviewLesson && isPreviewRequested) ? (
+  return (isEnrolled && isLearningRequested) || (hasFreePreviewLesson && isPreviewRequested) ? (
     <LearningView
       course={courseWithAccess}
       rawChapters={rawChapters}
       courseId={id!}
-      onExitPreview={isEnrolled ? undefined : closePreview}
+      initialLessonId={requestedLessonId}
+      onExitPreview={isEnrolled ? closeLearning : closePreview}
     />
   ) : (
     <MarketingView
       course={courseWithAccess}
-      onStartPreview={hasFreePreviewLesson ? openPreview : undefined}
+      onStartPreview={!isEnrolled && hasFreePreviewLesson ? openPreview : undefined}
+      onOpenLearning={isEnrolled ? openLearning : undefined}
     />
   );
 }
