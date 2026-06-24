@@ -20,5 +20,8 @@ public record CreateLessonRequest(
         boolean isFree,      // cho xem thử miễn phí?
 
         /** URL nhúng YouTube/Vimeo — nullable, dùng khi videoSource = 'embed'. */
-        String videoEmbedUrl
+        String videoEmbedUrl,
+
+        /** upload | embed | none — FE gửi để backend biết intent khi lưu. */
+        String videoSource
 ) {}

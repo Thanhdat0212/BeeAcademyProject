@@ -565,6 +565,10 @@ function MarketingView({
     ? 'Xem video học thử'
     : 'Xem nội dung học thử';
 
+  const introVideoUrl = course.introVideoUrl?.trim();
+  const introEmbedUrl = introVideoUrl ? toEmbeddableVideoUrl(introVideoUrl) : null;
+  const introDirectUrl = introVideoUrl && isDirectVideoUrl(introVideoUrl) ? introVideoUrl : null;
+
   function handleAddToCart() {
     // Guard 1: chưa đăng nhập → redirect sang /login
     // Truyền state { from } để Login.tsx biết phải redirect về đâu sau khi login xong
@@ -690,6 +694,22 @@ function MarketingView({
                     </h2>
                     <div className="text-on-surface-variant leading-relaxed space-y-4 text-lg">
                       <p>{course.detailedDescription}</p>
+                      {(course.objective || course.audience) && (
+                        <div className="grid md:grid-cols-2 gap-5">
+                          {course.objective && (
+                            <section className="border-l-4 border-primary/50 pl-4 py-1">
+                              <h3 className="text-sm font-extrabold text-on-surface mb-1">Mục tiêu khóa học</h3>
+                              <p className="text-sm leading-relaxed text-on-surface-variant whitespace-pre-line">{course.objective}</p>
+                            </section>
+                          )}
+                          {course.audience && (
+                            <section className="border-l-4 border-primary/50 pl-4 py-1">
+                              <h3 className="text-sm font-extrabold text-on-surface mb-1">Đối tượng học viên</h3>
+                              <p className="text-sm leading-relaxed text-on-surface-variant whitespace-pre-line">{course.audience}</p>
+                            </section>
+                          )}
+                        </div>
+                      )}
                       <p>Khóa học bao gồm đầy đủ hệ thống bài giảng video chất lượng cao, bài tập tự luyện và tài liệu PDF đính kèm.</p>
                       <ul className="grid sm:grid-cols-2 gap-4 mt-8">
                         {['Nắm vững kiến thức trọng tâm', 'Luyện tập với bài tập thực tế', 'Hỗ trợ giải đáp 24/7', 'Truy cập trọn đời'].map((item, idx) => (
@@ -803,31 +823,42 @@ function MarketingView({
           <div className="lg:col-span-1 relative">
             <div className="bg-surface-container-lowest border border-outline-variant/40 rounded-[2rem] p-6 shadow-2xl shadow-primary/10 sticky top-28">
               <div className="rounded-2xl overflow-hidden mb-6 aspect-video relative group">
-                <img src={course.image} alt={course.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                <div className="absolute inset-0 bg-black/20" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  {isOwnedCourse && onOpenLearning ? (
-                    <button
-                      type="button"
-                      onClick={() => onOpenLearning()}
-                      className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg cursor-pointer hover:scale-110 transition-transform"
-                    >
-                      <PlayCircle className="w-8 h-8 ml-1" />
-                    </button>
-                  ) : primaryPreviewLesson && onStartPreview ? (
-                    <button
-                      type="button"
-                      onClick={onStartPreview}
-                      className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg cursor-pointer hover:scale-110 transition-transform"
-                    >
-                      <PlayCircle className="w-8 h-8 ml-1" />
-                    </button>
-                  ) : (
-                    <div className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg">
-                      <PlayCircle className="w-8 h-8 ml-1" />
+                {introEmbedUrl ? (
+                  <iframe
+                    src={introEmbedUrl}
+                    title={`Video giới thiệu ${course.title}`}
+                    className="w-full h-full"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : introDirectUrl ? (
+                  <video
+                    src={introDirectUrl}
+                    poster={course.image}
+                    controls
+                    className="w-full h-full object-cover bg-black"
+                  />
+                ) : (
+                  <>
+                    <img src={course.image} alt={course.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <div className="absolute inset-0 bg-black/20" />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      {primaryPreviewLesson && onStartPreview ? (
+                        <button
+                          type="button"
+                          onClick={onStartPreview}
+                          className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg cursor-pointer hover:scale-110 transition-transform"
+                        >
+                          <PlayCircle className="w-8 h-8 ml-1" />
+                        </button>
+                      ) : (
+                        <div className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg">
+                          <PlayCircle className="w-8 h-8 ml-1" />
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
               {isOwnedCourse ? (
                 <>
@@ -991,6 +1022,33 @@ function roleLabel(role: string): string {
   if (role === 'admin') return 'Admin';
   if (role === 'parent') return 'Phụ huynh';
   return 'Học viên';
+}
+
+function toEmbeddableVideoUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes('youtu.be')) {
+      const id = parsed.pathname.replace('/', '');
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    if (host.includes('youtube.com')) {
+      if (parsed.pathname.includes('/embed/')) return url;
+      const id = parsed.searchParams.get('v');
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    if (host.includes('vimeo.com')) {
+      const id = parsed.pathname.split('/').filter(Boolean).pop();
+      return id ? `https://player.vimeo.com/video/${id}` : null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isDirectVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov)(\?|#|$)/i.test(url);
 }
 
 function adaptLearningLesson(lesson: LessonDetail): Lesson {

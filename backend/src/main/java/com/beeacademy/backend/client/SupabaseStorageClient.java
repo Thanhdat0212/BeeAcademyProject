@@ -3,6 +3,7 @@ package com.beeacademy.backend.client;
 import com.beeacademy.backend.config.SupabaseProperties;
 import com.beeacademy.backend.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -66,6 +67,16 @@ public class SupabaseStorageClient {
      * @return public URL có thể truy cập trực tiếp từ trình duyệt
      */
     public String upload(String bucket, String objectPath, String contentType, byte[] bytes) {
+        return uploadBody(bucket, objectPath, contentType, bytes, bytes.length);
+    }
+
+    public String upload(String bucket, String objectPath, String contentType,
+                         Resource resource, long contentLength) {
+        return uploadBody(bucket, objectPath, contentType, resource, contentLength);
+    }
+
+    private String uploadBody(String bucket, String objectPath, String contentType,
+                              Object body, long contentLength) {
         // Path đầy đủ trong API: /storage/v1/object/{bucket}/{path}
         String uri = STORAGE_OBJECT_PATH + "/" + bucket + "/" + objectPath;
 
@@ -77,12 +88,13 @@ public class SupabaseStorageClient {
                     // Header này yêu cầu Supabase cho phép upsert (ghi đè nếu đã có)
                     .header("x-upsert", "true")
                     .contentType(MediaType.parseMediaType(contentType))
-                    .body(bytes)
+                    .contentLength(contentLength)
+                    .body(body)
                     .retrieve()
                     .toBodilessEntity();
 
             String publicUrl = buildPublicUrl(bucket, objectPath);
-            log.info("Đã upload file lên {} ({} bytes) -> {}", uri, bytes.length, publicUrl);
+            log.info("Đã upload file lên {} ({} bytes) -> {}", uri, contentLength, publicUrl);
             return publicUrl;
 
         } catch (HttpClientErrorException ex) {

@@ -13,6 +13,7 @@ public record PendingCourseResponse(
         UUID id,
         String title,
         String thumbnailUrl,
+        String introVideoUrl,
         String teacherName,
         String categoryName,
         List<Integer> grades,
@@ -20,11 +21,12 @@ public record PendingCourseResponse(
         Integer salePriceVnd,
         Integer totalChapters,
         Integer totalLessons,
+        Integer submittedVersionNo,
         Instant submittedAt
 ) {
     public static PendingCourseResponse fromEntity(Course c) {
         return new PendingCourseResponse(
-                c.getId(), c.getTitle(), c.getThumbnailUrl(),
+                c.getId(), c.getTitle(), c.getThumbnailUrl(), c.getIntroVideoUrl(),
                 c.getTeacher() != null ? c.getTeacher().getFullName() : null,
                 c.getCategory() != null ? c.getCategory().getName() : null,
                 c.getGrades() != null
@@ -33,6 +35,7 @@ public record PendingCourseResponse(
                 c.getPriceVnd(),
                 c.getSalePriceVnd(),
                 c.getTotalChapters(), c.getTotalLessons(),
+                c.getSubmittedVersionNo(),
                 c.getUpdatedAt()
         );
     }

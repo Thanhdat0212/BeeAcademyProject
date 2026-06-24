@@ -13,6 +13,7 @@ export interface TeacherCourseResponse {
   slug: string;
   title: string;
   thumbnailUrl: string | null;
+  introVideoUrl: string | null;
   /** UUID danh mục — thêm mới để form edit không cần gọi getCourseDetail() thêm lần nữa. */
   categoryId: string | null;
   categoryName: string | null;
@@ -23,6 +24,8 @@ export interface TeacherCourseResponse {
   totalChapters: number;
   totalLessons: number;
   salesCount: number;
+  versionNo: number;
+  submittedVersionNo: number;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -51,9 +54,12 @@ export interface TeacherChapterResponse {
 
 export interface TeacherCourseDetailResponse extends TeacherCourseResponse {
   description: string | null;
+  objective: string | null;
+  audience: string | null;
   categoryId: string | null;
   chapters: TeacherChapterResponse[];
   approvalHistory: ApprovalHistoryResponse[];
+  versions: CourseVersionResponse[];
 }
 
 export interface ApprovalHistoryResponse {
@@ -64,10 +70,21 @@ export interface ApprovalHistoryResponse {
   createdAt: string;
 }
 
+export interface CourseVersionResponse {
+  id: string;
+  versionNo: number;
+  title: string;
+  submittedByName: string | null;
+  submittedAt: string;
+}
+
 export interface CreateCourseRequest {
   title: string;
   description?: string;
+  objective?: string;
+  audience?: string;
   thumbnailUrl?: string;
+  introVideoUrl?: string;
   categoryId: string;
   grades: number[];
   priceVnd: number;
@@ -86,6 +103,7 @@ export interface CreateLessonRequest {
   position?: number;
   isFree: boolean;
   videoEmbedUrl?: string;
+  videoSource?: 'upload' | 'embed' | 'none';
 }
 
 // ─── Course CRUD ─────────────────────────────────────────────────────────────
@@ -148,6 +166,16 @@ export async function deleteChapter(courseId: string, chapterId: string): Promis
   await apiClient.delete(`/api/teacher/courses/${courseId}/chapters/${chapterId}`);
 }
 
+export async function reorderChapters(
+    courseId: string,
+    chapterIds: string[]): Promise<TeacherCourseDetailResponse> {
+  const res = await apiClient.put<ApiResponse<TeacherCourseDetailResponse>>(
+    `/api/teacher/courses/${courseId}/chapters/reorder`,
+    { chapters: chapterIds.map((id, idx) => ({ id, position: idx + 1 })) },
+  );
+  return unwrap(res.data);
+}
+
 // ─── Lesson CRUD ─────────────────────────────────────────────────────────────
 
 export async function addLesson(courseId: string, chapterId: string,
@@ -170,6 +198,17 @@ export async function deleteLesson(courseId: string, chapterId: string,
                                     lessonId: string): Promise<void> {
   await apiClient.delete(
     `/api/teacher/courses/${courseId}/chapters/${chapterId}/lessons/${lessonId}`);
+}
+
+export async function reorderLessons(
+    courseId: string,
+    chapterId: string,
+    lessonIds: string[]): Promise<TeacherCourseDetailResponse> {
+  const res = await apiClient.put<ApiResponse<TeacherCourseDetailResponse>>(
+    `/api/teacher/courses/${courseId}/chapters/${chapterId}/lessons/reorder`,
+    { lessons: lessonIds.map((id, idx) => ({ id, position: idx + 1 })) },
+  );
+  return unwrap(res.data);
 }
 
 // ─── Upload ───────────────────────────────────────────────────────────────────

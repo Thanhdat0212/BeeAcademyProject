@@ -11,6 +11,8 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
 import { apiClient, unwrap } from '../../api/client';
+import { listAdminNotifications, markAdminNotificationRead } from '../../api/adminService';
+import type { AdminNotification } from '../../api/adminService';
 import type { ApiResponse, PageResponse } from '../../types/api';
 import {
   LayoutDashboard, BookOpen, Users, FileText,
@@ -32,6 +34,7 @@ interface PendingCourse {
   priceVnd: number;
   totalChapters: number;
   totalLessons: number;
+  submittedVersionNo: number;
   submittedAt: string;
   thumbnailUrl: string | null;
 }
@@ -74,6 +77,9 @@ export default function ApprovalsPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [notifications, setNotifications] = useState<AdminNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   const navigate = useNavigate();
   // useLocation() thay vì window.location — React Router cập nhật khi navigate (pushState)
@@ -98,8 +104,30 @@ export default function ApprovalsPage() {
     }
   }
 
+  async function loadNotifications() {
+    try {
+      const data = await listAdminNotifications(false);
+      setNotifications(data.notifications);
+      setUnreadCount(data.unreadCount);
+    } catch {}
+  }
+
+  async function openNotification(notification: AdminNotification) {
+    if (notification.unread) {
+      try {
+        await markAdminNotificationRead(notification.id);
+        setUnreadCount(count => Math.max(0, count - 1));
+        setNotifications(items => items.map(item =>
+          item.id === notification.id ? { ...item, unread: false, readAt: new Date().toISOString() } : item));
+      } catch {}
+    }
+    setShowNotifications(false);
+    if (notification.targetPath) navigate(notification.targetPath);
+  }
+
   useEffect(() => {
     loadPending();
+    loadNotifications();
   }, []);
 
   // Lọc theo search query
@@ -192,9 +220,47 @@ export default function ApprovalsPage() {
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Duyệt khóa học</h1>
 
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowNotifications(v => !v)}
+                className="relative text-on-surface-variant hover:text-primary transition-colors"
+                title="Thông báo duyệt khóa học"
+              >
+                <Bell className="w-5 h-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-2 -top-2 min-w-4 h-4 rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 text-white">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+              {showNotifications && (
+                <div className="absolute right-0 top-8 z-50 w-80 overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl">
+                  <div className="border-b border-outline-variant/20 px-4 py-3">
+                    <p className="text-sm font-extrabold text-on-surface">Thông báo Admin</p>
+                    <p className="text-xs text-on-surface-variant">{unreadCount} thông báo chưa đọc</p>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <p className="px-4 py-6 text-center text-sm text-on-surface-variant">Chưa có thông báo</p>
+                    ) : notifications.map(notification => (
+                      <button
+                        key={notification.id}
+                        onClick={() => openNotification(notification)}
+                        className="w-full border-b border-outline-variant/10 px-4 py-3 text-left hover:bg-surface-container"
+                      >
+                        <div className="flex items-start gap-2">
+                          {notification.unread && <span className="mt-1.5 h-2 w-2 rounded-full bg-primary" />}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-bold text-on-surface">{notification.title}</p>
+                            <p className="mt-0.5 line-clamp-2 text-xs text-on-surface-variant">{notification.message}</p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold text-on-surface leading-none">{user?.name ?? 'Admin'}</p>

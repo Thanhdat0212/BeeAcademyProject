@@ -33,10 +33,13 @@ export interface Course {
   title: string;
   description: string;
   detailedDescription?: string;
+  objective?: string;
+  audience?: string;
   price?: string;
   subject: Subject;
   grade: Grade;
   image: string;
+  introVideoUrl?: string;
   rating: number;
   students: number;
   instructor: string;

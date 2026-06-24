@@ -356,6 +356,37 @@ export default function CourseReviewPage() {
                         <p className="text-sm text-on-surface leading-relaxed line-clamp-4">{course.description}</p>
                       </div>
                     )}
+
+                    {course.introVideoUrl && (
+                      <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2">
+                        <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1">Video giới thiệu</p>
+                        <a
+                          href={course.introVideoUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="break-all text-sm font-bold text-primary hover:underline"
+                        >
+                          {course.introVideoUrl}
+                        </a>
+                      </div>
+                    )}
+
+                    {(course.objective || course.audience) && (
+                      <div className="mt-4 grid sm:grid-cols-2 gap-4">
+                        {course.objective && (
+                          <section className="border-l-4 border-primary/50 pl-3">
+                            <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1">Mục tiêu</p>
+                            <p className="text-sm text-on-surface leading-relaxed whitespace-pre-line">{course.objective}</p>
+                          </section>
+                        )}
+                        {course.audience && (
+                          <section className="border-l-4 border-primary/50 pl-3">
+                            <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1">Đối tượng</p>
+                            <p className="text-sm text-on-surface leading-relaxed whitespace-pre-line">{course.audience}</p>
+                          </section>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
 

@@ -23,8 +23,8 @@ import java.util.UUID;
  *
  * <p>Cần cấu hình application.yml:
  * <pre>
- *   spring.servlet.multipart.max-file-size: 500MB
- *   spring.servlet.multipart.max-request-size: 500MB
+ *   spring.servlet.multipart.max-file-size: 2GB
+ *   spring.servlet.multipart.max-request-size: 2GB
  * </pre>
  */
 @RestController

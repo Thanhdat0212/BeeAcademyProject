@@ -21,6 +21,7 @@ import {
   GraduationCap, ChevronDown, ChevronRight, Save,
   Upload, Link2, Video, FileImage, Presentation,
   Youtube, Megaphone, Database, Loader2, CheckCircle2, AlertTriangle, UserCircle, Lock,
+  GripVertical,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -52,6 +53,14 @@ type ChapterEditingState =
   | { mode: 'closed' }
   | { mode: 'new' }
   | { mode: 'edit'; chapterId: string };
+
+type DragState =
+  | { type: 'chapter'; id: string }
+  | { type: 'lesson'; chapterId: string; id: string }
+  | null;
+
+const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
 
 // ═══════════════════════════════════════════════════════════════════
 //  HELPERS
@@ -91,6 +100,13 @@ function sortChapters(chapters: TeacherChapterResponse[]): TeacherChapterRespons
       lessons: sortLessons(chapter.lessons),
     }))
     .sort((a, b) => a.position - b.position);
+}
+
+function moveItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+  const next = [...items];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -162,7 +178,7 @@ function FileSlot({ label, icon, accept, existingName, file, onSelect, onRemove 
           </button>
           {/* FIX: hiển thị giới hạn file size tài liệu */}
           <p className="text-xs text-on-surface-variant text-center">
-            PDF, PPTX, DOCX · Tối đa <strong>50 MB</strong>
+            PDF, PPTX, DOCX · Tối đa <strong>100 MB</strong>
           </p>
         </div>
       )}
@@ -174,9 +190,9 @@ function FileSlot({ label, icon, accept, existingName, file, onSelect, onRemove 
         onChange={e => {
           const f = e.target.files?.[0];
           if (f) {
-            // FIX: check file size tại client (50MB cho tài liệu)
-            if (f.size > 50 * 1024 * 1024) {
-              alert('File tài liệu vượt quá giới hạn 50 MB. Vui lòng chọn file nhỏ hơn.');
+            // FIX: check file size tại client (100MB cho tài liệu)
+            if (f.size > MAX_DOCUMENT_BYTES) {
+              alert('File tài liệu vượt quá giới hạn 100 MB. Vui lòng chọn file nhỏ hơn.');
               e.target.value = '';
               return;
             }
@@ -207,7 +223,8 @@ function VideoSlot({
   const inputRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<'upload' | 'embed'>(videoSource === 'embed' ? 'embed' : 'upload');
 
-  const hasExistingUpload = videoSource === 'upload' && !!videoStoragePath;
+  const hasStoredVideo = !!videoStoragePath;
+  const hasExistingUpload = videoSource === 'upload' && hasStoredVideo;
   const displayFileName = videoFile?.name ?? (hasExistingUpload ? '(Video đã tải lên)' : undefined);
 
   return (
@@ -276,7 +293,7 @@ function VideoSlot({
               </button>
               {/* FIX: hiển thị giới hạn file size để GV biết trước khi chọn */}
               <p className="text-xs text-on-surface-variant text-center">
-                Chấp nhận MP4, WebM, MOV · Tối đa <strong>500 MB</strong>
+                Chấp nhận MP4, WebM, MOV · Tối đa <strong>2 GB</strong>
               </p>
             </div>
           )}
@@ -288,8 +305,8 @@ function VideoSlot({
               const f = e.target.files?.[0];
               if (f) {
                 // FIX: check file size ngay tại client trước khi upload
-                if (f.size > 500 * 1024 * 1024) {
-                  alert('File video vượt quá giới hạn 500 MB. Vui lòng chọn file nhỏ hơn.');
+                if (f.size > MAX_VIDEO_BYTES) {
+                  alert('File video vượt quá giới hạn 2 GB. Vui lòng chọn file nhỏ hơn.');
                   e.target.value = '';
                   return;
                 }
@@ -302,13 +319,12 @@ function VideoSlot({
         </>
       ) : (
         <div className="space-y-2">
-          {/* FIX: cảnh báo khi GV đã upload video nhưng chuyển sang embed
-              — file video cũ trên server sẽ trở thành orphan (không bị xóa tự động) */}
-          {hasExistingUpload && (
+          {/* Khi đổi sang embed, backend sẽ dọn file upload cũ sau khi lưu thành công. */}
+          {hasStoredVideo && (
             <div className="flex items-start gap-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
               <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-amber-700">
-                Bạn đã có video đã tải lên. Thay bằng YouTube/Vimeo sẽ <strong>không xóa</strong> file cũ khỏi server.
+                Video đã tải lên trước đó sẽ được xóa khỏi storage sau khi bạn lưu link YouTube/Vimeo.
               </p>
             </div>
           )}
@@ -345,6 +361,8 @@ export default function TeacherContentPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [dragging, setDragging] = useState<DragState>(null);
+  const [reorderSaving, setReorderSaving] = useState(false);
 
   // Lesson form state
   const [lessonEditing, setLessonEditing] = useState<LessonEditingState>({ mode: 'closed' });
@@ -411,6 +429,59 @@ export default function TeacherContentPage() {
     setVideoFile(null); setPdfFile(null); setSlideFile(null);
   }
 
+  async function refreshSelectedCourseDetail() {
+    const detail = await svc.getCourseDetail(selectedCourseId);
+    setChapters(sortChapters(detail.chapters));
+  }
+
+  async function reorderChapter(draggedId: string, targetId: string) {
+    if (!selectedCourseId || draggedId === targetId || reorderSaving) return;
+    const fromIndex = chapters.findIndex(ch => ch.id === draggedId);
+    const toIndex = chapters.findIndex(ch => ch.id === targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+
+    const next = moveItem(chapters, fromIndex, toIndex)
+      .map((chapter, idx) => ({ ...chapter, position: idx + 1 }));
+    setChapters(next);
+    setReorderSaving(true);
+    try {
+      const detail = await svc.reorderChapters(selectedCourseId, next.map(ch => ch.id));
+      setChapters(sortChapters(detail.chapters));
+    } catch (err: unknown) {
+      notify.error(err instanceof Error ? err.message : 'Không lưu được thứ tự chương');
+      await refreshSelectedCourseDetail().catch(() => {});
+    } finally {
+      setReorderSaving(false);
+      setDragging(null);
+    }
+  }
+
+  async function reorderLesson(chapterId: string, draggedId: string, targetId: string) {
+    if (!selectedCourseId || draggedId === targetId || reorderSaving) return;
+    const chapter = chapters.find(ch => ch.id === chapterId);
+    if (!chapter) return;
+    const fromIndex = chapter.lessons.findIndex(lesson => lesson.id === draggedId);
+    const toIndex = chapter.lessons.findIndex(lesson => lesson.id === targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+
+    const nextLessons = moveItem(chapter.lessons, fromIndex, toIndex)
+      .map((lesson, idx) => ({ ...lesson, position: idx + 1 }));
+    const nextChapters = chapters.map(ch =>
+      ch.id === chapterId ? { ...ch, lessons: nextLessons } : ch);
+    setChapters(nextChapters);
+    setReorderSaving(true);
+    try {
+      const detail = await svc.reorderLessons(selectedCourseId, chapterId, nextLessons.map(lesson => lesson.id));
+      setChapters(sortChapters(detail.chapters));
+    } catch (err: unknown) {
+      notify.error(err instanceof Error ? err.message : 'Không lưu được thứ tự bài giảng');
+      await refreshSelectedCourseDetail().catch(() => {});
+    } finally {
+      setReorderSaving(false);
+      setDragging(null);
+    }
+  }
+
   // ── Lesson handlers ──────────────────────────────────────────────
 
   function startAddLesson(chapterId: string) {
@@ -461,6 +532,7 @@ export default function TeacherContentPage() {
         description:  lessonForm.description.trim() || undefined,
         position:     lessonForm.position,
         isFree:       lessonForm.isFree,
+        videoSource:  lessonForm.videoSource,
         // Chỉ gửi embedUrl khi user chọn tab embed và đã nhập URL
         videoEmbedUrl: lessonForm.videoSource === 'embed' && lessonForm.videoEmbedUrl.trim()
           ? lessonForm.videoEmbedUrl.trim() : undefined,
@@ -742,7 +814,6 @@ export default function TeacherContentPage() {
                     ...lessonForm,
                     videoSource: url ? 'embed' : 'none',
                     videoEmbedUrl: url,
-                    videoStoragePath: '',  // xóa path upload cũ khi chuyển sang embed
                   })}
                   onFileSelect={f => {
                     setVideoFile(f);
@@ -837,8 +908,8 @@ export default function TeacherContentPage() {
                 </h3>
                 <p className="text-sm text-on-surface-variant mt-1">
                   {deleteConfirm.type === 'chapter'
-                    ? `Xóa chương "${deleteConfirm.title}" sẽ xóa toàn bộ bài giảng bên trong. Hành động này không thể hoàn tác.`
-                    : `Xóa bài giảng "${deleteConfirm.title}"? Hành động này không thể hoàn tác.`
+                    ? `Xóa chương "${deleteConfirm.title}" sẽ xóa toàn bộ bài giảng và file đã upload bên trong. Hành động này không thể hoàn tác.`
+                    : `Xóa bài giảng "${deleteConfirm.title}" sẽ xóa cả file đã upload. Hành động này không thể hoàn tác.`
                   }
                 </p>
               </div>
@@ -994,6 +1065,12 @@ export default function TeacherContentPage() {
                     <BookOpen className="w-4 h-4 text-primary" />
                     Cấu trúc khóa học
                   </h3>
+                  {reorderSaving && (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-primary">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Đang lưu
+                    </span>
+                  )}
                 </div>
 
                 {loadingDetail ? (
@@ -1014,12 +1091,29 @@ export default function TeacherContentPage() {
                       return (
                         <div
                           key={chapter.id}
+                          draggable={!reorderSaving}
+                          onDragStart={e => {
+                            e.dataTransfer.effectAllowed = 'move';
+                            setDragging({ type: 'chapter', id: chapter.id });
+                          }}
+                          onDragOver={e => e.preventDefault()}
+                          onDrop={e => {
+                            e.preventDefault();
+                            if (dragging?.type === 'chapter') reorderChapter(dragging.id, chapter.id);
+                          }}
+                          onDragEnd={() => setDragging(null)}
                           className={`border rounded-xl overflow-hidden ${
                             isChapterEditing ? 'border-primary/50' : 'border-outline-variant/30'
-                          }`}
+                          } ${dragging?.type === 'chapter' && dragging.id === chapter.id ? 'opacity-60' : ''}`}
                         >
                           {/* Chapter header */}
                           <div className="flex items-center bg-surface-container/50 hover:bg-surface-container transition-colors">
+                            <span
+                              title="Kéo để đổi thứ tự chương"
+                              className="pl-2 text-on-surface-variant/60 cursor-grab active:cursor-grabbing"
+                            >
+                              <GripVertical className="w-4 h-4" />
+                            </span>
                             <button
                               onClick={() => toggleChapter(chapter.id)}
                               className="flex items-center gap-2 px-3 py-2.5 flex-1 text-left min-w-0"
@@ -1070,10 +1164,34 @@ export default function TeacherContentPage() {
                                     return (
                                       <div
                                         key={lesson.id}
+                                        draggable={!reorderSaving}
+                                        onDragStart={e => {
+                                          e.stopPropagation();
+                                          e.dataTransfer.effectAllowed = 'move';
+                                          setDragging({ type: 'lesson', chapterId: chapter.id, id: lesson.id });
+                                        }}
+                                        onDragOver={e => {
+                                          if (dragging?.type === 'lesson' && dragging.chapterId === chapter.id) {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                          }
+                                        }}
+                                        onDrop={e => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          if (dragging?.type === 'lesson' && dragging.chapterId === chapter.id) {
+                                            reorderLesson(chapter.id, dragging.id, lesson.id);
+                                          }
+                                        }}
+                                        onDragEnd={() => setDragging(null)}
                                         className={`flex items-center gap-2 px-2 py-2 rounded-lg group ${
                                           isEditing ? 'bg-primary/10' : 'hover:bg-surface-container/50'
-                                        }`}
+                                        } ${dragging?.type === 'lesson' && dragging.id === lesson.id ? 'opacity-60' : ''}`}
                                       >
+                                        <GripVertical
+                                          title="Kéo để đổi thứ tự bài giảng"
+                                          className="w-3.5 h-3.5 text-on-surface-variant/50 cursor-grab active:cursor-grabbing flex-shrink-0"
+                                        />
                                         <span className="text-xs font-mono text-on-surface-variant flex-shrink-0 w-5 text-right">
                                           {lesson.position}.
                                         </span>

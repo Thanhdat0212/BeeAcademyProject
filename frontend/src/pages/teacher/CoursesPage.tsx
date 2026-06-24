@@ -138,7 +138,10 @@ function Spinner() {
 interface CourseForm {
   title: string;
   description: string;
+  objective: string;
+  audience: string;
   thumbnailUrl: string;
+  introVideoUrl: string;
   categoryId: string;
   grades: number[];
   priceVnd: string;
@@ -146,7 +149,7 @@ interface CourseForm {
 }
 
 const EMPTY_FORM: CourseForm = {
-  title: '', description: '', thumbnailUrl: '', categoryId: '',
+  title: '', description: '', objective: '', audience: '', thumbnailUrl: '', introVideoUrl: '', categoryId: '',
   grades: [], priceVnd: '', salePriceVnd: '',
 };
 
@@ -189,7 +192,10 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
       setForm({
         title:        editing.title,
         description:  '',
+        objective:    '',
+        audience:     '',
         thumbnailUrl: editing.thumbnailUrl ?? '',
+        introVideoUrl: editing.introVideoUrl ?? '',
         categoryId:   editing.categoryId ?? '',
         grades:       editing.grades ?? [],
         priceVnd:     editing.priceVnd.toString(),
@@ -205,7 +211,10 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
         if (isMounted) setForm(f => ({
           ...f,
           description: d.description ?? '',
+          objective: d.objective ?? '',
+          audience: d.audience ?? '',
           thumbnailUrl: d.thumbnailUrl ?? editing.thumbnailUrl ?? '',
+          introVideoUrl: d.introVideoUrl ?? editing.introVideoUrl ?? '',
         }));
       }).catch(() => {});
       return () => { isMounted = false; };
@@ -241,6 +250,11 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
     setThumbnailInputKey(k => k + 1);
   }
 
+  function textPayload(value: string, allowBlank: boolean): string | undefined {
+    const trimmed = value.trim();
+    return trimmed || (allowBlank ? '' : undefined);
+  }
+
   async function handleSave() {
     if (!form.title.trim())    { notify.error('Vui lòng nhập tiêu đề'); return; }
     if (!form.categoryId)      { notify.error('Vui lòng chọn môn học'); return; }
@@ -258,6 +272,22 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
       }
     }
 
+    if (form.introVideoUrl.trim()) {
+      const introUrl = form.introVideoUrl.trim();
+      const isSupportedIntro =
+        /^https?:\/\//i.test(introUrl)
+        && (
+          introUrl.includes('youtube.com')
+          || introUrl.includes('youtu.be')
+          || introUrl.includes('vimeo.com')
+          || /\.(mp4|webm|mov)(\?|#|$)/i.test(introUrl)
+        );
+      if (!isSupportedIntro) {
+        notify.error('Video giới thiệu chỉ hỗ trợ YouTube, Vimeo hoặc link MP4/WebM/MOV công khai');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       let thumbnailUrl = form.thumbnailUrl.trim() || undefined;
@@ -271,8 +301,11 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
 
       const req: CreateCourseRequest = {
         title:       form.title.trim(),
-        description: form.description.trim() || undefined,
+        description: textPayload(form.description, Boolean(editing)),
+        objective: textPayload(form.objective, Boolean(editing)),
+        audience: textPayload(form.audience, Boolean(editing)),
         thumbnailUrl,
+        introVideoUrl: textPayload(form.introVideoUrl, Boolean(editing)),
         categoryId:  form.categoryId,
         grades:      form.grades,
         priceVnd:    Number(form.priceVnd),
@@ -349,9 +382,48 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
                   value={form.description}
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                   rows={4}
-                  placeholder="Nội dung khóa học, đối tượng học sinh, mục tiêu..."
+                  placeholder="Tóm tắt nội dung và điểm nổi bật của khóa học..."
                   className="w-full px-3 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary resize-none"
                 />
+              </div>
+
+              {/* Mục tiêu và đối tượng */}
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-1.5">Mục tiêu khóa học</label>
+                <textarea
+                  value={form.objective}
+                  maxLength={5000}
+                  onChange={e => setForm(f => ({ ...f, objective: e.target.value }))}
+                  rows={3}
+                  placeholder="VD: Nắm vững kiến thức trọng tâm, giải được các dạng bài thường gặp..."
+                  className="w-full px-3 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-1.5">Đối tượng học viên</label>
+                <textarea
+                  value={form.audience}
+                  maxLength={5000}
+                  onChange={e => setForm(f => ({ ...f, audience: e.target.value }))}
+                  rows={3}
+                  placeholder="VD: Học sinh lớp 8 cần củng cố nền tảng hoặc ôn thi giữa kỳ..."
+                  className="w-full px-3 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-1.5">Video giới thiệu khóa học</label>
+                <input
+                  type="url"
+                  value={form.introVideoUrl}
+                  onChange={e => setForm(f => ({ ...f, introVideoUrl: e.target.value }))}
+                  placeholder="https://www.youtube.com/watch?v=... hoặc https://.../intro.mp4"
+                  className="w-full px-3 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary"
+                />
+                <p className="mt-1.5 text-xs text-on-surface-variant">
+                  Hỗ trợ YouTube, Vimeo hoặc link MP4/WebM/MOV công khai để Admin và học sinh xem trước.
+                </p>
               </div>
 
               {/* Ảnh bìa */}

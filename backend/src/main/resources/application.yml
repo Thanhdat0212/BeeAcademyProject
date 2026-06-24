@@ -52,11 +52,11 @@ spring:
         physical_naming_strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
     open-in-view: false   # Tắt OSIV - tránh lazy load ngoài transaction (best practice)
 
-  # Upload: avatar (5MB) + video khoá học (500MB)
+  # Upload: avatar (5MB) + video khóa học (2GB) + tài liệu (100MB)
   servlet:
     multipart:
-      max-file-size: 500MB
-      max-request-size: 500MB
+      max-file-size: 2GB
+      max-request-size: 2GB
 
   # --------------------------------------------------------------------------
   # Mail: gửi OTP qua Gmail SMTP

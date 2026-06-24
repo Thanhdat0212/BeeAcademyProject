@@ -98,7 +98,10 @@ export interface CourseSummary {
   slug: string;
   title: string;
   description: string | null;
+  objective: string | null;
+  audience: string | null;
   thumbnailUrl: string | null;
+  introVideoUrl: string | null;
   categoryName: string | null;
   categorySlug: string | null;
   teacherName: string | null;
@@ -144,6 +147,8 @@ export interface ChapterDetail {
 
 /** Shape đầy đủ cho detail page (GET /api/courses/{id}). */
 export interface CourseDetail extends Omit<CourseSummary, 'isFeatured'> {
+  versionNo: number;
+  submittedVersionNo: number;
   publishedAt: string | null;
   chapters: ChapterDetail[];
   enrolled: boolean; // true nếu đã mua / là GV sở hữu / là Admin
