@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -96,12 +97,20 @@ public class CourseService {
 
         Set<UUID> previewCourseIds = findCoursesWithFreePreview(coursePage.getContent());
 
+        List<UUID> courseIds = coursePage.getContent().stream().map(Course::getId).toList();
+        Map<UUID, Integer> studentCounts = buildStudentCounts(courseIds);
+        Map<UUID, double[]> ratingStats = buildRatingStats(courseIds);
+
         // Map qua DTO. Lưu ý: page query mặc định không JOIN FETCH category/teacher
         // → nếu truy cập course.getCategory().getName() sẽ trigger N+1.
         // GIẢI PHÁP: ở GĐ này dữ liệu nhỏ (9 mock courses) chấp nhận N+1.
         // Khi scale, thêm @EntityGraph trên một method findAll Specification tuỳ chỉnh.
         return PageResponse.of(coursePage,
-                course -> CourseSummaryResponse.fromEntity(course, previewCourseIds.contains(course.getId())));
+                course -> CourseSummaryResponse.fromEntity(course,
+                        previewCourseIds.contains(course.getId()),
+                        studentCounts.getOrDefault(course.getId(), 0),
+                        ratingAvgOf(ratingStats, course.getId()),
+                        reviewCountOf(ratingStats, course.getId())));
     }
 
     // ========================================================================
@@ -124,9 +133,7 @@ public class CourseService {
                 .orElseThrow(() -> new ResourceNotFoundException("Course", id));
 
         boolean canSeeAllVideos = canUserAccessAllVideos(course, me);
-        return CourseDetailResponse.fromEntity(course, canSeeAllVideos,
-                buildUrlResolver(canSeeAllVideos), buildDocMap(course),
-                buildChaptersWithQuiz(course));
+        return buildDetailResponse(course, canSeeAllVideos);
     }
 
     @Transactional(readOnly = true)
@@ -135,9 +142,20 @@ public class CourseService {
                 .orElseThrow(() -> new ResourceNotFoundException("Course", slug));
 
         boolean canSeeAllVideos = canUserAccessAllVideos(course, me);
+        return buildDetailResponse(course, canSeeAllVideos);
+    }
+
+    /** Dựng response chi tiết kèm số học viên + đánh giá thật của khóa học. */
+    private CourseDetailResponse buildDetailResponse(Course course, boolean canSeeAllVideos) {
+        List<UUID> ids = List.of(course.getId());
+        int studentCount = buildStudentCounts(ids).getOrDefault(course.getId(), 0);
+        Map<UUID, double[]> ratingStats = buildRatingStats(ids);
         return CourseDetailResponse.fromEntity(course, canSeeAllVideos,
                 buildUrlResolver(canSeeAllVideos), buildDocMap(course),
-                buildChaptersWithQuiz(course));
+                buildChaptersWithQuiz(course),
+                studentCount,
+                ratingAvgOf(ratingStats, course.getId()),
+                reviewCountOf(ratingStats, course.getId()));
     }
 
     /**
@@ -246,11 +264,59 @@ public class CourseService {
         if (me == null) return Collections.emptyList();
         List<Course> courses = courseRepository.findEnrolledByStudentId(me.userId());
         Set<UUID> previewCourseIds = findCoursesWithFreePreview(courses);
+        List<UUID> courseIds = courses.stream().map(Course::getId).toList();
+        Map<UUID, Integer> studentCounts = buildStudentCounts(courseIds);
+        Map<UUID, double[]> ratingStats = buildRatingStats(courseIds);
         return courses
                 .stream()
                 .map(course -> CourseSummaryResponse.fromEntity(course,
-                        previewCourseIds.contains(course.getId())))
+                        previewCourseIds.contains(course.getId()),
+                        studentCounts.getOrDefault(course.getId(), 0),
+                        ratingAvgOf(ratingStats, course.getId()),
+                        reviewCountOf(ratingStats, course.getId())))
                 .toList();
+    }
+
+    // ========================================================================
+    // Số liệu thật: học viên (enrollments) + đánh giá (reviews)
+    // ========================================================================
+
+    /** courseId → số học viên đã ghi danh (1 query batch). */
+    private Map<UUID, Integer> buildStudentCounts(List<UUID> courseIds) {
+        if (courseIds == null || courseIds.isEmpty()) return Collections.emptyMap();
+        Map<UUID, Integer> result = new HashMap<>();
+        for (Object[] row : enrollmentRepository.countGroupedByCourseId(courseIds)) {
+            result.put(toUuid(row[0]), ((Number) row[1]).intValue());
+        }
+        return result;
+    }
+
+    /** courseId → [điểm trung bình, số lượt đánh giá] (1 query batch). */
+    private Map<UUID, double[]> buildRatingStats(List<UUID> courseIds) {
+        if (courseIds == null || courseIds.isEmpty()) return Collections.emptyMap();
+        Map<UUID, double[]> result = new HashMap<>();
+        for (Object[] row : courseRepository.findRatingStatsByCourseIds(courseIds)) {
+            double avg = row[1] != null ? ((Number) row[1]).doubleValue() : 0.0;
+            int count = row[2] != null ? ((Number) row[2]).intValue() : 0;
+            result.put(toUuid(row[0]), new double[]{avg, count});
+        }
+        return result;
+    }
+
+    /** Điểm trung bình làm tròn 1 chữ số; null khi chưa có đánh giá nào. */
+    private Double ratingAvgOf(Map<UUID, double[]> stats, UUID courseId) {
+        double[] s = stats.get(courseId);
+        if (s == null || s[1] <= 0) return null;
+        return Math.round(s[0] * 10.0) / 10.0;
+    }
+
+    private int reviewCountOf(Map<UUID, double[]> stats, UUID courseId) {
+        double[] s = stats.get(courseId);
+        return s != null ? (int) s[1] : 0;
+    }
+
+    private UUID toUuid(Object value) {
+        return value instanceof UUID uuid ? uuid : UUID.fromString(value.toString());
     }
 
     // ========================================================================

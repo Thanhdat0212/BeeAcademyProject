@@ -38,6 +38,7 @@ export interface Course {
   grade: Grade;
   image: string;
   rating: number;
+  reviewCount?: number;
   students: number;
   instructor: string;
   isEnrolled: boolean;

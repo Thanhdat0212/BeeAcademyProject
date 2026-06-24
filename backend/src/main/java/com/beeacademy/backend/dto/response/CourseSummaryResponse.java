@@ -51,7 +51,10 @@ public record CourseSummaryResponse(
         boolean hasFreePreview,
         Integer totalChapters,
         Integer totalLessons,
-        Integer totalDurationSec
+        Integer totalDurationSec,
+        Integer studentCount,
+        Double ratingAvg,
+        Integer reviewCount
 ) {
 
     /**
@@ -62,10 +65,15 @@ public record CourseSummaryResponse(
      * khi map page (nếu list 20 courses thì N=20 → 40 query extra).
      */
     public static CourseSummaryResponse fromEntity(Course course) {
-        return fromEntity(course, false);
+        return fromEntity(course, false, 0, null, 0);
     }
 
     public static CourseSummaryResponse fromEntity(Course course, boolean hasFreePreview) {
+        return fromEntity(course, hasFreePreview, 0, null, 0);
+    }
+
+    public static CourseSummaryResponse fromEntity(Course course, boolean hasFreePreview,
+                                                   int studentCount, Double ratingAvg, int reviewCount) {
         // Boxing int[] → List<Integer> để JSON ra mảng JSON chuẩn
         List<Integer> grades = Arrays.stream(course.getGrades()).boxed().collect(Collectors.toList());
 
@@ -91,7 +99,10 @@ public record CourseSummaryResponse(
                 hasFreePreview,
                 course.getTotalChapters(),
                 course.getTotalLessons(),
-                course.getTotalDurationSec()
+                course.getTotalDurationSec(),
+                studentCount,
+                ratingAvg,
+                reviewCount
         );
     }
 }

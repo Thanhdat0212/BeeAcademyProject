@@ -62,3 +62,18 @@ ChiaCode/
 
 # ── File tạm Office (Excel/Word khóa khi đang mở) ────────
 ~$*
+
+# RBL SWT301 - project rieng, push len GitHub khac, khong commit vao repo nay
+/RBL_SWT301_Week4/
+
+# Clone team3 (develop) de tham khao - khong commit vao repo nay
+/team3-develop/
+
+# ── File/thu muc cuc bo, khong thuoc project (chi commit backend/ + frontend/) ──
+/team_split/
+/samples/
+/team-rules/
+/Week04/
+/gen_sheet.py
+/PHAN_CONG_NHIEM_VU.md
+/TEAM_TASK_DIVISION.md
