@@ -112,6 +112,9 @@ export interface CourseSummary {
   totalChapters: number;
   totalLessons: number;
   totalDurationSec: number;
+  studentCount: number;
+  ratingAvg: number | null;
+  reviewCount: number;
 }
 
 export interface LessonDocumentDto {

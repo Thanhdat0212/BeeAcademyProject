@@ -47,7 +47,10 @@ public record CourseDetailResponse(
         Instant publishedAt,
         List<ChapterResponse> chapters,
         /** true nếu user đã mua/enroll hoặc là GV sở hữu hoặc là Admin */
-        boolean enrolled
+        boolean enrolled,
+        Integer studentCount,
+        Double ratingAvg,
+        Integer reviewCount
 ) {
 
     /**
@@ -79,6 +82,19 @@ public record CourseDetailResponse(
                                                    Function<Lesson, String> resolver,
                                                    Map<UUID, List<CourseDocument>> docMap,
                                                    Set<UUID> chaptersWithQuiz) {
+        return fromEntity(course, canSeeAllVideos, resolver, docMap, chaptersWithQuiz, 0, null, 0);
+    }
+
+    /**
+     * Overload đầy đủ nhất: kèm số học viên thật ({@code studentCount}) và
+     * thống kê đánh giá ({@code ratingAvg}, {@code reviewCount}). {@code ratingAvg}
+     * null khi khóa chưa có đánh giá nào.
+     */
+    public static CourseDetailResponse fromEntity(Course course, boolean canSeeAllVideos,
+                                                   Function<Lesson, String> resolver,
+                                                   Map<UUID, List<CourseDocument>> docMap,
+                                                   Set<UUID> chaptersWithQuiz,
+                                                   int studentCount, Double ratingAvg, int reviewCount) {
         List<Integer> grades = Arrays.stream(course.getGrades()).boxed().collect(Collectors.toList());
 
         List<ChapterResponse> chapters = course.getChapters().stream()
@@ -110,7 +126,10 @@ public record CourseDetailResponse(
                 course.getTotalDurationSec(),
                 course.getPublishedAt(),
                 chapters,
-                canSeeAllVideos   // enrolled = có quyền xem toàn bộ video
+                canSeeAllVideos,   // enrolled = có quyền xem toàn bộ video
+                studentCount,
+                ratingAvg,
+                reviewCount
         );
     }
 }

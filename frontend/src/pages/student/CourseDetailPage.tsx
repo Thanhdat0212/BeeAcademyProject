@@ -588,10 +588,18 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
           </h1>
           <p className="text-xl text-on-surface-variant mb-8 max-w-3xl leading-relaxed">{course.description}</p>
           <div className="flex flex-wrap items-center gap-8 text-on-surface-variant font-medium">
-            <div className="flex items-center gap-2 text-amber-500 bg-amber-500/10 px-3 py-1.5 rounded-lg">
-              <Star className="w-5 h-5 fill-amber-500" />
-              <span className="text-lg font-bold">{course.rating}</span>
-            </div>
+            {course.reviewCount && course.reviewCount > 0 ? (
+              <div className="flex items-center gap-2 text-amber-500 bg-amber-500/10 px-3 py-1.5 rounded-lg">
+                <Star className="w-5 h-5 fill-amber-500" />
+                <span className="text-lg font-bold">{course.rating}</span>
+                <span className="text-sm text-on-surface-variant">({course.reviewCount} đánh giá)</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-on-surface-variant bg-surface-container px-3 py-1.5 rounded-lg">
+                <Star className="w-5 h-5" />
+                <span className="text-sm">Chưa có đánh giá</span>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Users className="w-5 h-5" />
               <span>{course.students.toLocaleString('vi-VN')} học viên</span>

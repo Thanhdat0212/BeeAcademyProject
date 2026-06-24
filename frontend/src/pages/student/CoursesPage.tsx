@@ -559,9 +559,13 @@ export default function CoursesPage() {
                               </div>
                               <div className="p-6 flex flex-col flex-grow">
                                 <div className="flex items-center justify-between mb-3">
-                                  <div className="flex items-center gap-1 text-sm font-semibold text-amber-500">
-                                    <Star className="w-4 h-4 fill-amber-500" /> {course.rating}
-                                  </div>
+                                  {course.reviewCount && course.reviewCount > 0 ? (
+                                    <div className="flex items-center gap-1 text-sm font-semibold text-amber-500">
+                                      <Star className="w-4 h-4 fill-amber-500" /> {course.rating}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded">Mới</span>
+                                  )}
                                   <div className="flex items-center gap-1 text-sm font-medium text-on-surface-variant">
                                     <Users className="w-4 h-4" /> {course.students.toLocaleString('vi-VN')}
                                   </div>
