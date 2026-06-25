@@ -11,6 +11,13 @@ export async function getStudentParentLinkInvitations(): Promise<StudentParentLi
   return unwrap(res.data);
 }
 
+export async function getStudentLinkedParents(): Promise<StudentParentLinkInvitationResponse[]> {
+  const res = await apiClient.get<ApiResponse<StudentParentLinkInvitationResponse[]>>(
+    '/api/student/parent-link-invitations/linked-parents'
+  );
+  return unwrap(res.data);
+}
+
 export async function acceptStudentParentLinkInvitation(
   parentId: string
 ): Promise<StudentParentLinkInvitationResponse> {
@@ -25,6 +32,24 @@ export async function rejectStudentParentLinkInvitation(
 ): Promise<StudentParentLinkInvitationResponse> {
   const res = await apiClient.post<ApiResponse<StudentParentLinkInvitationResponse>>(
     `/api/student/parent-link-invitations/${encodeURIComponent(parentId)}/reject`
+  );
+  return unwrap(res.data);
+}
+
+export async function requestStudentParentUnlink(
+  parentId: string
+): Promise<StudentParentLinkInvitationResponse> {
+  const res = await apiClient.post<ApiResponse<StudentParentLinkInvitationResponse>>(
+    `/api/student/parent-link-invitations/${encodeURIComponent(parentId)}/unlink-request`
+  );
+  return unwrap(res.data);
+}
+
+export async function confirmStudentParentUnlink(
+  parentId: string
+): Promise<StudentParentLinkInvitationResponse> {
+  const res = await apiClient.post<ApiResponse<StudentParentLinkInvitationResponse>>(
+    `/api/student/parent-link-invitations/${encodeURIComponent(parentId)}/unlink-confirm`
   );
   return unwrap(res.data);
 }

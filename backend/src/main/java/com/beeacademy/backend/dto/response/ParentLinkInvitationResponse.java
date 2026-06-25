@@ -11,6 +11,9 @@ public record ParentLinkInvitationResponse(
         String grade,
         String status,
         Instant invitedAt,
-        Instant respondedAt
+        Instant respondedAt,
+        UUID unlinkRequestedById,
+        String unlinkRequestedByRole,
+        Instant unlinkRequestedAt
 ) {
 }

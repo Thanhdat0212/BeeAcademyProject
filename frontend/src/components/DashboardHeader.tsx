@@ -10,7 +10,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import type { Course } from '../data/mockCourses';
 import { inferGradeFromSearchQuery, searchCourses } from '../api/courseService';
 import { adaptCourseSummary } from '../api/adapter';
-import { getStudentParentLinkInvitations } from '../api/studentParentLinkService';
+import { getStudentLinkedParents, getStudentParentLinkInvitations } from '../api/studentParentLinkService';
 // ─── Highlight từ khớp trong text ────────────────────────────────────────────
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -186,9 +186,14 @@ export default function DashboardHeader() {
 
     const loadPendingInvitations = async () => {
       try {
-        const invitations = await getStudentParentLinkInvitations();
+        const [invitations, linkedParents] = await Promise.all([
+          getStudentParentLinkInvitations(),
+          getStudentLinkedParents(),
+        ]);
         if (!cancelled) {
-          setPendingNotificationCount(invitations.length);
+          setPendingNotificationCount(
+            invitations.length + linkedParents.filter(parent => parent.unlinkRequestedByRole === 'parent').length
+          );
         }
       } catch (error) {
         if (!cancelled) {

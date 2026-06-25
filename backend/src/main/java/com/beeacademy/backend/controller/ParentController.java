@@ -1,11 +1,14 @@
 package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.request.SendParentLinkInvitationRequest;
+import com.beeacademy.backend.dto.request.SendParentTeacherMessageRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.ChildOverviewResponse;
 import com.beeacademy.backend.dto.response.ChildProgressReportResponse;
 import com.beeacademy.backend.dto.response.LinkedStudentResponse;
 import com.beeacademy.backend.dto.response.ParentLinkInvitationResponse;
+import com.beeacademy.backend.dto.response.ParentPaymentHistoryResponse;
+import com.beeacademy.backend.dto.response.ParentTeacherConversationResponse;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.ParentService;
@@ -53,10 +56,19 @@ public class ParentController {
     }
 
     @DeleteMapping("/children/{studentId}")
-    public ApiResponse<Void> unlinkStudent(@PathVariable UUID studentId) {
+    public ApiResponse<LinkedStudentResponse> unlinkStudent(@PathVariable UUID studentId) {
         AuthenticatedUser me = CurrentUser.required();
-        parentService.unlinkStudent(me, studentId);
-        return ApiResponse.ok(null, "Gỡ liên kết tài khoản con thành công!");
+        return ApiResponse.ok(
+                parentService.unlinkStudent(me, studentId),
+                "Đã gửi yêu cầu hủy liên kết. Cần học sinh đồng ý để hoàn tất.");
+    }
+
+    @PostMapping("/children/{studentId}/unlink-confirm")
+    public ApiResponse<LinkedStudentResponse> confirmUnlinkStudent(@PathVariable UUID studentId) {
+        AuthenticatedUser me = CurrentUser.required();
+        return ApiResponse.ok(
+                parentService.confirmUnlinkStudent(me, studentId),
+                "Đã xác nhận hủy liên kết tài khoản con.");
     }
 
     @GetMapping("/children/{studentId}/overview")
@@ -69,5 +81,28 @@ public class ParentController {
     public ApiResponse<ChildProgressReportResponse> getChildProgressReport(@PathVariable UUID studentId) {
         AuthenticatedUser me = CurrentUser.required();
         return ApiResponse.ok(parentService.getChildProgressReport(me, studentId));
+    }
+
+    @GetMapping("/children/{studentId}/payment-history")
+    public ApiResponse<ParentPaymentHistoryResponse> getChildPaymentHistory(@PathVariable UUID studentId) {
+        AuthenticatedUser me = CurrentUser.required();
+        return ApiResponse.ok(parentService.getChildPaymentHistory(me, studentId));
+    }
+
+    @GetMapping("/children/{studentId}/teacher-conversations")
+    public ApiResponse<List<ParentTeacherConversationResponse>> getChildTeacherConversations(
+            @PathVariable UUID studentId) {
+        AuthenticatedUser me = CurrentUser.required();
+        return ApiResponse.ok(parentService.getChildTeacherConversations(me, studentId));
+    }
+
+    @PostMapping("/children/{studentId}/teacher-conversations")
+    public ApiResponse<ParentTeacherConversationResponse> sendParentTeacherMessage(
+            @PathVariable UUID studentId,
+            @Valid @RequestBody SendParentTeacherMessageRequest request) {
+        AuthenticatedUser me = CurrentUser.required();
+        return ApiResponse.ok(
+                parentService.sendParentTeacherMessage(me, studentId, request),
+                "Đã gửi tin nhắn tới giáo viên.");
     }
 }

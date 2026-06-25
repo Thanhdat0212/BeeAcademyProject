@@ -28,6 +28,11 @@ public class StudentParentLinkController {
         return ApiResponse.ok(studentParentLinkService.listPendingInvitations(CurrentUser.required()));
     }
 
+    @GetMapping("/linked-parents")
+    public ApiResponse<List<StudentParentLinkInvitationResponse>> listLinkedParents() {
+        return ApiResponse.ok(studentParentLinkService.listLinkedParents(CurrentUser.required()));
+    }
+
     @PostMapping("/{parentId}/accept")
     public ApiResponse<StudentParentLinkInvitationResponse> acceptInvitation(@PathVariable UUID parentId) {
         return ApiResponse.ok(
@@ -40,5 +45,19 @@ public class StudentParentLinkController {
         return ApiResponse.ok(
                 studentParentLinkService.rejectInvitation(CurrentUser.required(), parentId),
                 "Đã từ chối lời mời liên kết phụ huynh.");
+    }
+
+    @PostMapping("/{parentId}/unlink-request")
+    public ApiResponse<StudentParentLinkInvitationResponse> requestUnlink(@PathVariable UUID parentId) {
+        return ApiResponse.ok(
+                studentParentLinkService.requestUnlink(CurrentUser.required(), parentId),
+                "Đã gửi yêu cầu hủy liên kết. Cần phụ huynh đồng ý để hoàn tất.");
+    }
+
+    @PostMapping("/{parentId}/unlink-confirm")
+    public ApiResponse<StudentParentLinkInvitationResponse> confirmUnlink(@PathVariable UUID parentId) {
+        return ApiResponse.ok(
+                studentParentLinkService.confirmUnlink(CurrentUser.required(), parentId),
+                "Đã xác nhận hủy liên kết phụ huynh.");
     }
 }

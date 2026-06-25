@@ -101,7 +101,8 @@ Group project — School of Software Engineering.
 
 | Member | GitHub |
 |---|---|
-| Vo Van Thanh Dat | [@Thanhdat0212](https://github.com/Thanhdat0212) |
+| Vo Van Thanh Dat | [@Thanhdat0212](https://github.com/Thanhdat0212)   |
+| Le Dai Thanh     | [@22-LeDaiThanh](https://github.com/22-LeDaiThanh) |
 
 ## 📄 License
 

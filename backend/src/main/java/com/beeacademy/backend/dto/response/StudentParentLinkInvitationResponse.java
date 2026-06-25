@@ -10,6 +10,9 @@ public record StudentParentLinkInvitationResponse(
         String avatarUrl,
         String status,
         Instant invitedAt,
-        Instant respondedAt
+        Instant respondedAt,
+        UUID unlinkRequestedById,
+        String unlinkRequestedByRole,
+        Instant unlinkRequestedAt
 ) {
 }

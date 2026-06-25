@@ -116,6 +116,7 @@ public class TeacherCourseService {
         validatePrice(req.priceVnd());
         // Validate: giá khuyến mãi phải nhỏ hơn giá gốc (cross-field validation)
         validateSalePrice(req.salePriceVnd(), req.priceVnd());
+        validateThumbnailUrl(req.thumbnailUrl());
         validateIntroVideoUrl(req.introVideoUrl());
 
         int[] grades = req.grades().stream().mapToInt(Integer::intValue).toArray();
@@ -212,6 +213,7 @@ public class TeacherCourseService {
         validatePrice(effectivePrice);
         // Validate: giá khuyến mãi phải nhỏ hơn giá gốc (sau khi tính giá hiệu dụng)
         validateSalePrice(effectiveSalePrice, effectivePrice);
+        validateThumbnailUrl(req.thumbnailUrl());
         validateIntroVideoUrl(req.introVideoUrl());
 
         Category category = req.categoryId() != null ? loadCategory(req.categoryId()) : null;
@@ -518,6 +520,16 @@ public class TeacherCourseService {
         Set<UUID> uniqueIds = new HashSet<>(requestedIds);
         if (requestedIds.size() != uniqueIds.size() || !expectedIds.equals(uniqueIds)) {
             throw new BusinessException("INVALID_REORDER", message);
+        }
+    }
+
+    private void validateThumbnailUrl(String url) {
+        if (url == null || url.isBlank()) return;
+        String trimmed = url.trim();
+        String lower = trimmed.toLowerCase();
+        if (lower.matches(".*\\.(mp4|webm|mov)(\\?.*)?(#.*)?$")) {
+            throw new BusinessException("INVALID_THUMBNAIL_URL",
+                    "Ảnh bìa khóa học phải là ảnh, không dùng URL video giới thiệu.");
         }
     }
 

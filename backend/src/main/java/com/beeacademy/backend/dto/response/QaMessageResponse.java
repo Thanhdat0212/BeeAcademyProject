@@ -16,9 +16,12 @@ public record QaMessageResponse(
     public static QaMessageResponse fromEntity(QaMessage message) {
         String name = message.getAuthor().getFullName();
         if (name == null || name.isBlank()) {
-            name = message.getAuthorRole().toDbValue().equals("teacher")
-                    ? "Giáo viên"
-                    : "Học sinh";
+            name = switch (message.getAuthorRole()) {
+                case TEACHER -> "Giáo viên";
+                case PARENT -> "Phụ huynh";
+                case ADMIN -> "Quản trị viên";
+                case STUDENT -> "Học sinh";
+            };
         }
         return new QaMessageResponse(
                 message.getId(),

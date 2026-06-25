@@ -47,6 +47,7 @@ const PARENT_MENU_ITEMS = [
   { icon: BarChart2,     label: 'Tổng quan báo cáo',    path: '/parent'          },
   { icon: BookOpen,      label: 'Khóa học của con',     path: '/parent/courses'  },
   { icon: TrendingUp,    label: 'Tiến độ & Điểm số',    path: '/parent/progress' },
+  { icon: CreditCard,    label: 'Lịch sử thanh toán',    path: '/parent/payments' },
   { icon: MessageSquare, label: 'Tin nhắn giáo viên',    path: '/parent/messages' },
   { icon: Settings,      label: 'Liên kết tài khoản con',path: '/parent/link'     },
   { icon: Camera,        label: 'Ảnh đại diện phụ huynh',path: '/account/photo'   },

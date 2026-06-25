@@ -834,13 +834,16 @@ function MarketingView({
                 ) : introDirectUrl ? (
                   <video
                     src={introDirectUrl}
-                    poster={course.image}
+                    poster={course.image && !isDirectVideoUrl(course.image) ? course.image : undefined}
                     controls
                     className="w-full h-full object-cover bg-black"
                   />
                 ) : (
                   <>
-                    <img src={course.image} alt={course.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <SafeCourseImage
+                      course={course}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
                     <div className="absolute inset-0 bg-black/20" />
                     <div className="absolute inset-0 flex items-center justify-center">
                       {primaryPreviewLesson && onStartPreview ? (
@@ -1049,6 +1052,41 @@ function toEmbeddableVideoUrl(url: string): string | null {
 
 function isDirectVideoUrl(url: string): boolean {
   return /\.(mp4|webm|mov)(\?|#|$)/i.test(url);
+}
+
+function SafeCourseImage({
+  course,
+  className,
+  fallbackClassName = '',
+  alt = '',
+}: {
+  course: Course;
+  className: string;
+  fallbackClassName?: string;
+  alt?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const imageUrl = course.image?.trim();
+  const canUseImage = Boolean(imageUrl) && !isDirectVideoUrl(imageUrl) && !failed;
+
+  if (canUseImage) {
+    return (
+      <img
+        src={imageUrl}
+        alt={alt || course.title}
+        onError={() => setFailed(true)}
+        className={className}
+      />
+    );
+  }
+
+  return (
+    <div className={`${className} ${fallbackClassName} bg-surface-container-high flex flex-col items-center justify-center text-center px-5`}>
+      <BookOpen className="w-10 h-10 text-primary mb-3" />
+      <p className="text-sm font-extrabold text-on-surface line-clamp-2">{course.title}</p>
+      <p className="text-xs font-semibold text-on-surface-variant mt-1">{course.subject} · {course.grade}</p>
+    </div>
+  );
 }
 
 function adaptLearningLesson(lesson: LessonDetail): Lesson {
@@ -1422,7 +1460,7 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
             {/* Hiển thị thông báo khi signed URL hết hạn (sau 1 giờ) */}
             {videoUrlExpired ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-white gap-3 px-8 text-center">
-                <img src={course.image} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
+                <SafeCourseImage course={course} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
                 <AlertCircle className="w-14 h-14 text-orange-400 relative z-10" />
                 <p className="text-base font-semibold relative z-10">Link video đã hết hạn</p>
                 <p className="text-sm text-white/60 relative z-10 max-w-xs">
@@ -1467,7 +1505,7 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
             ) : activeLesson?.type === 'video' ? (
               // Video chưa có URL — có thể chưa upload hoặc backend chưa trả signed URL
               <div className="absolute inset-0 flex flex-col items-center justify-center text-white gap-3 px-8 text-center">
-                <img src={course.image} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
+                <SafeCourseImage course={course} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
                 <AlertCircle className="w-14 h-14 text-yellow-400 relative z-10" />
                 <p className="text-base font-semibold relative z-10">
                   {activeLesson.isFree ? 'Bài học thử chưa có video' : 'Video chưa sẵn sàng'}
@@ -1487,7 +1525,7 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
             ) : activeLesson?.type === 'pdf' ? (
               // PDF viewer
               <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
-                <img src={course.image} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
+                <SafeCourseImage course={course} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
                 <FileText className="w-16 h-16 mb-4 opacity-80 text-blue-400 relative z-10" />
                 <h3 className="text-2xl font-bold relative z-10">Tài liệu PDF</h3>
                 {activeLesson?.url && activeLesson.url !== '#' ? (
@@ -1505,7 +1543,7 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
               </div>
             ) : (
               // Thumbnail mặc định
-              <img src={course.image} alt="Thumbnail" className="absolute inset-0 w-full h-full object-cover opacity-40" />
+              <SafeCourseImage course={course} alt="Thumbnail" className="absolute inset-0 w-full h-full object-cover opacity-40" />
             )}
           </div>
 

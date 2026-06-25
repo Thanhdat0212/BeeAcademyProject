@@ -221,6 +221,10 @@ export interface LinkedStudentResponse {
   avatarUrl: string | null;
   code: string;
   grade: string;
+  linkStatus?: ParentLinkStatus;
+  unlinkRequestedById?: string | null;
+  unlinkRequestedByRole?: ParentLinkParticipantRole | null;
+  unlinkRequestedAt?: string | null;
 }
 
 export interface LinkStudentRequest {
@@ -228,6 +232,7 @@ export interface LinkStudentRequest {
 }
 
 export type ParentLinkStatus = 'pending' | 'accepted' | 'rejected';
+export type ParentLinkParticipantRole = 'parent' | 'student';
 
 export interface SendParentLinkInvitationPayload {
   studentEmail: string;
@@ -242,6 +247,9 @@ export interface ParentLinkInvitationResponse {
   status: ParentLinkStatus;
   invitedAt: string;
   respondedAt: string | null;
+  unlinkRequestedById: string | null;
+  unlinkRequestedByRole: ParentLinkParticipantRole | null;
+  unlinkRequestedAt: string | null;
 }
 
 export interface StudentParentLinkInvitationResponse {
@@ -252,6 +260,9 @@ export interface StudentParentLinkInvitationResponse {
   status: ParentLinkStatus;
   invitedAt: string;
   respondedAt: string | null;
+  unlinkRequestedById: string | null;
+  unlinkRequestedByRole: ParentLinkParticipantRole | null;
+  unlinkRequestedAt: string | null;
 }
 
 export interface ChildOverviewResponse {
@@ -303,5 +314,72 @@ export interface ChildProgressReportResponse {
   generatedAt: string;
   courses: ParentCourseProgressItem[];
   assessments: ParentAssessmentRecord[];
+}
+
+export type ParentPaymentStatus = 'PENDING' | 'PAID' | 'CANCELLED' | 'EXPIRED';
+export type ParentPaymentPayerRole = 'parent' | 'student';
+
+export interface ParentPaymentTransaction {
+  orderId: string;
+  orderCode: number;
+  paymentRef: string;
+  payerId: string;
+  payerName: string;
+  payerRole: ParentPaymentPayerRole;
+  courseId: string;
+  courseTitle: string;
+  teacherName: string | null;
+  categoryName: string | null;
+  thumbnailUrl: string | null;
+  grades: number[];
+  amountVnd: number;
+  status: ParentPaymentStatus;
+  createdAt: string;
+  paidAt: string | null;
+  currentProgressPct: number;
+  invoiceCode: string;
+}
+
+export interface ParentPaymentHistoryResponse {
+  studentId: string;
+  studentName: string;
+  gradeLabel: string;
+  generatedAt: string;
+  totalPaidAmount: number;
+  transactionCount: number;
+  pendingCount: number;
+  averageProgress: number;
+  transactions: ParentPaymentTransaction[];
+}
+
+export type ParentTeacherConversationStatus = 'pending' | 'answered' | 'resolved';
+export type ParentTeacherMessageAuthorRole = 'student' | 'teacher' | 'parent' | 'admin';
+
+export interface ParentTeacherMessageResponse {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorRole: ParentTeacherMessageAuthorRole;
+  content: string;
+  sentAt: string;
+}
+
+export interface ParentTeacherConversationResponse {
+  threadId: string | null;
+  studentId: string;
+  studentName: string;
+  teacherId: string;
+  teacherName: string;
+  teacherAvatarUrl: string | null;
+  courseId: string;
+  courseTitle: string;
+  categoryName: string | null;
+  gradeLabel: string;
+  status: ParentTeacherConversationStatus | null;
+  startedAt: string | null;
+  lastActivityAt: string | null;
+  lastMessage: string | null;
+  messageCount: number;
+  messages: ParentTeacherMessageResponse[];
 }
 

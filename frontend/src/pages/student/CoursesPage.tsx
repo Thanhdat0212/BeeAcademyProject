@@ -37,6 +37,41 @@ const GRADE_OPTIONS = [
 
 const PAGE_SIZE = 12;
 
+function isVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov)(\?|#|$)/i.test(url);
+}
+
+function CourseCover({
+  course,
+  className,
+}: {
+  course: UiCourse;
+  className: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const imageUrl = course.image?.trim();
+  const canUseImage = Boolean(imageUrl) && !isVideoUrl(imageUrl) && !failed;
+
+  if (canUseImage) {
+    return (
+      <img
+        src={imageUrl}
+        alt={course.title}
+        onError={() => setFailed(true)}
+        className={className}
+      />
+    );
+  }
+
+  return (
+    <div className={`${className} bg-surface-container-high flex flex-col items-center justify-center text-center px-5`}>
+      <BookOpen className="w-10 h-10 text-primary mb-3" />
+      <p className="text-sm font-extrabold text-on-surface line-clamp-2">{course.title}</p>
+      <p className="text-xs font-semibold text-on-surface-variant mt-1">{course.subject} · {course.grade}</p>
+    </div>
+  );
+}
+
 function parseSubjectParam(value: string | null): string | null {
   const subject = value?.trim();
   return subject ? subject : null;
@@ -329,10 +364,13 @@ export default function CoursesPage() {
                     transition={{ delay: idx * 0.1 }}
                     className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/50 hover:shadow-lg hover:border-primary/30 transition-all group flex flex-col h-full"
                   >
-                    <div className="relative h-40 overflow-hidden">
-                      <Link to={`/courses/${course.id}`}>
-                        <img src={course.image} alt={course.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                      </Link>
+                      <div className="relative h-40 overflow-hidden">
+                        <Link to={`/courses/${course.id}`}>
+                          <CourseCover
+                            course={course}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
+                        </Link>
                       <div className="absolute top-3 left-3 bg-surface/90 backdrop-blur text-xs font-bold px-3 py-1 rounded-full text-on-surface pointer-events-none">
                         {course.grade}
                       </div>
@@ -541,9 +579,8 @@ export default function CoursesPage() {
                             >
                               <div className="relative h-48 overflow-hidden">
                                 <Link to={`/courses/${course.id}`}>
-                                  <img
-                                    src={course.image}
-                                    alt={course.title}
+                                  <CourseCover
+                                    course={course}
                                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
                                   />
                                 </Link>

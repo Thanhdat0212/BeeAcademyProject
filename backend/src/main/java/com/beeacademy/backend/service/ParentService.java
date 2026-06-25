@@ -1,10 +1,14 @@
 package com.beeacademy.backend.service;
 
 import com.beeacademy.backend.dto.request.SendParentLinkInvitationRequest;
+import com.beeacademy.backend.dto.request.SendParentTeacherMessageRequest;
 import com.beeacademy.backend.dto.response.ChildOverviewResponse;
 import com.beeacademy.backend.dto.response.ChildProgressReportResponse;
 import com.beeacademy.backend.dto.response.LinkedStudentResponse;
 import com.beeacademy.backend.dto.response.ParentLinkInvitationResponse;
+import com.beeacademy.backend.dto.response.ParentPaymentHistoryResponse;
+import com.beeacademy.backend.dto.response.ParentTeacherConversationResponse;
+import com.beeacademy.backend.dto.response.QaMessageResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Assignment;
@@ -12,9 +16,14 @@ import com.beeacademy.backend.model.AssignmentSubmission;
 import com.beeacademy.backend.model.Course;
 import com.beeacademy.backend.model.Enrollment;
 import com.beeacademy.backend.model.ExamAttempt;
+import com.beeacademy.backend.model.Order;
+import com.beeacademy.backend.model.OrderItem;
+import com.beeacademy.backend.model.OrderStatus;
 import com.beeacademy.backend.model.ParentStudentLink;
 import com.beeacademy.backend.model.ParentStudentLinkStatus;
 import com.beeacademy.backend.model.Profile;
+import com.beeacademy.backend.model.QaMessage;
+import com.beeacademy.backend.model.QaThread;
 import com.beeacademy.backend.model.QuizAttempt;
 import com.beeacademy.backend.model.QuizConfig;
 import com.beeacademy.backend.model.UserRole;
@@ -22,8 +31,10 @@ import com.beeacademy.backend.repository.AssignmentSubmissionRepository;
 import com.beeacademy.backend.repository.CourseRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
 import com.beeacademy.backend.repository.ExamAttemptRepository;
+import com.beeacademy.backend.repository.OrderRepository;
 import com.beeacademy.backend.repository.ParentStudentLinkRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
+import com.beeacademy.backend.repository.QaThreadRepository;
 import com.beeacademy.backend.repository.QuizAttemptRepository;
 import com.beeacademy.backend.repository.QuizConfigRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
@@ -40,6 +51,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -47,6 +59,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -62,6 +75,8 @@ public class ParentService {
     private final QuizAttemptRepository quizAttemptRepository;
     private final ExamAttemptRepository examAttemptRepository;
     private final AssignmentSubmissionRepository assignmentSubmissionRepository;
+    private final QaThreadRepository qaThreadRepository;
+    private final OrderRepository orderRepository;
     private final ParentLinkInvitationEmailService parentLinkInvitationEmailService;
 
     @Transactional(readOnly = true)
@@ -72,16 +87,7 @@ public class ParentService {
                 me.userId(),
                 ParentStudentLinkStatus.ACCEPTED.toDbValue());
         return links.stream()
-                .map(link -> {
-                    Profile student = link.getStudent();
-                    return LinkedStudentResponse.builder()
-                            .id(student.getId())
-                            .name(student.getFullName())
-                            .avatarUrl(student.getAvatarUrl())
-                            .code("")
-                            .grade("")
-                            .build();
-                })
+                .map(this::toLinkedStudentResponse)
                 .collect(Collectors.toList());
     }
 
@@ -147,17 +153,49 @@ public class ParentService {
     }
 
     @Transactional
-    public void unlinkStudent(AuthenticatedUser me, UUID studentId) {
-        log.info("Parent {} requested unlink for student {}", me.userId(), studentId);
+    public LinkedStudentResponse unlinkStudent(AuthenticatedUser me, UUID studentId) {
+        log.info("Parent {} requested unlink approval flow for student {}", me.userId(), studentId);
 
-        ParentStudentLink link = linkRepository.findByIdParentIdAndIdStudentId(me.userId(), studentId)
-                .orElseThrow(() -> new BusinessException(
-                        "LINK_NOT_FOUND",
-                        "Không tìm thấy thông tin liên kết giữa tài khoản của bạn và học sinh này.",
-                        HttpStatus.NOT_FOUND));
+        ParentStudentLink link = requireActiveLink(me.userId(), studentId);
+        if (link.hasPendingUnlinkRequest()) {
+            if (link.isUnlinkRequestedBy(me.userId())) {
+                return toLinkedStudentResponse(link);
+            }
 
-        linkRepository.delete(link);
-        log.info("Unlinked student {} from parent {}", studentId, me.userId());
+            link.revoke();
+            ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+            log.info("Parent {} confirmed unlink requested by student {}", me.userId(), studentId);
+            return toLinkedStudentResponse(savedLink);
+        }
+
+        link.requestUnlink(me.userId());
+        ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        log.info("Parent {} sent unlink request to student {}", me.userId(), studentId);
+        return toLinkedStudentResponse(savedLink);
+    }
+
+    @Transactional
+    public LinkedStudentResponse confirmUnlinkStudent(AuthenticatedUser me, UUID studentId) {
+        log.info("Parent {} confirmed unlink for student {}", me.userId(), studentId);
+
+        ParentStudentLink link = requireActiveLink(me.userId(), studentId);
+        if (!link.hasPendingUnlinkRequest()) {
+            throw new BusinessException(
+                    "UNLINK_REQUEST_NOT_FOUND",
+                    "Chưa có yêu cầu hủy liên kết nào cần xác nhận.",
+                    HttpStatus.CONFLICT);
+        }
+        if (link.isUnlinkRequestedBy(me.userId())) {
+            throw new BusinessException(
+                    "UNLINK_REQUEST_OWNED_BY_PARENT",
+                    "Bạn đã gửi yêu cầu hủy. Cần học sinh đồng ý để hoàn tất.",
+                    HttpStatus.CONFLICT);
+        }
+
+        link.revoke();
+        ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        log.info("Parent {} completed unlink for student {}", me.userId(), studentId);
+        return toLinkedStudentResponse(savedLink);
     }
 
     @Transactional(readOnly = true)
@@ -295,6 +333,229 @@ public class ParentService {
                 assessments);
     }
 
+    @Transactional(readOnly = true)
+    public ParentPaymentHistoryResponse getChildPaymentHistory(AuthenticatedUser me, UUID studentId) {
+        log.info("Parent {} requested payment history for student {}", me.userId(), studentId);
+
+        Profile student = requireLinkedStudent(me, studentId);
+        Profile parent = requireParentProfile(me.userId());
+        List<Enrollment> enrollments = enrollmentRepository.findByStudentId(studentId);
+
+        if (enrollments.isEmpty()) {
+            return new ParentPaymentHistoryResponse(
+                    studentId,
+                    displayName(student),
+                    "",
+                    Instant.now(),
+                    0L,
+                    0,
+                    0,
+                    0.0,
+                    List.of());
+        }
+
+        Map<UUID, Enrollment> enrollmentByCourseId = enrollments.stream()
+                .collect(Collectors.toMap(
+                        Enrollment::getCourseId,
+                        enrollment -> enrollment,
+                        (left, right) -> left,
+                        LinkedHashMap::new));
+        List<UUID> courseIds = enrollmentByCourseId.keySet().stream().toList();
+        Map<UUID, Course> courseById = courseRepository.findByIdIn(courseIds).stream()
+                .collect(Collectors.toMap(Course::getId, Function.identity()));
+
+        List<Order> orders = orderRepository.findParentChildHistoryWithItems(
+                List.of(me.userId(), studentId),
+                courseIds);
+        List<ParentPaymentHistoryResponse.Transaction> transactions = orders.stream()
+                .flatMap(order -> order.getItems().stream()
+                        .filter(item -> enrollmentByCourseId.containsKey(item.getCourseId()))
+                        .map(item -> toParentPaymentTransaction(
+                                order,
+                                item,
+                                parent,
+                                student,
+                                courseById.get(item.getCourseId()),
+                                enrollmentByCourseId.get(item.getCourseId()))))
+                .sorted(Comparator.comparing(
+                        ParentPaymentHistoryResponse.Transaction::createdAt,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
+
+        long totalPaidAmount = transactions.stream()
+                .filter(transaction -> transaction.status() == OrderStatus.PAID)
+                .mapToLong(transaction -> transaction.amountVnd() != null ? transaction.amountVnd() : 0)
+                .sum();
+        int pendingCount = (int) transactions.stream()
+                .filter(transaction -> transaction.status() == OrderStatus.PENDING)
+                .count();
+        double averageProgress = transactions.isEmpty()
+                ? 0.0
+                : transactions.stream()
+                .mapToInt(transaction -> transaction.currentProgressPct() != null ? transaction.currentProgressPct() : 0)
+                .average()
+                .orElse(0.0);
+
+        return new ParentPaymentHistoryResponse(
+                studentId,
+                displayName(student),
+                resolveGradeLabel(courseById.values().stream().toList()),
+                Instant.now(),
+                totalPaidAmount,
+                transactions.size(),
+                pendingCount,
+                round1(averageProgress),
+                transactions);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ParentTeacherConversationResponse> getChildTeacherConversations(
+            AuthenticatedUser me,
+            UUID studentId) {
+        log.info("Parent {} requested teacher conversations for student {}", me.userId(), studentId);
+
+        Profile student = requireLinkedStudent(me, studentId);
+        List<Course> enrolledCourses = courseRepository.findEnrolledByStudentId(studentId).stream()
+                .filter(course -> course.getTeacher() != null)
+                .toList();
+        if (enrolledCourses.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, QaThread> latestParentThreadByCourseId = qaThreadRepository
+                .findParentThreadsForStudent(me.userId(), studentId)
+                .stream()
+                .collect(Collectors.toMap(
+                        thread -> thread.getCourse().getId(),
+                        Function.identity(),
+                        (newer, older) -> newer,
+                        LinkedHashMap::new));
+
+        return enrolledCourses.stream()
+                .map(course -> toParentTeacherConversation(
+                        student,
+                        course,
+                        latestParentThreadByCourseId.get(course.getId())))
+                .toList();
+    }
+
+    @Transactional
+    public ParentTeacherConversationResponse sendParentTeacherMessage(
+            AuthenticatedUser me,
+            UUID studentId,
+            SendParentTeacherMessageRequest request) {
+        log.info("Parent {} sent teacher message for student {} and course {}",
+                me.userId(), studentId, request.courseId());
+
+        Profile parent = requireParentProfile(me.userId());
+        if (parent.getRole() != UserRole.PARENT) {
+            throwForbidden();
+        }
+        Profile student = requireLinkedStudent(me, studentId);
+
+        Course course = courseRepository.findWithCategoryAndTeacherById(request.courseId())
+                .orElseThrow(() -> new ResourceNotFoundException("Course", request.courseId()));
+        if (course.getTeacher() == null) {
+            throw new BusinessException(
+                    "COURSE_TEACHER_MISSING",
+                    "Khóa học này chưa được gán giáo viên để nhận tin nhắn.",
+                    HttpStatus.CONFLICT);
+        }
+        if (!enrollmentRepository.existsByStudentIdAndCourseId(studentId, course.getId())) {
+            throw new BusinessException(
+                    "NOT_ENROLLED",
+                    "Con chưa ghi danh khóa học này nên phụ huynh chưa thể nhắn giáo viên.",
+                    HttpStatus.FORBIDDEN);
+        }
+
+        List<QaThread> existingThreads = qaThreadRepository
+                .findParentThreadsForCourse(me.userId(), studentId, course.getId());
+        QaThread thread;
+        if (existingThreads.isEmpty()) {
+            thread = QaThread.createWithAuthor(student, course, null, parent, request.content());
+        } else {
+            thread = existingThreads.get(0);
+            thread.addParentMessage(parent, request.content());
+        }
+
+        QaThread saved = qaThreadRepository.saveAndFlush(thread);
+        return toParentTeacherConversation(student, course, saved);
+    }
+
+    private ParentTeacherConversationResponse toParentTeacherConversation(
+            Profile student,
+            Course course,
+            QaThread thread) {
+        List<QaMessageResponse> messages = thread == null
+                ? List.of()
+                : thread.getMessages().stream()
+                .sorted(Comparator.comparing(message ->
+                        message.getCreatedAt() == null ? Instant.EPOCH : message.getCreatedAt()))
+                .map(QaMessageResponse::fromEntity)
+                .toList();
+        QaMessage latestMessage = thread == null
+                ? null
+                : thread.getMessages().stream()
+                .max(Comparator.comparing(message ->
+                        message.getCreatedAt() == null ? Instant.EPOCH : message.getCreatedAt()))
+                .orElse(null);
+
+        Profile teacher = course.getTeacher();
+        return new ParentTeacherConversationResponse(
+                thread != null ? thread.getId() : null,
+                student.getId(),
+                displayName(student, "Học sinh"),
+                teacher.getId(),
+                displayName(teacher, "Giáo viên"),
+                teacher.getAvatarUrl(),
+                course.getId(),
+                course.getTitle(),
+                course.getCategory() != null ? course.getCategory().getName() : null,
+                resolveGradeLabel(List.of(course)),
+                thread != null ? thread.getStatus().toDbValue() : null,
+                thread != null ? thread.getCreatedAt() : null,
+                thread != null ? thread.getLastActivityAt() : null,
+                latestMessage != null ? latestMessage.getContent() : null,
+                messages.size(),
+                messages);
+    }
+
+    private ParentPaymentHistoryResponse.Transaction toParentPaymentTransaction(
+            Order order,
+            OrderItem item,
+            Profile parent,
+            Profile student,
+            Course course,
+            Enrollment enrollment) {
+        String payerRole = order.getUserId().equals(parent.getId()) ? "parent" : "student";
+        Profile payer = "parent".equals(payerRole) ? parent : student;
+        OrderStatus status = order.isExpired() ? OrderStatus.EXPIRED : order.getStatus();
+        Integer progressPct = enrollment != null && enrollment.getProgressPct() != null
+                ? enrollment.getProgressPct()
+                : 0;
+        String courseSuffix = item.getCourseId().toString().substring(0, 8).toUpperCase();
+
+        return new ParentPaymentHistoryResponse.Transaction(
+                order.getId(),
+                order.getOrderCode(),
+                order.getPaymentRef(),
+                order.getUserId(),
+                displayName(payer, "parent".equals(payerRole) ? "Phụ huynh" : "Học sinh"),
+                payerRole,
+                item.getCourseId(),
+                course != null ? course.getTitle() : "Khóa học",
+                course != null && course.getTeacher() != null ? displayName(course.getTeacher(), "Giáo viên") : null,
+                course != null && course.getCategory() != null ? course.getCategory().getName() : null,
+                course != null ? course.getThumbnailUrl() : null,
+                course != null ? Arrays.stream(course.getGrades()).boxed().sorted().toList() : List.of(),
+                item.getPriceAtPurchase(),
+                status,
+                order.getCreatedAt(),
+                order.getPaidAt(),
+                progressPct,
+                order.getPaymentRef() + "-" + courseSuffix);
+    }
+
     private Profile requireLinkedStudent(AuthenticatedUser me, UUID studentId) {
         boolean isLinked = linkRepository.existsByIdParentIdAndIdStudentIdAndStatus(
                 me.userId(),
@@ -311,9 +572,41 @@ public class ParentService {
                 .orElseThrow(() -> new ResourceNotFoundException("Profile", studentId));
     }
 
+    private ParentStudentLink requireActiveLink(UUID parentId, UUID studentId) {
+        ParentStudentLink link = linkRepository.findByIdParentIdAndIdStudentId(parentId, studentId)
+                .orElseThrow(() -> new BusinessException(
+                        "LINK_NOT_FOUND",
+                        "Không tìm thấy thông tin liên kết giữa tài khoản của bạn và học sinh này.",
+                        HttpStatus.NOT_FOUND));
+
+        if (link.getStatus() != ParentStudentLinkStatus.ACCEPTED) {
+            throw new BusinessException(
+                    "LINK_NOT_ACTIVE",
+                    "Liên kết này không còn ở trạng thái hoạt động.",
+                    HttpStatus.CONFLICT);
+        }
+
+        return link;
+    }
+
     private Profile requireParentProfile(UUID parentId) {
         return profileRepository.findById(parentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Profile", parentId));
+    }
+
+    private LinkedStudentResponse toLinkedStudentResponse(ParentStudentLink link) {
+        Profile student = link.getStudent();
+        return LinkedStudentResponse.builder()
+                .id(student.getId())
+                .name(displayName(student))
+                .avatarUrl(student.getAvatarUrl())
+                .code("")
+                .grade(resolveGradeLabel(student.getId()))
+                .linkStatus(link.getStatus().toApiValue())
+                .unlinkRequestedById(link.getUnlinkRequestedBy())
+                .unlinkRequestedByRole(resolveUnlinkRequestedByRole(link))
+                .unlinkRequestedAt(link.getUnlinkRequestedAt())
+                .build();
     }
 
     private ParentLinkInvitationResponse toParentLinkInvitationResponse(ParentStudentLink link) {
@@ -331,7 +624,24 @@ public class ParentService {
                 resolveGradeLabel(student.getId()),
                 link.getStatus().toApiValue(),
                 link.getInvitedAt(),
-                link.getRespondedAt());
+                link.getRespondedAt(),
+                link.getUnlinkRequestedBy(),
+                resolveUnlinkRequestedByRole(link),
+                link.getUnlinkRequestedAt());
+    }
+
+    private String resolveUnlinkRequestedByRole(ParentStudentLink link) {
+        UUID requestedBy = link.getUnlinkRequestedBy();
+        if (requestedBy == null) {
+            return null;
+        }
+        if (requestedBy.equals(link.getParent().getId())) {
+            return "parent";
+        }
+        if (requestedBy.equals(link.getStudent().getId())) {
+            return "student";
+        }
+        return null;
     }
 
     private String resolveGradeLabel(UUID studentId) {
@@ -643,10 +953,21 @@ public class ParentService {
     }
 
     private String displayName(Profile profile) {
+        return displayName(profile, "Học sinh");
+    }
+
+    private String displayName(Profile profile, String fallback) {
         if (profile == null || profile.getFullName() == null || profile.getFullName().isBlank()) {
-            return "Học sinh";
+            return fallback;
         }
         return profile.getFullName();
+    }
+
+    private void throwForbidden() {
+        throw new BusinessException(
+                "FORBIDDEN",
+                "Bạn không có quyền thực hiện thao tác này.",
+                HttpStatus.FORBIDDEN);
     }
 
     private double round1(double value) {

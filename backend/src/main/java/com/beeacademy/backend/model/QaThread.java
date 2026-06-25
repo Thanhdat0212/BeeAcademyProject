@@ -69,6 +69,11 @@ public class QaThread {
     private List<QaMessage> messages = new ArrayList<>();
 
     public static QaThread create(Profile student, Course course, Lesson lesson, String content) {
+        return createWithAuthor(student, course, lesson, student, content);
+    }
+
+    public static QaThread createWithAuthor(Profile student, Course course, Lesson lesson,
+                                            Profile author, String content) {
         QaThread thread = new QaThread();
         thread.id = UUID.randomUUID();
         thread.student = student;
@@ -76,7 +81,7 @@ public class QaThread {
         thread.lesson = lesson;
         thread.status = QaThreadStatus.PENDING;
         thread.lastActivityAt = Instant.now();
-        thread.messages.add(QaMessage.create(thread, student, content));
+        thread.messages.add(QaMessage.create(thread, author, content));
         return thread;
     }
 
@@ -86,6 +91,13 @@ public class QaThread {
 
     public void addStudentMessage(Profile student, String content) {
         this.messages.add(QaMessage.create(this, student, content));
+        this.status = QaThreadStatus.PENDING;
+        this.resolvedAt = null;
+        this.lastActivityAt = Instant.now();
+    }
+
+    public void addParentMessage(Profile parent, String content) {
+        this.messages.add(QaMessage.create(this, parent, content));
         this.status = QaThreadStatus.PENDING;
         this.resolvedAt = null;
         this.lastActivityAt = Instant.now();

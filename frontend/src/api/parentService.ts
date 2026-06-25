@@ -15,7 +15,9 @@ import type {
   LinkedStudentResponse,
   ChildOverviewResponse,
   ChildProgressReportResponse,
-  ParentLinkInvitationResponse
+  ParentLinkInvitationResponse,
+  ParentPaymentHistoryResponse,
+  ParentTeacherConversationResponse
 } from '../types/api';
 
 /**
@@ -58,8 +60,18 @@ export async function sendLinkInvitation(studentEmail: string): Promise<ParentLi
  * DELETE /api/parent/children/{studentId}
  * Hủy liên kết giám sát tài khoản học sinh.
  */
-export async function unlinkStudent(studentId: string): Promise<void> {
-  await apiClient.delete(`/api/parent/children/${encodeURIComponent(studentId)}`);
+export async function unlinkStudent(studentId: string): Promise<LinkedStudentResponse> {
+  const res = await apiClient.delete<ApiResponse<LinkedStudentResponse>>(
+    `/api/parent/children/${encodeURIComponent(studentId)}`
+  );
+  return unwrap(res.data);
+}
+
+export async function confirmUnlinkStudent(studentId: string): Promise<LinkedStudentResponse> {
+  const res = await apiClient.post<ApiResponse<LinkedStudentResponse>>(
+    `/api/parent/children/${encodeURIComponent(studentId)}/unlink-confirm`
+  );
+  return unwrap(res.data);
 }
 
 /**
@@ -80,6 +92,46 @@ export async function getChildOverview(studentId: string): Promise<ChildOverview
 export async function getChildProgressReport(studentId: string): Promise<ChildProgressReportResponse> {
   const res = await apiClient.get<ApiResponse<ChildProgressReportResponse>>(
     `/api/parent/children/${encodeURIComponent(studentId)}/progress-report`
+  );
+  return unwrap(res.data);
+}
+
+/**
+ * GET /api/parent/children/{studentId}/payment-history
+ * Lấy lịch sử thanh toán UC26 của con, gồm giao dịch của học sinh/phụ huynh và tiến độ hiện tại.
+ */
+export async function getChildPaymentHistory(studentId: string): Promise<ParentPaymentHistoryResponse> {
+  const res = await apiClient.get<ApiResponse<ParentPaymentHistoryResponse>>(
+    `/api/parent/children/${encodeURIComponent(studentId)}/payment-history`
+  );
+  return unwrap(res.data);
+}
+
+/**
+ * GET /api/parent/children/{studentId}/teacher-conversations
+ * Lấy danh sách giáo viên/khóa học mà phụ huynh có thể trao đổi cho con đang chọn.
+ */
+export async function getChildTeacherConversations(
+  studentId: string,
+): Promise<ParentTeacherConversationResponse[]> {
+  const res = await apiClient.get<ApiResponse<ParentTeacherConversationResponse[]>>(
+    `/api/parent/children/${encodeURIComponent(studentId)}/teacher-conversations`,
+  );
+  return unwrap(res.data);
+}
+
+/**
+ * POST /api/parent/children/{studentId}/teacher-conversations
+ * Gửi tin nhắn tới giáo viên phụ trách khóa học của con.
+ */
+export async function sendParentTeacherMessage(
+  studentId: string,
+  courseId: string,
+  content: string,
+): Promise<ParentTeacherConversationResponse> {
+  const res = await apiClient.post<ApiResponse<ParentTeacherConversationResponse>>(
+    `/api/parent/children/${encodeURIComponent(studentId)}/teacher-conversations`,
+    { courseId, content },
   );
   return unwrap(res.data);
 }

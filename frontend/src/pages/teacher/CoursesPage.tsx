@@ -324,6 +324,10 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
       notify.error('Giá tối thiểu 1,000 VND'); return;
     }
     // FIX: validate giá khuyến mãi phải nhỏ hơn giá gốc (trước đây không có check này)
+    if (/\.(mp4|webm|mov)(\?|#|$)/i.test(form.thumbnailUrl.trim())) {
+      notify.error('Ảnh bìa khóa học phải là ảnh, không dùng URL video giới thiệu.');
+      return;
+    }
     if (form.salePriceVnd) {
       const saleNum  = Number(form.salePriceVnd);
       const priceNum = Number(form.priceVnd);

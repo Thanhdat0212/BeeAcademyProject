@@ -56,6 +56,12 @@ public class ParentStudentLink {
     @Column(name = "responded_at")
     private Instant respondedAt;
 
+    @Column(name = "unlink_requested_by")
+    private UUID unlinkRequestedBy;
+
+    @Column(name = "unlink_requested_at")
+    private Instant unlinkRequestedAt;
+
     @Embeddable
     @Getter
     @Setter
@@ -109,14 +115,41 @@ public class ParentStudentLink {
         this.status = ParentStudentLinkStatus.PENDING;
         this.invitedAt = Instant.now();
         this.respondedAt = null;
+        this.unlinkRequestedBy = null;
+        this.unlinkRequestedAt = null;
     }
 
     public void accept() {
         this.status = ParentStudentLinkStatus.ACCEPTED;
         this.respondedAt = Instant.now();
+        this.unlinkRequestedBy = null;
+        this.unlinkRequestedAt = null;
     }
 
     public void reject() {
+        this.status = ParentStudentLinkStatus.REJECTED;
+        this.respondedAt = Instant.now();
+        this.unlinkRequestedBy = null;
+        this.unlinkRequestedAt = null;
+    }
+
+    public boolean hasPendingUnlinkRequest() {
+        return this.unlinkRequestedBy != null;
+    }
+
+    public boolean isUnlinkRequestedBy(UUID userId) {
+        return userId != null && userId.equals(this.unlinkRequestedBy);
+    }
+
+    public void requestUnlink(UUID requesterId) {
+        if (requesterId == null) {
+            throw new IllegalArgumentException("Requester id must not be null.");
+        }
+        this.unlinkRequestedBy = requesterId;
+        this.unlinkRequestedAt = Instant.now();
+    }
+
+    public void revoke() {
         this.status = ParentStudentLinkStatus.REJECTED;
         this.respondedAt = Instant.now();
     }

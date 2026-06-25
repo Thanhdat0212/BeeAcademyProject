@@ -37,6 +37,18 @@ public class StudentParentLinkService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<StudentParentLinkInvitationResponse> listLinkedParents(AuthenticatedUser me) {
+        log.info("Student {} requested active parent links", me.userId());
+
+        return linkRepository.findByIdStudentIdAndStatusOrderByInvitedAtDesc(
+                        me.userId(),
+                        ParentStudentLinkStatus.ACCEPTED.toDbValue())
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     @Transactional
     public StudentParentLinkInvitationResponse acceptInvitation(AuthenticatedUser me, UUID parentId) {
         ParentStudentLink link = requirePendingInvitation(me.userId(), parentId);
@@ -52,6 +64,48 @@ public class StudentParentLinkService {
         link.reject();
         ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
         log.info("Student {} rejected parent link invitation from {}", me.userId(), parentId);
+        return toResponse(savedLink);
+    }
+
+    @Transactional
+    public StudentParentLinkInvitationResponse requestUnlink(AuthenticatedUser me, UUID parentId) {
+        ParentStudentLink link = requireActiveLink(me.userId(), parentId);
+        if (link.hasPendingUnlinkRequest()) {
+            if (link.isUnlinkRequestedBy(me.userId())) {
+                return toResponse(link);
+            }
+
+            link.revoke();
+            ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+            log.info("Student {} confirmed unlink requested by parent {}", me.userId(), parentId);
+            return toResponse(savedLink);
+        }
+
+        link.requestUnlink(me.userId());
+        ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        log.info("Student {} sent unlink request to parent {}", me.userId(), parentId);
+        return toResponse(savedLink);
+    }
+
+    @Transactional
+    public StudentParentLinkInvitationResponse confirmUnlink(AuthenticatedUser me, UUID parentId) {
+        ParentStudentLink link = requireActiveLink(me.userId(), parentId);
+        if (!link.hasPendingUnlinkRequest()) {
+            throw new BusinessException(
+                    "UNLINK_REQUEST_NOT_FOUND",
+                    "Chưa có yêu cầu hủy liên kết nào cần xác nhận.",
+                    HttpStatus.CONFLICT);
+        }
+        if (link.isUnlinkRequestedBy(me.userId())) {
+            throw new BusinessException(
+                    "UNLINK_REQUEST_OWNED_BY_STUDENT",
+                    "Bạn đã gửi yêu cầu hủy. Cần phụ huynh đồng ý để hoàn tất.",
+                    HttpStatus.CONFLICT);
+        }
+
+        link.revoke();
+        ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        log.info("Student {} completed unlink for parent {}", me.userId(), parentId);
         return toResponse(savedLink);
     }
 
@@ -72,6 +126,23 @@ public class StudentParentLinkService {
         return link;
     }
 
+    private ParentStudentLink requireActiveLink(UUID studentId, UUID parentId) {
+        ParentStudentLink link = linkRepository.findByIdParentIdAndIdStudentId(parentId, studentId)
+                .orElseThrow(() -> new BusinessException(
+                        "PARENT_LINK_NOT_FOUND",
+                        "Không tìm thấy liên kết phụ huynh này.",
+                        HttpStatus.NOT_FOUND));
+
+        if (link.getStatus() != ParentStudentLinkStatus.ACCEPTED) {
+            throw new BusinessException(
+                    "PARENT_LINK_NOT_ACTIVE",
+                    "Liên kết phụ huynh này không còn hoạt động.",
+                    HttpStatus.CONFLICT);
+        }
+
+        return link;
+    }
+
     private StudentParentLinkInvitationResponse toResponse(ParentStudentLink link) {
         Profile parent = link.getParent();
         String parentEmail = profileRepository.findEmailByUserId(parent.getId()).orElse("");
@@ -82,7 +153,24 @@ public class StudentParentLinkService {
                 parent.getAvatarUrl(),
                 link.getStatus().toApiValue(),
                 link.getInvitedAt(),
-                link.getRespondedAt());
+                link.getRespondedAt(),
+                link.getUnlinkRequestedBy(),
+                resolveUnlinkRequestedByRole(link),
+                link.getUnlinkRequestedAt());
+    }
+
+    private String resolveUnlinkRequestedByRole(ParentStudentLink link) {
+        UUID requestedBy = link.getUnlinkRequestedBy();
+        if (requestedBy == null) {
+            return null;
+        }
+        if (requestedBy.equals(link.getParent().getId())) {
+            return "parent";
+        }
+        if (requestedBy.equals(link.getStudent().getId())) {
+            return "student";
+        }
+        return null;
     }
 
     private String displayName(Profile profile) {

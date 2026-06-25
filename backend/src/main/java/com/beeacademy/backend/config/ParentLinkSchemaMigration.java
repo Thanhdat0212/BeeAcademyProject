@@ -41,7 +41,9 @@ public class ParentLinkSchemaMigration implements ApplicationRunner {
                 ALTER TABLE public.parent_student_links
                     ADD COLUMN IF NOT EXISTS status public.parent_link_status,
                     ADD COLUMN IF NOT EXISTS invited_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ NULL
+                    ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ NULL,
+                    ADD COLUMN IF NOT EXISTS unlink_requested_by UUID NULL,
+                    ADD COLUMN IF NOT EXISTS unlink_requested_at TIMESTAMPTZ NULL
                 """);
         jdbcTemplate.execute("""
                 ALTER TABLE public.parent_student_links
@@ -89,6 +91,11 @@ public class ParentLinkSchemaMigration implements ApplicationRunner {
         jdbcTemplate.execute("""
                 CREATE INDEX IF NOT EXISTS idx_parent_student_links_student_status
                 ON public.parent_student_links (student_id, status, invited_at DESC)
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_parent_student_links_unlink_requested_by
+                ON public.parent_student_links (unlink_requested_by, unlink_requested_at DESC)
+                WHERE unlink_requested_by IS NOT NULL
                 """);
     }
 }

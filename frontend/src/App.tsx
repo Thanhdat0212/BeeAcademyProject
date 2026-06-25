@@ -42,6 +42,7 @@ import ParentCourses from './pages/parents/ParentCourses';
 import ParentProgress from './pages/parents/ParentProgress';
 import ParentMessages from './pages/parents/ParentMessages';
 import ParentStudentLink from './pages/parents/ParentStudentLink';
+import ParentPayments from './pages/parents/ParentPayments';
 import ProtectedRoute from './components/ProtectedRoute';
 
 export default function App() {
@@ -79,6 +80,7 @@ export default function App() {
         <Route path="/parent"          element={<ProtectedRoute role="parent"><ParentDashboard /></ProtectedRoute>} />
         <Route path="/parent/courses"  element={<ProtectedRoute role="parent"><ParentCourses /></ProtectedRoute>} />
         <Route path="/parent/progress" element={<ProtectedRoute role="parent"><ParentProgress /></ProtectedRoute>} />
+        <Route path="/parent/payments" element={<ProtectedRoute role="parent"><ParentPayments /></ProtectedRoute>} />
         <Route path="/parent/messages" element={<ProtectedRoute role="parent"><ParentMessages /></ProtectedRoute>} />
         <Route path="/parent/link"     element={<ProtectedRoute role="parent"><ParentStudentLink /></ProtectedRoute>} />
 
