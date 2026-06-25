@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,6 +20,20 @@ public interface ExamAttemptRepository extends JpaRepository<ExamAttempt, UUID> 
 
     Optional<ExamAttempt> findFirstByStudentIdAndExamConfigIdAndSubmittedAtIsNotNullOrderBySubmittedAtDesc(
             UUID studentId, UUID examConfigId);
+
+    @Query("""
+            SELECT attempt
+            FROM ExamAttempt attempt
+            JOIN FETCH attempt.examConfig config
+            JOIN FETCH config.course course
+            WHERE attempt.student.id = :studentId
+              AND course.id IN :courseIds
+              AND attempt.submittedAt IS NOT NULL
+            ORDER BY attempt.submittedAt DESC
+            """)
+    List<ExamAttempt> findSubmittedByStudentAndCourseIds(
+            @Param("studentId") UUID studentId,
+            @Param("courseIds") Collection<UUID> courseIds);
 
     @Query("""
             SELECT attempt

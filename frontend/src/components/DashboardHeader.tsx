@@ -4,12 +4,13 @@ import {
 } from 'lucide-react';
 import DashboardSidebar from './DashboardSidebar';
 import { motion, AnimatePresence } from 'motion/react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useCartStore } from '../store/useCartStore';
 import { useAuthStore } from '../store/useAuthStore';
 import type { Course } from '../data/mockCourses';
 import { inferGradeFromSearchQuery, searchCourses } from '../api/courseService';
 import { adaptCourseSummary } from '../api/adapter';
+import { getStudentParentLinkInvitations } from '../api/studentParentLinkService';
 // ─── Highlight từ khớp trong text ────────────────────────────────────────────
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -132,6 +133,7 @@ function SearchDropdown({ query, results, loading, highlightedIdx, onSelect, onV
 
 export default function DashboardHeader() {
   const navigate = useNavigate();
+  const location = useLocation();
   const cartItems = useCartStore(state => state.items);
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
@@ -142,6 +144,7 @@ export default function DashboardHeader() {
   const [highlightedIdx, setHighlightedIdx] = useState(-1);
   const [results, setResults] = useState<Course[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [pendingNotificationCount, setPendingNotificationCount] = useState(0);
   const searchRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -172,6 +175,37 @@ export default function DashboardHeader() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (user?.role !== 'student') {
+      setPendingNotificationCount(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadPendingInvitations = async () => {
+      try {
+        const invitations = await getStudentParentLinkInvitations();
+        if (!cancelled) {
+          setPendingNotificationCount(invitations.length);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Không thể tải số thông báo lời mời phụ huynh:', error);
+          setPendingNotificationCount(0);
+        }
+      }
+    };
+
+    loadPendingInvitations();
+    window.addEventListener('bee:student-parent-link-invitations-updated', loadPendingInvitations);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bee:student-parent-link-invitations-updated', loadPendingInvitations);
+    };
+  }, [user?.role, location.pathname]);
 
   useEffect(() => {
     setHighlightedIdx(-1);
@@ -276,6 +310,7 @@ export default function DashboardHeader() {
   }
 
   const isDropdownOpen = showDropdown && searchQuery.trim().length >= 1;
+  const notificationTarget = user?.role === 'student' ? '/notifications' : location.pathname;
 
   // Avatar URL: dùng user.avatar nếu có, fallback sang ui-avatars với tên user
   const avatarSrc = user?.avatar ??
@@ -342,10 +377,27 @@ export default function DashboardHeader() {
         <div className="flex items-center gap-4 sm:gap-5 flex-shrink-0">
 
           {/* Notification Bell */}
-          <button className="relative text-on-surface-variant hover:text-primary transition-colors">
+          <Link
+            to={notificationTarget}
+            className="relative text-on-surface-variant hover:text-primary transition-colors"
+            title="Thông báo"
+            aria-label="Thông báo"
+          >
             <Bell className="w-6 h-6" />
-            <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-surface" />
-          </button>
+            <AnimatePresence>
+              {pendingNotificationCount > 0 && (
+                <motion.span
+                  key={pendingNotificationCount}
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  exit={{ scale: 0 }}
+                  className="absolute -top-2 -right-2 min-w-5 h-5 px-1 bg-red-500 text-white text-[10px] font-extrabold rounded-full flex items-center justify-center border-2 border-surface"
+                >
+                  {pendingNotificationCount > 9 ? '9+' : pendingNotificationCount}
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </Link>
 
           {/* Shopping Cart với badge số lượng */}
           <Link to="/checkout" className="relative text-on-surface-variant hover:text-primary transition-colors">

@@ -77,4 +77,16 @@ public class UploadController {
                 CurrentUser.required().userId(), file);
         return ApiResponse.ok(result, "Upload anh bia thanh cong");
     }
+
+    /**
+     * Upload video gioi thieu khoa hoc.
+     * Path: /api/upload/course-intro-video
+     */
+    @PostMapping("/course-intro-video")
+    public ApiResponse<UploadResponse> uploadCourseIntroVideo(
+            @RequestParam("file") MultipartFile file) {
+        UploadResponse result = uploadService.uploadCourseIntroVideo(
+                CurrentUser.required().userId(), file);
+        return ApiResponse.ok(result, "Upload video gioi thieu thanh cong");
+    }
 }

@@ -25,7 +25,7 @@ import {
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, CheckCircle2, Clock, AlertTriangle,
   Megaphone, Database, Send, RefreshCcw, Eye, Save, Loader2, ChevronDown,
-  Upload, Image as ImageIcon, MessageSquare, UserCircle, Lock,
+  Upload, Image as ImageIcon, MessageSquare, UserCircle, Lock, Video,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -170,6 +170,12 @@ const EMPTY_FORM: CourseForm = {
 const ALL_GRADES = [6, 7, 8, 9];
 const ALLOWED_THUMBNAIL_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_THUMBNAIL_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_INTRO_VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'];
+const MAX_INTRO_VIDEO_SIZE_BYTES = 2 * 1024 * 1024 * 1024;
+
+function isDirectVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov)(\?|#|$)/i.test(url);
+}
 
 interface CourseFormPanelProps {
   open: boolean;
@@ -185,6 +191,9 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
   const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
   const [thumbnailPreviewUrl, setThumbnailPreviewUrl] = useState('');
   const [thumbnailInputKey, setThumbnailInputKey] = useState(0);
+  const [introVideoFile, setIntroVideoFile] = useState<File | null>(null);
+  const [introVideoPreviewUrl, setIntroVideoPreviewUrl] = useState('');
+  const [introVideoInputKey, setIntroVideoInputKey] = useState(0);
 
   useEffect(() => {
     if (!thumbnailFile) {
@@ -198,9 +207,22 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
   }, [thumbnailFile]);
 
   useEffect(() => {
+    if (!introVideoFile) {
+      setIntroVideoPreviewUrl('');
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(introVideoFile);
+    setIntroVideoPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [introVideoFile]);
+
+  useEffect(() => {
     if (!open) return;
     setThumbnailFile(null);
     setThumbnailInputKey(k => k + 1);
+    setIntroVideoFile(null);
+    setIntroVideoInputKey(k => k + 1);
     if (editing) {
       // TeacherCourseResponse đã có categoryId → set form ngay không cần đợi API
       setForm({
@@ -259,9 +281,34 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
     setThumbnailFile(file);
   }
 
+  function handleIntroVideoChange(file: File | undefined) {
+    if (!file) return;
+    if (!ALLOWED_INTRO_VIDEO_TYPES.includes(file.type)) {
+      notify.error('Chỉ chấp nhận video MP4, WebM hoặc MOV');
+      setIntroVideoInputKey(k => k + 1);
+      return;
+    }
+    if (file.size > MAX_INTRO_VIDEO_SIZE_BYTES) {
+      notify.error('Video giới thiệu không được vượt quá 2GB');
+      setIntroVideoInputKey(k => k + 1);
+      return;
+    }
+    setIntroVideoFile(file);
+  }
+
   function cancelThumbnailSelection() {
     setThumbnailFile(null);
     setThumbnailInputKey(k => k + 1);
+  }
+
+  function cancelIntroVideoSelection() {
+    setIntroVideoFile(null);
+    setIntroVideoInputKey(k => k + 1);
+  }
+
+  function clearIntroVideo() {
+    cancelIntroVideoSelection();
+    setForm(f => ({ ...f, introVideoUrl: '' }));
   }
 
   function textPayload(value: string, allowBlank: boolean): string | undefined {
@@ -286,7 +333,7 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
       }
     }
 
-    if (form.introVideoUrl.trim()) {
+    if (!introVideoFile && form.introVideoUrl.trim()) {
       const introUrl = form.introVideoUrl.trim();
       const isSupportedIntro =
         /^https?:\/\//i.test(introUrl)
@@ -313,13 +360,22 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
         thumbnailUrl = uploaded.publicUrl;
       }
 
+      let introVideoUrl = form.introVideoUrl.trim() || undefined;
+      if (introVideoFile) {
+        const uploaded = await teacherCourseService.uploadCourseIntroVideo(introVideoFile);
+        if (!uploaded.publicUrl) {
+          throw new Error('Upload video giới thiệu không trả về URL');
+        }
+        introVideoUrl = uploaded.publicUrl;
+      }
+
       const req: CreateCourseRequest = {
         title:       form.title.trim(),
         description: textPayload(form.description, Boolean(editing)),
         objective: textPayload(form.objective, Boolean(editing)),
         audience: textPayload(form.audience, Boolean(editing)),
         thumbnailUrl,
-        introVideoUrl: textPayload(form.introVideoUrl, Boolean(editing)),
+        introVideoUrl: textPayload(introVideoUrl ?? '', Boolean(editing)),
         categoryId:  form.categoryId,
         grades:      form.grades,
         priceVnd:    Number(form.priceVnd),
@@ -344,6 +400,13 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
       setSaving(false);
     }
   }
+
+  const persistedIntroVideoUrl = form.introVideoUrl.trim();
+  const introVideoPreviewSrc = introVideoPreviewUrl
+    || (isDirectVideoUrl(persistedIntroVideoUrl) ? persistedIntroVideoUrl : '');
+  const hasLegacyIntroVideoLink = Boolean(persistedIntroVideoUrl)
+    && !introVideoPreviewUrl
+    && !isDirectVideoUrl(persistedIntroVideoUrl);
 
   return (
     <>
@@ -428,16 +491,70 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
 
               <div>
                 <label className="block text-sm font-bold text-on-surface mb-1.5">Video giới thiệu khóa học</label>
-                <input
-                  type="url"
-                  value={form.introVideoUrl}
-                  onChange={e => setForm(f => ({ ...f, introVideoUrl: e.target.value }))}
-                  placeholder="https://www.youtube.com/watch?v=... hoặc https://.../intro.mp4"
-                  className="w-full px-3 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary"
-                />
+                <label className="flex items-center justify-center gap-2 w-full px-3 py-3 text-sm font-bold bg-surface-container border border-dashed border-outline-variant rounded-xl text-on-surface-variant hover:border-primary hover:text-primary cursor-pointer transition-colors">
+                  <Upload className="w-4 h-4" />
+                  {introVideoFile ? introVideoFile.name : 'Chọn video từ máy'}
+                  <input
+                    key={introVideoInputKey}
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime,.mov"
+                    onChange={e => handleIntroVideoChange(e.target.files?.[0])}
+                    className="hidden"
+                  />
+                </label>
                 <p className="mt-1.5 text-xs text-on-surface-variant">
-                  Hỗ trợ YouTube, Vimeo hoặc link MP4/WebM/MOV công khai để Admin và học sinh xem trước.
+                  Hỗ trợ MP4, WebM, MOV. Video sẽ được tải lên khi bấm lưu để Admin và học sinh xem trước.
                 </p>
+                {(introVideoFile || persistedIntroVideoUrl) && (
+                  <div className="mt-2 flex items-center gap-3">
+                    {introVideoFile && (
+                      <button
+                        type="button"
+                        onClick={cancelIntroVideoSelection}
+                        className="text-xs font-bold text-primary hover:underline"
+                      >
+                        Hủy chọn video mới
+                      </button>
+                    )}
+                    {persistedIntroVideoUrl && (
+                      <button
+                        type="button"
+                        onClick={clearIntroVideo}
+                        className="text-xs font-bold text-red-600 hover:underline"
+                      >
+                        Gỡ video hiện tại
+                      </button>
+                    )}
+                  </div>
+                )}
+                {introVideoPreviewSrc && (
+                  <div className="mt-3 overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container">
+                    <video
+                      src={introVideoPreviewSrc}
+                      controls
+                      preload="metadata"
+                      className="w-full h-48 bg-black object-cover"
+                    />
+                  </div>
+                )}
+                {hasLegacyIntroVideoLink && (
+                  <div className="mt-3 rounded-xl border border-outline-variant/30 bg-surface-container px-3 py-3">
+                    <p className="text-xs font-bold text-on-surface-variant mb-1">Video hiện tại</p>
+                    <a
+                      href={persistedIntroVideoUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="break-all text-sm font-bold text-primary hover:underline"
+                    >
+                      {persistedIntroVideoUrl}
+                    </a>
+                  </div>
+                )}
+                {!introVideoPreviewSrc && !hasLegacyIntroVideoLink && (
+                  <div className="mt-3 h-28 rounded-xl border border-outline-variant/30 bg-surface-container/60 flex items-center justify-center">
+                    <Video className="w-8 h-8 text-on-surface-variant/40" />
+                  </div>
+                )}
               </div>
 
               {/* Ảnh bìa */}

@@ -195,6 +195,22 @@ public class ContentUploadService {
         return new UploadResponse(path, publicUrl, ext, file.getSize());
     }
 
+    @Transactional
+    public UploadResponse uploadCourseIntroVideo(UUID teacherId, MultipartFile file) {
+        validateFile(file, ALLOWED_VIDEO_MIME, MAX_VIDEO_BYTES,
+                     "video MP4, WebM hoac QuickTime", "2GB");
+
+        String ext = getExtension(file.getOriginalFilename(), "mp4");
+        String path = "course-intros/" + teacherId + "/" + UUID.randomUUID() + "." + ext;
+
+        String publicUrl = storageClient.upload(DOCS_BUCKET, path,
+                                                file.getContentType(), file.getResource(), file.getSize());
+
+        log.info("Upload course intro video thanh cong: teacherId={} path={} url={}",
+                 teacherId, path, publicUrl);
+        return new UploadResponse(path, publicUrl, file.getContentType(), file.getSize());
+    }
+
     public String generateSignedVideoUrl(String storagePath) {
         return storageClient.generateSignedUrl(VIDEO_BUCKET, storagePath, 3600);
     }

@@ -360,14 +360,23 @@ export default function CourseReviewPage() {
                     {course.introVideoUrl && (
                       <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2">
                         <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1">Video giới thiệu</p>
-                        <a
-                          href={course.introVideoUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="break-all text-sm font-bold text-primary hover:underline"
-                        >
-                          {course.introVideoUrl}
-                        </a>
+                        {/\.(mp4|webm|mov)(\?|#|$)/i.test(course.introVideoUrl) ? (
+                          <video
+                            src={course.introVideoUrl}
+                            controls
+                            preload="metadata"
+                            className="mt-2 w-full rounded-lg bg-black"
+                          />
+                        ) : (
+                          <a
+                            href={course.introVideoUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="break-all text-sm font-bold text-primary hover:underline"
+                          >
+                            {course.introVideoUrl}
+                          </a>
+                        )}
                       </div>
                     )}
 

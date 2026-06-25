@@ -19,6 +19,7 @@ import AvatarPage from './pages/student/AvatarPage';
 import ComplaintsPage from './pages/student/ComplaintsPage';
 import StudentQuizPage from './pages/student/StudentQuizPage';
 import StudentExamPage from './pages/student/StudentExamPage';
+import NotificationsPage from './pages/student/NotificationsPage';
 import DashboardAdmin from './pages/admin/DashboardAdmin';
 import DashboardTeacher from './pages/teacher/DashboardTeacher';
 import TeacherCoursesPage from './pages/teacher/CoursesPage';
@@ -72,6 +73,7 @@ export default function App() {
         <Route path="/account/photo" element={<ProtectedRoute><AvatarPage /></ProtectedRoute>} />
         <Route path="/account"       element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
         <Route path="/complaints"    element={<ProtectedRoute><ComplaintsPage /></ProtectedRoute>} />
+        <Route path="/notifications" element={<ProtectedRoute role="student"><NotificationsPage /></ProtectedRoute>} />
 
         {/* ── Parent (chỉ role=parent) ── */}
         <Route path="/parent"          element={<ProtectedRoute role="parent"><ParentDashboard /></ProtectedRoute>} />

@@ -255,3 +255,12 @@ export async function uploadCourseThumbnail(file: File): Promise<UploadResponse>
     { headers: { 'Content-Type': 'multipart/form-data' } });
   return unwrap(res.data);
 }
+
+export async function uploadCourseIntroVideo(file: File): Promise<UploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiClient.post<ApiResponse<UploadResponse>>(
+    '/api/upload/course-intro-video', form,
+    { headers: { 'Content-Type': 'multipart/form-data' } });
+  return unwrap(res.data);
+}

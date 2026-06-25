@@ -13,7 +13,9 @@ import { apiClient, unwrap } from './client';
 import type {
   ApiResponse,
   LinkedStudentResponse,
-  ChildOverviewResponse
+  ChildOverviewResponse,
+  ChildProgressReportResponse,
+  ParentLinkInvitationResponse
 } from '../types/api';
 
 /**
@@ -23,6 +25,29 @@ import type {
 export async function getLinkedChildren(): Promise<LinkedStudentResponse[]> {
   const res = await apiClient.get<ApiResponse<LinkedStudentResponse[]>>(
     '/api/parent/children'
+  );
+  return unwrap(res.data);
+}
+
+/**
+ * GET /api/parent/link-invitations
+ * Lấy danh sách lời mời liên kết đang chờ học sinh xác nhận.
+ */
+export async function getLinkInvitations(): Promise<ParentLinkInvitationResponse[]> {
+  const res = await apiClient.get<ApiResponse<ParentLinkInvitationResponse[]>>(
+    '/api/parent/link-invitations'
+  );
+  return unwrap(res.data);
+}
+
+/**
+ * POST /api/parent/link-invitations
+ * Gửi lời mời liên kết tới email học sinh.
+ */
+export async function sendLinkInvitation(studentEmail: string): Promise<ParentLinkInvitationResponse> {
+  const res = await apiClient.post<ApiResponse<ParentLinkInvitationResponse>>(
+    '/api/parent/link-invitations',
+    { studentEmail }
   );
   return unwrap(res.data);
 }
@@ -44,6 +69,17 @@ export async function unlinkStudent(studentId: string): Promise<void> {
 export async function getChildOverview(studentId: string): Promise<ChildOverviewResponse> {
   const res = await apiClient.get<ApiResponse<ChildOverviewResponse>>(
     `/api/parent/children/${encodeURIComponent(studentId)}/overview`
+  );
+  return unwrap(res.data);
+}
+
+/**
+ * GET /api/parent/children/{studentId}/progress-report
+ * Lấy báo cáo chi tiết UC24 của con, gồm tiến độ theo khóa học và bảng điểm.
+ */
+export async function getChildProgressReport(studentId: string): Promise<ChildProgressReportResponse> {
+  const res = await apiClient.get<ApiResponse<ChildProgressReportResponse>>(
+    `/api/parent/children/${encodeURIComponent(studentId)}/progress-report`
   );
   return unwrap(res.data);
 }

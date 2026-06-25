@@ -1,6 +1,7 @@
 package com.beeacademy.backend.model;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Embeddable;
 import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.Entity;
@@ -16,57 +17,45 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.ColumnTransformer;
 
 import java.io.Serializable;
 import java.time.Instant;
 import java.util.UUID;
 
-/**
- * Entity đại diện cho mối liên kết giữa Phụ huynh (Parent) và Học sinh (Student).
- * 
- * <p>Mỗi bản ghi ánh xạ mối quan hệ 1-N hoặc N-N từ bảng {@code parent_student_links}.
- * Sử dụng khóa chính tổ hợp {@link Id} để đảm bảo tính duy nhất của mối liên kết giữa phụ huynh và con.
- */
 @Entity
 @Table(name = "parent_student_links")
 @Getter
-@NoArgsConstructor(access = AccessLevel.PROTECTED) // JPA cần constructor không tham số
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 @Builder
 public class ParentStudentLink {
 
-    /**
-     * Khóa chính tổ hợp chứa parentId và studentId
-     */
     @EmbeddedId
     private Id id;
 
-
-    /**
-     * Đối tượng Phụ huynh trong liên kết (liên kết đến profiles)
-     */
     @ManyToOne(fetch = FetchType.LAZY)
     @MapsId("parentId")
     @JoinColumn(name = "parent_id", nullable = false)
     private Profile parent;
 
-    /**
-     * Đối tượng Học sinh (con) trong liên kết (liên kết đến profiles)
-     */
     @ManyToOne(fetch = FetchType.LAZY)
     @MapsId("studentId")
     @JoinColumn(name = "student_id", nullable = false)
     private Profile student;
 
-    // ========================================================================
-    // Khóa chính tổ hợp (Composite Primary Key Class)
-    // ========================================================================
-    
-    /**
-     * Lớp nhúng định nghĩa khóa chính tổ hợp gồm ID phụ huynh và ID học sinh.
-     * Cần implements Serializable và override equals/hashCode theo chuẩn JPA.
-     */
+    @Convert(converter = ParentStudentLinkStatusConverter.class)
+    @ColumnTransformer(read = "status::text", write = "?::parent_link_status")
+    @Column(name = "status", nullable = false)
+    @Builder.Default
+    private ParentStudentLinkStatus status = ParentStudentLinkStatus.ACCEPTED;
+
+    @Column(name = "invited_at", nullable = false)
+    private Instant invitedAt;
+
+    @Column(name = "responded_at")
+    private Instant respondedAt;
+
     @Embeddable
     @Getter
     @Setter
@@ -84,28 +73,51 @@ public class ParentStudentLink {
         private UUID studentId;
     }
 
-    // ========================================================================
-    // Factory method (Rich Domain Model)
-    // ========================================================================
-
-    /**
-     * Phương thức khởi tạo thực thể liên kết mới
-     * 
-     * @param parent  Đối tượng Profile phụ huynh
-     * @param student Đối tượng Profile học sinh
-     * @return Thực thể liên kết ParentStudentLink mới
-     */
-    public static ParentStudentLink createLink(Profile parent, Profile student) {
+    public static ParentStudentLink createAcceptedLink(Profile parent, Profile student) {
         if (parent == null || student == null) {
-            throw new IllegalArgumentException("Hồ sơ phụ huynh và học sinh không được null khi tạo liên kết.");
+            throw new IllegalArgumentException("Parent and student profile must not be null.");
         }
-        
-        Id linkId = new Id(parent.getId(), student.getId());
-        
+
+        Instant now = Instant.now();
         return ParentStudentLink.builder()
-                .id(linkId)
+                .id(new Id(parent.getId(), student.getId()))
                 .parent(parent)
                 .student(student)
+                .status(ParentStudentLinkStatus.ACCEPTED)
+                .invitedAt(now)
+                .respondedAt(now)
                 .build();
+    }
+
+    public static ParentStudentLink createPendingInvitation(Profile parent, Profile student) {
+        if (parent == null || student == null) {
+            throw new IllegalArgumentException("Parent and student profile must not be null.");
+        }
+
+        Instant now = Instant.now();
+        return ParentStudentLink.builder()
+                .id(new Id(parent.getId(), student.getId()))
+                .parent(parent)
+                .student(student)
+                .status(ParentStudentLinkStatus.PENDING)
+                .invitedAt(now)
+                .respondedAt(null)
+                .build();
+    }
+
+    public void markPending() {
+        this.status = ParentStudentLinkStatus.PENDING;
+        this.invitedAt = Instant.now();
+        this.respondedAt = null;
+    }
+
+    public void accept() {
+        this.status = ParentStudentLinkStatus.ACCEPTED;
+        this.respondedAt = Instant.now();
+    }
+
+    public void reject() {
+        this.status = ParentStudentLinkStatus.REJECTED;
+        this.respondedAt = Instant.now();
     }
 }

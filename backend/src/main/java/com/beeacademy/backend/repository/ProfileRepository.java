@@ -45,6 +45,9 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
     @Query(value = "SELECT id FROM auth.users WHERE LOWER(email) = LOWER(:email)", nativeQuery = true)
     Optional<UUID> findUserIdByEmail(@Param("email") String email);
 
+    @Query(value = "SELECT email FROM auth.users WHERE id = :userId", nativeQuery = true)
+    Optional<String> findEmailByUserId(@Param("userId") UUID userId);
+
     /**
      * Admin: danh sách user với tìm kiếm và filter role.
      * Join auth.users để lấy email.

@@ -227,6 +227,33 @@ export interface LinkStudentRequest {
   code: string;
 }
 
+export type ParentLinkStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface SendParentLinkInvitationPayload {
+  studentEmail: string;
+}
+
+export interface ParentLinkInvitationResponse {
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  avatarUrl: string | null;
+  grade: string;
+  status: ParentLinkStatus;
+  invitedAt: string;
+  respondedAt: string | null;
+}
+
+export interface StudentParentLinkInvitationResponse {
+  parentId: string;
+  parentName: string;
+  parentEmail: string;
+  avatarUrl: string | null;
+  status: ParentLinkStatus;
+  invitedAt: string;
+  respondedAt: string | null;
+}
+
 export interface ChildOverviewResponse {
   studentName: string;
   grade: string;
@@ -236,5 +263,45 @@ export interface ChildOverviewResponse {
   latestQuizScore: number;
   latestExamScore: number;
   weeklyActivityHours: number[];
+}
+
+export interface ParentCourseProgressItem {
+  courseId: string;
+  courseTitle: string;
+  teacherName: string | null;
+  status: 'active' | 'completed';
+  progressPct: number;
+  enrolledAt: string | null;
+  grades: number[];
+  quizCompletedCount: number;
+  quizTotalCount: number;
+  averageQuizScore: number | null;
+  latestQuizScore: number | null;
+  latestExamScore: number | null;
+  latestAssignmentScore: number | null;
+}
+
+export interface ParentAssessmentRecord {
+  id: string;
+  courseId: string;
+  courseTitle: string;
+  courseStatus: 'active' | 'completed';
+  assessmentName: string;
+  assessmentType: 'quiz' | 'exam' | 'assignment';
+  chapterTitle: string | null;
+  rawScore: number | null;
+  maxScore: number | null;
+  normalizedScore: number | null;
+  feedback: string | null;
+  submittedAt: string | null;
+}
+
+export interface ChildProgressReportResponse {
+  studentId: string;
+  studentName: string;
+  gradeLabel: string;
+  generatedAt: string;
+  courses: ParentCourseProgressItem[];
+  assessments: ParentAssessmentRecord[];
 }
 

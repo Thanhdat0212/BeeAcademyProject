@@ -23,7 +23,7 @@
 
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  BookOpen, CreditCard, Heart, MessageSquare,
+  Bell, BookOpen, CreditCard, Heart, MessageSquare,
   ShoppingBag, UserCircle, Camera, LogOut, Lock, Megaphone,
   DollarSign, BarChart2, Settings, Calendar, TrendingUp, Database
 } from 'lucide-react';
@@ -31,6 +31,7 @@ import { useAuthStore } from '../store/useAuthStore';
 
 // ─── Cấu hình mục menu theo vai trò (Role-based menu items) ───────────────────
 const STUDENT_MENU_ITEMS = [
+  { icon: Bell,          label: 'Thông báo',              path: '/notifications' },
   { icon: BookOpen,      label: 'Khóa học và Bài tập', path: '/courses'       },
   { icon: CreditCard,    label: 'Loại tài khoản',       path: '/account/type'  },
   { icon: Heart,         label: 'Danh sách yêu thích',  path: '/favorites'     },

@@ -15,6 +15,25 @@ public interface AssignmentSubmissionRepository
     @Query("""
             SELECT DISTINCT submission
             FROM AssignmentSubmission submission
+            JOIN FETCH submission.assignment assignment
+            LEFT JOIN FETCH assignment.chapter chapter
+            LEFT JOIN FETCH assignment.lesson lesson
+            LEFT JOIN FETCH lesson.chapter lessonChapter
+            WHERE submission.student.id = :studentId
+              AND submission.submittedAt IS NOT NULL
+              AND (
+                    chapter.course.id IN :courseIds
+                 OR lessonChapter.course.id IN :courseIds
+              )
+            ORDER BY submission.submittedAt DESC
+            """)
+    List<AssignmentSubmission> findSubmittedByStudentAndCourseIds(
+            @Param("studentId") UUID studentId,
+            @Param("courseIds") List<UUID> courseIds);
+
+    @Query("""
+            SELECT DISTINCT submission
+            FROM AssignmentSubmission submission
             JOIN FETCH submission.student
             JOIN FETCH submission.assignment assignment
             LEFT JOIN FETCH assignment.chapter chapter

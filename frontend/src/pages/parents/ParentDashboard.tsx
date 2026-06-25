@@ -10,6 +10,7 @@ import PageBanner from '../../components/PageBanner';
 import { useAuthStore, LinkedStudent } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
 import * as parentService from '../../api/parentService';
+import { printParentProgressReport } from '../../lib/parentProgressReport';
 import type { ChildOverviewResponse } from '../../types/api';
 
 // ---------------------------------------------------------------------------
@@ -110,37 +111,28 @@ export default function ParentDashboard() {
   };
 
   // Xuất báo cáo học tập chi tiết giả lập
-  const handleExportReport = () => {
-    if (!activeStudent || !overview) return;
-    const toastId = notify.loading('Đang khởi tạo báo cáo...');
-    
-    setTimeout(() => {
-      // Dữ liệu CSV
-      const headers = ['Học sinh', 'Lớp', 'Tiến độ trung bình (%)', 'Khóa học đang học', 'Khóa học hoàn thành', 'Điểm Quiz mới nhất', 'Điểm thi mới nhất'];
-      const data = [
-        activeStudent.name,
-        activeStudent.grade,
-        overview.avgProgress,
-        overview.activeCourses,
-        overview.completedCourses,
-        overview.latestQuizScore,
-        overview.latestExamScore
-      ];
-      
-      const csvContent = "data:text/csv;charset=utf-8,\uFEFF"
-        + [headers.join(','), data.join(',')].join('\n');
-      
-      const encodedUri = encodeURI(csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `Bao_Cao_Hoc_Tap_${activeStudent.name.replace(/\s+/g, '_')}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
+  const handleExportReport = async () => {
+    if (!activeStudent) return;
+
+    const toastId = notify.loading('Đang chuẩn bị báo cáo PDF...');
+    try {
+      const report = await parentService.getChildProgressReport(activeStudent.id);
+      const opened = printParentProgressReport(report, {
+        filterSummary: 'Tổng quan tuần hiện tại',
+      });
+
       notify.dismiss(toastId);
-      notify.success('Đã tải xuống báo cáo học tập chi tiết thành công!');
-    }, 1500);
+      if (!opened) {
+        notify.error('Trình duyệt đang chặn cửa sổ in báo cáo.');
+        return;
+      }
+
+      notify.success(`Đã mở báo cáo PDF cho ${activeStudent.name}.`);
+    } catch (error) {
+      notify.dismiss(toastId);
+      console.error('Lỗi khi xuất báo cáo phụ huynh:', error);
+      notify.error('Không thể xuất báo cáo học tập lúc này.');
+    }
   };
 
   if (linkedStudents.length === 0) {
@@ -280,7 +272,7 @@ export default function ParentDashboard() {
                 className="flex items-center gap-2 px-5 py-3 bg-primary text-on-primary rounded-xl font-bold text-xs hover:bg-primary/95 transition-all shadow-md shadow-primary/20 flex-shrink-0"
               >
                 <FileDown className="w-4 h-4" />
-                Xuất báo cáo chi tiết
+                In / Lưu PDF
               </button>
             </motion.div>
 
