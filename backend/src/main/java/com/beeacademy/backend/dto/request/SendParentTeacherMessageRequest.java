@@ -11,7 +11,18 @@ public record SendParentTeacherMessageRequest(
         UUID courseId,
 
         @NotBlank(message = "Vui lòng nhập nội dung tin nhắn")
-        @Size(max = 5000, message = "Tin nhắn tối đa 5000 ký tự")
-        String content
+        @Size(max = 2000, message = "Tin nhắn tối đa 2000 ký tự")
+        String content,
+
+        @Size(max = 1000, message = "Đường dẫn file đính kèm quá dài")
+        String attachmentUrl,
+
+        @Size(max = 255, message = "Tên file đính kèm quá dài")
+        String attachmentName,
+
+        @Size(max = 100, message = "Loại file đính kèm quá dài")
+        String attachmentType,
+
+        Long attachmentSizeBytes
 ) {
 }

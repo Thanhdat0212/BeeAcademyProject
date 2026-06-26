@@ -361,6 +361,10 @@ export interface ParentTeacherMessageResponse {
   authorName: string;
   authorRole: ParentTeacherMessageAuthorRole;
   content: string;
+  attachmentUrl: string | null;
+  attachmentName: string | null;
+  attachmentType: string | null;
+  attachmentSizeBytes: number | null;
   sentAt: string;
 }
 
@@ -381,5 +385,28 @@ export interface ParentTeacherConversationResponse {
   lastMessage: string | null;
   messageCount: number;
   messages: ParentTeacherMessageResponse[];
+}
+
+export interface UploadResponse {
+  storagePath: string;
+  publicUrl: string | null;
+  fileType: string;
+  fileSizeBytes: number;
+}
+
+export interface UserNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  targetUrl: string | null;
+  read: boolean;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface UserNotificationSummary {
+  unreadCount: number;
+  notifications: UserNotification[];
 }
 

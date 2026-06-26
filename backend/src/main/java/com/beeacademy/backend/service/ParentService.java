@@ -9,8 +9,10 @@ import com.beeacademy.backend.dto.response.ParentLinkInvitationResponse;
 import com.beeacademy.backend.dto.response.ParentPaymentHistoryResponse;
 import com.beeacademy.backend.dto.response.ParentTeacherConversationResponse;
 import com.beeacademy.backend.dto.response.QaMessageResponse;
+import com.beeacademy.backend.dto.response.UploadResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
+import com.beeacademy.backend.client.SupabaseStorageClient;
 import com.beeacademy.backend.model.Assignment;
 import com.beeacademy.backend.model.AssignmentSubmission;
 import com.beeacademy.backend.model.Course;
@@ -43,6 +45,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -58,6 +61,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -66,6 +70,20 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ParentService {
+
+    private static final String PARENT_MESSAGE_BUCKET = "course-docs";
+    private static final long MAX_PARENT_ATTACHMENT_BYTES = 20L * 1024 * 1024;
+    private static final Set<String> ALLOWED_ATTACHMENT_MIME = Set.of(
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "text/plain"
+    );
 
     private final ProfileRepository profileRepository;
     private final ParentStudentLinkRepository linkRepository;
@@ -78,6 +96,9 @@ public class ParentService {
     private final QaThreadRepository qaThreadRepository;
     private final OrderRepository orderRepository;
     private final ParentLinkInvitationEmailService parentLinkInvitationEmailService;
+    private final SupabaseStorageClient storageClient;
+    private final UserNotificationService notificationService;
+    private final ParentTeacherMessageEmailService parentTeacherMessageEmailService;
 
     @Transactional(readOnly = true)
     public List<LinkedStudentResponse> getLinkedChildren(AuthenticatedUser me) {
@@ -470,16 +491,122 @@ public class ParentService {
 
         List<QaThread> existingThreads = qaThreadRepository
                 .findParentThreadsForCourse(me.userId(), studentId, course.getId());
+        validateAttachmentMetadata(request.attachmentUrl(), request.attachmentSizeBytes());
         QaThread thread;
         if (existingThreads.isEmpty()) {
-            thread = QaThread.createWithAuthor(student, course, null, parent, request.content());
+            thread = QaThread.createWithAuthor(
+                    student,
+                    course,
+                    null,
+                    parent,
+                    request.content(),
+                    request.attachmentUrl(),
+                    request.attachmentName(),
+                    request.attachmentType(),
+                    request.attachmentSizeBytes());
         } else {
             thread = existingThreads.get(0);
-            thread.addParentMessage(parent, request.content());
+            thread.addParentMessage(
+                    parent,
+                    request.content(),
+                    request.attachmentUrl(),
+                    request.attachmentName(),
+                    request.attachmentType(),
+                    request.attachmentSizeBytes());
         }
 
         QaThread saved = qaThreadRepository.saveAndFlush(thread);
+        notifyTeacherAboutParentMessage(parent, student, course, request.content());
         return toParentTeacherConversation(student, course, saved);
+    }
+
+    public UploadResponse uploadMessageAttachment(AuthenticatedUser me, MultipartFile file) {
+        Profile parent = requireParentProfile(me.userId());
+        if (parent.getRole() != UserRole.PARENT) {
+            throwForbidden();
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("FILE_REQUIRED", "Vui lòng chọn file đính kèm.");
+        }
+        if (file.getSize() > MAX_PARENT_ATTACHMENT_BYTES) {
+            throw new BusinessException("FILE_TOO_LARGE", "File đính kèm tối đa 20MB.");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !ALLOWED_ATTACHMENT_MIME.contains(contentType)) {
+            throw new BusinessException(
+                    "UNSUPPORTED_FILE_TYPE",
+                    "Chỉ hỗ trợ PDF, ảnh, Word, PowerPoint hoặc text.",
+                    HttpStatus.BAD_REQUEST);
+        }
+
+        String originalName = file.getOriginalFilename();
+        String ext = extensionOf(originalName, contentType);
+        String path = "parent-messages/" + me.userId() + "/" + UUID.randomUUID() + ext;
+        try {
+            String publicUrl = storageClient.upload(
+                    PARENT_MESSAGE_BUCKET,
+                    path,
+                    contentType,
+                    file.getResource(),
+                    file.getSize());
+            return new UploadResponse(path, publicUrl, contentType, file.getSize());
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new BusinessException(
+                    "UPLOAD_FAILED",
+                    "Không thể tải file đính kèm. Vui lòng thử lại.",
+                    HttpStatus.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    private void notifyTeacherAboutParentMessage(Profile parent, Profile student, Course course, String content) {
+        Profile teacher = course.getTeacher();
+        String title = "Phụ huynh gửi tin nhắn mới";
+        String body = "%s gửi tin nhắn về %s trong khóa %s."
+                .formatted(displayName(parent, "Phụ huynh"), displayName(student, "học sinh"), course.getTitle());
+        notificationService.notify(teacher.getId(), "parent_teacher_message", title, body, "/teacher/qa");
+        parentTeacherMessageEmailService.notifyTeacher(
+                teacher.getId(),
+                displayName(teacher, "Giáo viên"),
+                displayName(parent, "Phụ huynh"),
+                displayName(student, "học sinh"),
+                course.getTitle(),
+                excerpt(content));
+    }
+
+    private void validateAttachmentMetadata(String attachmentUrl, Long attachmentSizeBytes) {
+        if (attachmentUrl == null || attachmentUrl.isBlank()) return;
+        if (attachmentSizeBytes != null && attachmentSizeBytes > MAX_PARENT_ATTACHMENT_BYTES) {
+            throw new BusinessException("FILE_TOO_LARGE", "File đính kèm tối đa 20MB.");
+        }
+    }
+
+    private String extensionOf(String filename, String contentType) {
+        if (filename != null) {
+            int dot = filename.lastIndexOf('.');
+            if (dot >= 0 && dot < filename.length() - 1) {
+                return filename.substring(dot).toLowerCase();
+            }
+        }
+        return switch (contentType) {
+            case "application/pdf" -> ".pdf";
+            case "image/png" -> ".png";
+            case "image/jpeg" -> ".jpg";
+            case "image/webp" -> ".webp";
+            case "application/msword" -> ".doc";
+            case "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> ".docx";
+            case "application/vnd.ms-powerpoint" -> ".ppt";
+            case "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> ".pptx";
+            default -> ".txt";
+        };
+    }
+
+    private String excerpt(String content) {
+        if (content == null || content.isBlank()) return "Tin nhắn mới";
+        String trimmed = content.trim();
+        return trimmed.length() <= 180 ? trimmed : trimmed.substring(0, 177) + "...";
     }
 
     private ParentTeacherConversationResponse toParentTeacherConversation(

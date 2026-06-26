@@ -9,11 +9,13 @@ import {
   Inbox,
   Loader2,
   MessageSquare,
+  Paperclip,
   RefreshCw,
   Search,
   Send,
   ShieldAlert,
   UserRound,
+  X,
 } from 'lucide-react';
 import DashboardHeader from '../../components/DashboardHeader';
 import PageBanner from '../../components/PageBanner';
@@ -22,7 +24,12 @@ import { notify } from '../../lib/toast';
 import {
   getChildTeacherConversations,
   sendParentTeacherMessage,
+  uploadParentMessageAttachment,
 } from '../../api/parentService';
+import {
+  listUserNotifications,
+  markUserNotificationRead,
+} from '../../api/notificationService';
 import type {
   ParentTeacherConversationResponse,
   ParentTeacherConversationStatus,
@@ -30,6 +37,8 @@ import type {
 } from '../../types/api';
 
 type FilterType = 'all' | 'pending' | 'answered';
+const MESSAGE_MAX_LENGTH = 2000;
+const ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 
 function avatarFor(name: string, url?: string | null, size = 96): string {
   return url || `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'Teacher')}&background=ad2c00&color=fff&bold=true&size=${size}`;
@@ -97,6 +106,12 @@ function roleLabel(role: ParentTeacherMessageResponse['authorRole']): string {
   return labels[role] ?? role;
 }
 
+function formatFileSize(bytes?: number | null): string {
+  if (!bytes) return '';
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function conversationTimestamp(conversation: ParentTeacherConversationResponse): number {
   return conversation.lastActivityAt ? new Date(conversation.lastActivityAt).getTime() : 0;
 }
@@ -127,6 +142,22 @@ function MessageBubble({ message }: { message: ParentTeacherMessageResponse }) {
           {message.authorName} · {roleLabel(message.authorRole)} · {formatDateTime(message.sentAt)}
         </div>
         <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+        {message.attachmentUrl && (
+          <a
+            href={message.attachmentUrl}
+            target="_blank"
+            rel="noreferrer"
+            className={`mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold ${
+              isParent
+                ? 'bg-on-primary/15 text-on-primary hover:bg-on-primary/20'
+                : 'bg-surface-container text-primary hover:bg-primary/10'
+            }`}
+          >
+            <Paperclip className="w-4 h-4" />
+            <span className="truncate">{message.attachmentName || 'File đính kèm'}</span>
+            <span className="opacity-75">{formatFileSize(message.attachmentSizeBytes)}</span>
+          </a>
+        )}
       </div>
     </div>
   );
@@ -139,6 +170,7 @@ export default function ParentMessages() {
   const [conversations, setConversations] = useState<ParentTeacherConversationResponse[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [childrenLoading, setChildrenLoading] = useState(true);
@@ -146,6 +178,7 @@ export default function ParentMessages() {
   const [sending, setSending] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,6 +190,34 @@ export default function ParentMessages() {
       cancelled = true;
     };
   }, [fetchLinkedStudents]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function markTeacherRepliesRead() {
+      try {
+        const summary = await listUserNotifications(true);
+        const replyNotifications = summary.notifications.filter(
+          notification => notification.type === 'parent_teacher_reply',
+        );
+        if (replyNotifications.length === 0) return;
+
+        await Promise.allSettled(
+          replyNotifications.map(notification => markUserNotificationRead(notification.id)),
+        );
+        if (!cancelled) {
+          window.dispatchEvent(new Event('bee:user-notifications-updated'));
+        }
+      } catch {
+        // Badge refresh is best-effort; message loading should stay quiet.
+      }
+    }
+
+    markTeacherRepliesRead();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (linkedStudents.length === 0) {
@@ -241,6 +302,10 @@ export default function ParentMessages() {
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = inputText.trim();
+    if (content.length > MESSAGE_MAX_LENGTH) {
+      notify.error(`Tin nhắn tối đa ${MESSAGE_MAX_LENGTH} ký tự`);
+      return;
+    }
     if (!content) {
       notify.error('Vui lòng nhập nội dung tin nhắn');
       return;
@@ -252,19 +317,45 @@ export default function ParentMessages() {
 
     try {
       setSending(true);
+      const uploaded = attachmentFile
+        ? await uploadParentMessageAttachment(attachmentFile)
+        : null;
       const updated = await sendParentTeacherMessage(
         selectedStudentId,
         activeConversation.courseId,
         content,
+        uploaded?.publicUrl
+          ? {
+              attachmentUrl: uploaded.publicUrl,
+              attachmentName: attachmentFile?.name ?? 'File đính kèm',
+              attachmentType: uploaded.fileType,
+              attachmentSizeBytes: uploaded.fileSizeBytes,
+            }
+          : null,
       );
       upsertConversation(updated);
       setInputText('');
+      setAttachmentFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       notify.success('Đã gửi tin nhắn tới giáo viên');
     } catch (error) {
       notify.error(error instanceof Error ? error.message : 'Không gửi được tin nhắn');
     } finally {
       setSending(false);
     }
+  }
+
+  function handleAttachmentChange(file: File | null) {
+    if (!file) {
+      setAttachmentFile(null);
+      return;
+    }
+    if (file.size > ATTACHMENT_MAX_BYTES) {
+      notify.error('File đính kèm tối đa 20MB');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    setAttachmentFile(file);
   }
 
   if (childrenLoading) {
@@ -493,13 +584,57 @@ export default function ParentMessages() {
 
                 <div className="p-4 bg-surface-container-lowest border-t border-outline-variant/20">
                   <form onSubmit={handleSendMessage} className="flex gap-2 items-end">
+                    <div className="flex-grow">
+                      {attachmentFile && (
+                        <div className="mb-2 flex items-center justify-between gap-2 rounded-xl bg-primary/10 text-primary px-3 py-2 text-xs font-bold">
+                          <span className="inline-flex items-center gap-2 min-w-0">
+                            <Paperclip className="w-4 h-4 flex-shrink-0" />
+                            <span className="truncate">{attachmentFile.name}</span>
+                            <span className="text-primary/70">{formatFileSize(attachmentFile.size)}</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttachmentFile(null);
+                              if (fileInputRef.current) fileInputRef.current.value = '';
+                            }}
+                            className="p-1 rounded-lg hover:bg-primary/10"
+                            title="Bỏ file"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     <textarea
                       value={inputText}
+                      maxLength={MESSAGE_MAX_LENGTH}
                       onChange={event => setInputText(event.target.value)}
                       placeholder="Nhập tin nhắn gửi giáo viên..."
                       rows={2}
-                      className="flex-grow px-4 py-3 rounded-xl bg-surface-container border border-outline-variant/40 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none text-sm text-on-surface transition-all placeholder:text-on-surface-variant/45 resize-none leading-relaxed"
+                      className="w-full px-4 py-3 rounded-xl bg-surface-container border border-outline-variant/40 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none text-sm text-on-surface transition-all placeholder:text-on-surface-variant/45 resize-none leading-relaxed"
                     />
+                      <div className="mt-1 text-right text-[11px] text-on-surface-variant">
+                        {inputText.length}/{MESSAGE_MAX_LENGTH}
+                      </div>
+                    </div>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.ppt,.pptx,.txt"
+                      onChange={event => handleAttachmentChange(event.target.files?.[0] ?? null)}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={sending}
+                      className="p-3 bg-surface-container text-on-surface rounded-xl font-bold hover:bg-surface-container-high disabled:opacity-60 transition-colors flex-shrink-0"
+                      title="Đính kèm file"
+                    >
+                      <Paperclip className="w-5 h-5" />
+                    </button>
 
                     <button
                       type="submit"

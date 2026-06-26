@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 /**
  * TeacherContentPage — UC28 — Bài giảng
  * Kết nối API thật: chapter CRUD + lesson CRUD + video/doc upload.
@@ -1107,9 +1108,7 @@ export default function TeacherContentPage() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Bài giảng</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <TeacherNotificationBell />
             <img
               src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
               alt="Teacher avatar"

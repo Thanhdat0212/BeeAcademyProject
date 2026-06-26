@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 /**
  * TeacherExamPage — Trang "Bài kiểm tra" cho Giáo viên (UC30)
  *
@@ -954,9 +955,7 @@ export default function TeacherExamPage() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Bài kiểm tra</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <TeacherNotificationBell />
             <img
               src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
               alt="Teacher avatar"

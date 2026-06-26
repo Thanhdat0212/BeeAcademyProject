@@ -74,6 +74,13 @@ public class QaThread {
 
     public static QaThread createWithAuthor(Profile student, Course course, Lesson lesson,
                                             Profile author, String content) {
+        return createWithAuthor(student, course, lesson, author, content, null, null, null, null);
+    }
+
+    public static QaThread createWithAuthor(Profile student, Course course, Lesson lesson,
+                                            Profile author, String content,
+                                            String attachmentUrl, String attachmentName,
+                                            String attachmentType, Long attachmentSizeBytes) {
         QaThread thread = new QaThread();
         thread.id = UUID.randomUUID();
         thread.student = student;
@@ -81,7 +88,8 @@ public class QaThread {
         thread.lesson = lesson;
         thread.status = QaThreadStatus.PENDING;
         thread.lastActivityAt = Instant.now();
-        thread.messages.add(QaMessage.create(thread, author, content));
+        thread.messages.add(QaMessage.create(thread, author, content,
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes));
         return thread;
     }
 
@@ -97,7 +105,14 @@ public class QaThread {
     }
 
     public void addParentMessage(Profile parent, String content) {
-        this.messages.add(QaMessage.create(this, parent, content));
+        addParentMessage(parent, content, null, null, null, null);
+    }
+
+    public void addParentMessage(Profile parent, String content,
+                                 String attachmentUrl, String attachmentName,
+                                 String attachmentType, Long attachmentSizeBytes) {
+        this.messages.add(QaMessage.create(this, parent, content,
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes));
         this.status = QaThreadStatus.PENDING;
         this.resolvedAt = null;
         this.lastActivityAt = Instant.now();

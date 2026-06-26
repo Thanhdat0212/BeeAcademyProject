@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -299,7 +300,7 @@ export default function TeacherGradesPage() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Chấm điểm bài tự luận</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <Bell className="w-5 h-5 text-on-surface-variant" />
+            <TeacherNotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold leading-none">{user?.name ?? 'Giáo viên'}</p>

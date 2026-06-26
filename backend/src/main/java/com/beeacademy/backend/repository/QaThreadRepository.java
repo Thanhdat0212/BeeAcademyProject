@@ -29,9 +29,12 @@ public interface QaThreadRepository extends JpaRepository<QaThread, UUID> {
     @EntityGraph(attributePaths = {
             "student", "course", "course.teacher", "course.category", "lesson", "messages", "messages.author"
     })
-    @Query("SELECT DISTINCT t FROM QaThread t JOIN t.messages m " +
+    @Query("SELECT DISTINCT t FROM QaThread t " +
            "WHERE t.student.id = :studentId " +
-           "AND m.author.id = :parentId " +
+           "AND EXISTS (" +
+           "    SELECT 1 FROM QaMessage m " +
+           "    WHERE m.thread = t AND m.author.id = :parentId" +
+           ") " +
            "ORDER BY t.lastActivityAt DESC")
     List<QaThread> findParentThreadsForStudent(@Param("parentId") UUID parentId,
                                                @Param("studentId") UUID studentId);
@@ -39,10 +42,13 @@ public interface QaThreadRepository extends JpaRepository<QaThread, UUID> {
     @EntityGraph(attributePaths = {
             "student", "course", "course.teacher", "course.category", "lesson", "messages", "messages.author"
     })
-    @Query("SELECT DISTINCT t FROM QaThread t JOIN t.messages m " +
+    @Query("SELECT DISTINCT t FROM QaThread t " +
            "WHERE t.student.id = :studentId " +
            "AND t.course.id = :courseId " +
-           "AND m.author.id = :parentId " +
+           "AND EXISTS (" +
+           "    SELECT 1 FROM QaMessage m " +
+           "    WHERE m.thread = t AND m.author.id = :parentId" +
+           ") " +
            "ORDER BY t.lastActivityAt DESC")
     List<QaThread> findParentThreadsForCourse(@Param("parentId") UUID parentId,
                                               @Param("studentId") UUID studentId,

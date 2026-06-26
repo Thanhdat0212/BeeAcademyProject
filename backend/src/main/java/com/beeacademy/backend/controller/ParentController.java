@@ -9,11 +9,13 @@ import com.beeacademy.backend.dto.response.LinkedStudentResponse;
 import com.beeacademy.backend.dto.response.ParentLinkInvitationResponse;
 import com.beeacademy.backend.dto.response.ParentPaymentHistoryResponse;
 import com.beeacademy.backend.dto.response.ParentTeacherConversationResponse;
+import com.beeacademy.backend.dto.response.UploadResponse;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.ParentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,7 +23,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -104,5 +108,9 @@ public class ParentController {
         return ApiResponse.ok(
                 parentService.sendParentTeacherMessage(me, studentId, request),
                 "Đã gửi tin nhắn tới giáo viên.");
+    }
+    @PostMapping(value = "/message-attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<UploadResponse> uploadMessageAttachment(@RequestPart("file") MultipartFile file) {
+        return ApiResponse.ok(parentService.uploadMessageAttachment(CurrentUser.required(), file));
     }
 }

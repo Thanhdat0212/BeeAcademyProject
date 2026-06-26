@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 /**
  * QuizChapterPage — /teacher/quiz
  * GV chọn khóa học → chọn chương → cấu hình quiz
@@ -319,7 +320,7 @@ export default function QuizChapterPage() {
           <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 text-on-surface-variant hover:bg-surface-container rounded-lg"><Menu className="w-5 h-5" /></button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Quiz chương</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="text-on-surface-variant hover:text-primary"><Bell className="w-5 h-5" /></button>
+            <TeacherNotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold text-on-surface leading-none">{user?.name ?? 'Giáo viên'}</p>

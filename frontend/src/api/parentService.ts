@@ -17,7 +17,8 @@ import type {
   ChildProgressReportResponse,
   ParentLinkInvitationResponse,
   ParentPaymentHistoryResponse,
-  ParentTeacherConversationResponse
+  ParentTeacherConversationResponse,
+  UploadResponse
 } from '../types/api';
 
 /**
@@ -128,10 +129,37 @@ export async function sendParentTeacherMessage(
   studentId: string,
   courseId: string,
   content: string,
+  attachment?: {
+    attachmentUrl: string;
+    attachmentName: string;
+    attachmentType: string;
+    attachmentSizeBytes: number;
+  } | null,
 ): Promise<ParentTeacherConversationResponse> {
   const res = await apiClient.post<ApiResponse<ParentTeacherConversationResponse>>(
     `/api/parent/children/${encodeURIComponent(studentId)}/teacher-conversations`,
-    { courseId, content },
+    {
+      courseId,
+      content,
+      attachmentUrl: attachment?.attachmentUrl ?? null,
+      attachmentName: attachment?.attachmentName ?? null,
+      attachmentType: attachment?.attachmentType ?? null,
+      attachmentSizeBytes: attachment?.attachmentSizeBytes ?? null,
+    },
+  );
+  return unwrap(res.data);
+}
+
+export async function uploadParentMessageAttachment(file: File): Promise<UploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiClient.post<ApiResponse<UploadResponse>>(
+    '/api/parent/message-attachments',
+    form,
+    {
+      timeout: 60000,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    },
   );
   return unwrap(res.data);
 }

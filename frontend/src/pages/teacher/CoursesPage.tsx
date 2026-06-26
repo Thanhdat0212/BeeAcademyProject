@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 /**
  * TeacherCoursesPage — Trang "Khóa học của tôi" cho Giáo viên (UC27)
  *
@@ -930,9 +931,7 @@ export default function TeacherCoursesPage() {
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Khóa học của tôi</h1>
 
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <TeacherNotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold text-on-surface leading-none">{user?.name ?? 'Giáo viên'}</p>

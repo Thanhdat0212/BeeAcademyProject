@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
@@ -891,7 +892,7 @@ export default function QuestionBankPage() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Ngân hàng câu hỏi</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="text-on-surface-variant hover:text-primary"><Bell className="w-5 h-5" /></button>
+            <TeacherNotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold text-on-surface leading-none">{user?.name ?? 'Giáo viên'}</p>
