@@ -6,11 +6,13 @@ import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.*;
 import com.beeacademy.backend.repository.*;
+import com.beeacademy.backend.security.AuthenticatedUser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,7 +53,14 @@ public class OrderService {
     private static final String PAYOS_API_URL = "https://api-merchant.payos.vn/v2/payment-requests";
 
     @Transactional
-    public OrderResponse createOrder(UUID userId, CreateOrderRequest req) {
+    public OrderResponse createOrder(AuthenticatedUser me, CreateOrderRequest req) {
+        if (!UserRole.STUDENT.toDbValue().equalsIgnoreCase(me.role())) {
+            throw new BusinessException("STUDENT_ONLY_PURCHASE",
+                    "Chỉ tài khoản học sinh mới được mua khóa học.",
+                    HttpStatus.FORBIDDEN);
+        }
+
+        UUID userId = me.userId();
         List<UUID> courseIds = req.courseIds();
 
         List<Course> courses = courseRepository.findAllById(courseIds);

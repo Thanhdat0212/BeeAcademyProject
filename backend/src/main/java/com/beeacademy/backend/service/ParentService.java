@@ -84,6 +84,8 @@ public class ParentService {
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             "text/plain"
     );
+    private static final Duration LINK_INVITATION_TTL = Duration.ofDays(7);
+    private static final int MAX_ACTIVE_OR_PENDING_CHILDREN = 5;
 
     private final ProfileRepository profileRepository;
     private final ParentStudentLinkRepository linkRepository;
@@ -148,20 +150,39 @@ public class ParentService {
 
         ParentStudentLink existingLink = linkRepository.findByIdParentIdAndIdStudentId(me.userId(), studentId)
                 .orElse(null);
-        if (existingLink != null && existingLink.getStatus() == ParentStudentLinkStatus.ACCEPTED) {
+        if (existingLink != null
+                && (existingLink.getStatus() == ParentStudentLinkStatus.ACCEPTED
+                || existingLink.getStatus() == ParentStudentLinkStatus.PENDING)) {
             throw new BusinessException(
-                    "ALREADY_LINKED",
-                    "Tài khoản học sinh này đã liên kết với bạn rồi.",
+                    "PARENT_LINK_ALREADY_EXISTS",
+                    "Da co loi moi hoac lien ket dang hoat dong voi hoc sinh nay.",
                     HttpStatus.CONFLICT);
         }
 
         Profile parent = requireParentProfile(me.userId());
+        long activeOrPendingChildren = linkRepository.findByIdParentIdAndStatusOrderByInvitedAtDesc(
+                        me.userId(),
+                        ParentStudentLinkStatus.ACCEPTED.toDbValue())
+                .size()
+                + linkRepository.findByIdParentIdAndStatusOrderByInvitedAtDesc(
+                        me.userId(),
+                        ParentStudentLinkStatus.PENDING.toDbValue())
+                .size();
+        if (activeOrPendingChildren >= MAX_ACTIVE_OR_PENDING_CHILDREN) {
+            throw new BusinessException(
+                    "PARENT_CHILD_LIMIT_EXCEEDED",
+                    "A parent can have at most 5 active or pending child links.",
+                    HttpStatus.CONFLICT);
+        }
+
+        String relationship = normalizeRelationship(request.relationship());
+        String note = normalizeNote(request.note());
         ParentStudentLink link = existingLink == null
-                ? ParentStudentLink.createPendingInvitation(parent, student)
+                ? ParentStudentLink.createPendingInvitation(parent, student, relationship, note)
                 : existingLink;
 
         if (existingLink != null) {
-            existingLink.markPending();
+            existingLink.markPending(relationship, note);
         }
 
         ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
@@ -169,8 +190,34 @@ public class ParentService {
                 normalizedEmail,
                 displayName(student),
                 displayName(parent));
+        notificationService.notify(
+                studentId,
+                "parent_link_invitation",
+                "Parent link invitation",
+                displayName(parent) + " invited you to link parent account on Bee Academy.",
+                "/student/notifications");
 
         return toParentLinkInvitationResponse(savedLink, normalizedEmail);
+    }
+
+    @Transactional
+    public void cancelLinkInvitation(AuthenticatedUser me, UUID studentId) {
+        log.info("Parent {} requested cancel pending link invitation for student {}", me.userId(), studentId);
+
+        ParentStudentLink link = linkRepository.findByIdParentIdAndIdStudentId(me.userId(), studentId)
+                .orElseThrow(() -> new BusinessException(
+                        "PARENT_LINK_INVITATION_NOT_FOUND",
+                        "Pending parent-student link invitation was not found.",
+                        HttpStatus.NOT_FOUND));
+        if (link.getStatus() != ParentStudentLinkStatus.PENDING) {
+            throw new BusinessException(
+                    "PARENT_LINK_INVITATION_NOT_PENDING",
+                    "Only pending invitations can be cancelled.",
+                    HttpStatus.CONFLICT);
+        }
+
+        link.reject();
+        linkRepository.saveAndFlush(link);
     }
 
     @Transactional
@@ -749,12 +796,47 @@ public class ParentService {
                 studentEmail,
                 student.getAvatarUrl(),
                 resolveGradeLabel(student.getId()),
+                link.getRelationship(),
+                link.getNote(),
                 link.getStatus().toApiValue(),
                 link.getInvitedAt(),
+                expiresAt(link),
+                isExpired(link),
                 link.getRespondedAt(),
                 link.getUnlinkRequestedBy(),
                 resolveUnlinkRequestedByRole(link),
                 link.getUnlinkRequestedAt());
+    }
+
+    private Instant expiresAt(ParentStudentLink link) {
+        return link.getInvitedAt() == null ? null : link.getInvitedAt().plus(LINK_INVITATION_TTL);
+    }
+
+    private boolean isExpired(ParentStudentLink link) {
+        Instant expiresAt = expiresAt(link);
+        return expiresAt != null && expiresAt.isBefore(Instant.now());
+    }
+
+    private String normalizeRelationship(String relationship) {
+        if (relationship == null || relationship.isBlank()) {
+            return "guardian";
+        }
+        String normalized = relationship.trim().toLowerCase();
+        if (!List.of("father", "mother", "guardian").contains(normalized)) {
+            throw new BusinessException(
+                    "INVALID_RELATIONSHIP",
+                    "Relationship must be father, mother, or guardian.",
+                    HttpStatus.BAD_REQUEST);
+        }
+        return normalized;
+    }
+
+    private String normalizeNote(String note) {
+        if (note == null || note.isBlank()) {
+            return null;
+        }
+        String normalized = note.trim();
+        return normalized.length() <= 500 ? normalized : normalized.substring(0, 500);
     }
 
     private String resolveUnlinkRequestedByRole(ParentStudentLink link) {

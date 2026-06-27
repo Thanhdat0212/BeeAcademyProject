@@ -16,6 +16,12 @@ import { notify } from '../../lib/toast';
 import * as studentParentLinkService from '../../api/studentParentLinkService';
 import type { StudentParentLinkInvitationResponse } from '../../types/api';
 
+const relationshipLabels = {
+  father: 'Cha',
+  mother: 'Me',
+  guardian: 'Nguoi giam ho',
+} as const;
+
 function fallbackAvatar(name: string): string {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=ffdbd1&color=7c2d12&bold=true&size=128`;
 }
@@ -30,11 +36,18 @@ function formatDateTime(value: string | null): string {
   }).format(date);
 }
 
+function invitationStatusText(invitation: StudentParentLinkInvitationResponse): string {
+  if (invitation.expired) return 'Yeu cau da het han';
+  return 'Dang cho xac nhan';
+}
+
 export default function NotificationsPage() {
   const [invitations, setInvitations] = useState<StudentParentLinkInvitationResponse[]>([]);
   const [linkedParents, setLinkedParents] = useState<StudentParentLinkInvitationResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionKey, setActionKey] = useState<string | null>(null);
+  const actionableInvitationCount = invitations.filter(invitation => !invitation.expired).length;
+  const expiredInvitationCount = invitations.length - actionableInvitationCount;
   const pendingUnlinkCount = linkedParents.filter(parent => parent.unlinkRequestedByRole === 'parent').length;
 
   const loadInvitations = async (showLoading = true) => {
@@ -131,10 +144,11 @@ export default function NotificationsPage() {
                 Liên kết phụ huynh
               </div>
               <h2 className="mt-3 text-2xl font-extrabold text-on-surface">
-                Yêu cầu phụ huynh cần xử lý ({invitations.length + pendingUnlinkCount})
+                Yêu cầu phụ huynh cần xử lý ({actionableInvitationCount + pendingUnlinkCount})
               </h2>
               <p className="mt-2 text-sm leading-6 text-on-surface-variant max-w-2xl">
                 Quản lý lời mời liên kết và xác nhận hủy liên kết với phụ huynh trên Bee Academy.
+                {expiredInvitationCount > 0 && ` ${expiredInvitationCount} loi moi da het han.`}
               </p>
             </div>
 
@@ -167,10 +181,12 @@ export default function NotificationsPage() {
             </div>
           ) : (
             <div className="pt-5 space-y-4">
-              {invitations.map(invitation => (
+              {invitations.map(invitation => {
+                const expired = invitation.expired;
+                return (
                 <div
                   key={invitation.parentId}
-                  className="p-4 rounded-2xl border border-outline-variant/20 bg-surface-container-low/40"
+                  className={`p-4 rounded-2xl border border-outline-variant/20 bg-surface-container-low/40 ${expired ? 'opacity-75' : ''}`}
                 >
                   <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                     <div className="flex items-center gap-3 min-w-0">
@@ -185,11 +201,18 @@ export default function NotificationsPage() {
                         </h3>
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-on-surface-variant">
                           <span>{invitation.parentEmail}</span>
+                          <span>{relationshipLabels[invitation.relationship]}</span>
+                          <span>Het han: {formatDateTime(invitation.expiresAt)}</span>
                           <span className="inline-flex items-center gap-1">
                             <Clock3 className="w-3.5 h-3.5" />
                             Gửi lúc: {formatDateTime(invitation.invitedAt)}
                           </span>
                         </div>
+                        {invitation.note && (
+                          <p className="mt-2 text-xs text-on-surface-variant line-clamp-2">
+                            {invitation.note}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -198,9 +221,14 @@ export default function NotificationsPage() {
                         <UserRound className="w-4 h-4" />
                         Đang chờ xác nhận
                       </span>
+                      {expired && (
+                        <span className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-500/10 text-slate-700 text-xs font-extrabold">
+                          {invitationStatusText(invitation)}
+                        </span>
+                      )}
                       <button
                         onClick={() => handleInvitationAction(invitation, 'reject')}
-                        disabled={actionKey !== null}
+                        disabled={actionKey !== null || expired}
                         className="h-10 px-4 rounded-xl border border-red-200/50 bg-red-50 text-red-600 text-xs font-extrabold hover:bg-red-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
                       >
                         {actionKey === `${invitation.parentId}:reject` ? (
@@ -212,7 +240,7 @@ export default function NotificationsPage() {
                       </button>
                       <button
                         onClick={() => handleInvitationAction(invitation, 'accept')}
-                        disabled={actionKey !== null}
+                        disabled={actionKey !== null || expired}
                         className="h-10 px-4 rounded-xl bg-primary text-on-primary text-xs font-extrabold hover:bg-primary/95 transition-colors shadow-md shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
                       >
                         {actionKey === `${invitation.parentId}:accept` ? (
@@ -225,7 +253,8 @@ export default function NotificationsPage() {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </motion.section>
