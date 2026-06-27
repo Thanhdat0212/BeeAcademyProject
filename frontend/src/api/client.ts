@@ -14,10 +14,18 @@
  *  src/api/<X>Service.ts để tách concerns.
  * ============================================================================
  */
-import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
+import axios, {
+  AxiosError,
+  AxiosInstance,
+  InternalAxiosRequestConfig,
+} from 'axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { notify } from '../lib/toast';
-import type { ApiErrorResponse, ApiResponse } from '../types/api';
+import type {
+  ApiErrorResponse,
+  ApiResponse,
+  AuthTokenPayload,
+} from '../types/api';
 
 // ----------------------------------------------------------------------------
 //  Tạo axios instance
@@ -67,25 +75,86 @@ apiClient.interceptors.request.use(
 //  Response interceptor - chuẩn hoá error + handle 401
 // ----------------------------------------------------------------------------
 
-/**
- * Track flag để chỉ logout + redirect 1 lần khi 401 dù có nhiều request đồng
- * thời cùng fail (ví dụ: 3 request song song cùng nhận 401, chỉ toast 1 lần).
- *
- * Reset khi:
- *   - User navigate (back/forward button → popstate)
- *   - Page được restore từ BFCache (browser back/forward cache → pageshow + persisted)
- * Không dùng setTimeout vì nếu user back trước khi timeout chạy xong,
- * các 401 hợp lệ tiếp theo sẽ bị nuốt im lặng.
- */
+interface RetryableRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean;
+}
+
+// Các request cùng nhận 401 sẽ dùng chung một lần refresh thay vì tự refresh/logout.
+let refreshPromise: Promise<AuthTokenPayload> | null = null;
 let isHandling401 = false;
-window.addEventListener('popstate', () => { isHandling401 = false; });
-window.addEventListener('pageshow', (e) => { if (e.persisted) isHandling401 = false; });
+
+const PUBLIC_AUTH_PATHS = [
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/reset-password',
+  '/api/auth/refresh',
+];
+
+function isPublicAuthRequest(url?: string): boolean {
+  if (!url) return false;
+  return PUBLIC_AUTH_PATHS.some(path => url === path || url.startsWith(`${path}/`));
+}
+
+function getRequestBearerToken(config?: InternalAxiosRequestConfig): string | null {
+  const authorization = config?.headers?.get('Authorization');
+  if (typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) {
+    return null;
+  }
+  return authorization.slice('Bearer '.length);
+}
+
+async function refreshAccessToken(refreshToken: string): Promise<AuthTokenPayload> {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post<ApiResponse<AuthTokenPayload>>(
+        `${BASE_URL}/api/auth/refresh`,
+        { refreshToken },
+        {
+          timeout: 15000,
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+        },
+      )
+      .then(response => response.data.data)
+      .then(payload => {
+        const currentSession = useAuthStore.getState();
+        // Không cho request refresh cũ khôi phục phiên sau khi user đã logout
+        // hoặc đăng nhập sang tài khoản khác trong lúc request đang chạy.
+        if (
+          !currentSession.isLoggedIn ||
+          currentSession.refreshToken !== refreshToken
+        ) {
+          throw new Error('AUTH_SESSION_CHANGED');
+        }
+        currentSession.refreshSession(payload);
+        return payload;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
+function expireSession(): void {
+  if (isHandling401) return;
+  isHandling401 = true;
+  useAuthStore.getState().logout();
+  notify.error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+
+  const currentPath = window.location.pathname;
+  if (currentPath !== '/login') {
+    window.location.assign(`/login?from=${encodeURIComponent(currentPath)}`);
+  }
+}
 
 apiClient.interceptors.response.use(
   // 2xx: pass through, component nhận response.data
   (response) => response,
   // Lỗi: chuẩn hoá thành Error có message tiếng Việt
-  (error: AxiosError<ApiErrorResponse>) => {
+  async (error: AxiosError<ApiErrorResponse>) => {
     // Trường hợp network (server down, CORS, timeout)
     if (!error.response) {
       const offline = !navigator.onLine;
@@ -101,18 +170,47 @@ apiClient.interceptors.response.use(
     const message = body?.message ?? 'Đã xảy ra lỗi không xác định';
     const code = body?.code ?? 'UNKNOWN';
 
-    // 401 toàn cục: token sai/hết hạn → đẩy về /login
-    if (status === 401 && !isHandling401) {
-      isHandling401 = true;
-      useAuthStore.getState().logout();
-      notify.error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
-      // Redirect dùng window.location vì interceptor không có access React Router
-      const currentPath = window.location.pathname;
-      if (currentPath !== '/login') {
-        window.location.href =
-          '/login?from=' + encodeURIComponent(currentPath);
+    if (status === 401 && error.config && !isPublicAuthRequest(error.config.url)) {
+      const originalRequest = error.config as RetryableRequestConfig;
+      const authState = useAuthStore.getState();
+
+      if (authState.isLoggedIn && authState.accessToken && !originalRequest._retry) {
+        originalRequest._retry = true;
+
+        try {
+          const requestToken = getRequestBearerToken(originalRequest);
+
+          // Request của trang cũ trả về sau khi phiên đã được refresh:
+          // thử lại ngay bằng token mới, không refresh/logout lần nữa.
+          if (requestToken && requestToken !== authState.accessToken) {
+            originalRequest.headers.set(
+              'Authorization',
+              `Bearer ${authState.accessToken}`,
+            );
+            return apiClient(originalRequest);
+          }
+
+          if (authState.refreshToken) {
+            const refreshed = await refreshAccessToken(authState.refreshToken);
+            originalRequest.headers.set(
+              'Authorization',
+              `Bearer ${refreshed.accessToken}`,
+            );
+            return apiClient(originalRequest);
+          }
+        } catch {
+          // Refresh token thật sự không còn hợp lệ.
+          const latestSession = useAuthStore.getState();
+          if (
+            latestSession.isLoggedIn &&
+            latestSession.refreshToken === authState.refreshToken
+          ) {
+            expireSession();
+          }
+        }
+      } else if (authState.isLoggedIn && !refreshPromise) {
+        expireSession();
       }
-      // Flag được reset bởi popstate/pageshow listener ở trên — không cần setTimeout
     }
 
     // Tạo Error custom có thêm code + fieldErrors để component xử lý

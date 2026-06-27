@@ -34,6 +34,10 @@ export interface LinkedStudent {
   avatar?: string;
   code: string;
   grade: string;
+  linkStatus?: 'pending' | 'accepted' | 'rejected';
+  unlinkRequestedById?: string | null;
+  unlinkRequestedByRole?: 'parent' | 'student' | null;
+  unlinkRequestedAt?: string | null;
   avgProgress?: number;
   coursesCount?: { active: number; completed: number };
   recentScores?: { quiz: number; exam: number };
@@ -66,6 +70,9 @@ interface AuthState {
    * `user` chấp nhận shape UserSummary từ API, store tự map sang User UI.
    */
   loginWithTokens: (payload: AuthTokenPayload) => void;
+
+  /** Cập nhật token sau khi refresh, giữ nguyên dữ liệu phiên đang dùng. */
+  refreshSession: (payload: AuthTokenPayload) => void;
  
   /** Cập nhật user info (sau khi PUT /api/me). */
   updateUser: (partial: Partial<User>) => void;
@@ -121,6 +128,14 @@ export const useAuthStore = create<AuthState>()(
           linkedStudents: [], // reset danh sách con khi login account mới
         }),
 
+      refreshSession: (payload) =>
+        set((state) => ({
+          isLoggedIn: true,
+          user: toUiUser(payload.user) ?? state.user,
+          accessToken: payload.accessToken,
+          refreshToken: payload.refreshToken,
+        })),
+
       updateUser: (partial) =>
         set((state) => ({
           user: state.user ? { ...state.user, ...partial } : null,
@@ -144,6 +159,10 @@ export const useAuthStore = create<AuthState>()(
             avatar: item.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=feb700&color=1a1b1e&bold=true&size=128`,
             code: item.code,
             grade: item.grade,
+            linkStatus: item.linkStatus,
+            unlinkRequestedById: item.unlinkRequestedById,
+            unlinkRequestedByRole: item.unlinkRequestedByRole,
+            unlinkRequestedAt: item.unlinkRequestedAt,
             avgProgress: 0,
             coursesCount: { active: 0, completed: 0 },
             recentScores: { quiz: 0, exam: 0 },
@@ -159,10 +178,19 @@ export const useAuthStore = create<AuthState>()(
 
       unlinkStudent: async (studentId) => {
         try {
-          await parentService.unlinkStudent(studentId);
-          // Xóa local
+          const updated = await parentService.unlinkStudent(studentId);
           set((state) => ({
-            linkedStudents: state.linkedStudents.filter((s) => s.id !== studentId),
+            linkedStudents: updated.linkStatus === 'rejected'
+              ? state.linkedStudents.filter((s) => s.id !== studentId)
+              : state.linkedStudents.map((student) => student.id === studentId
+                ? {
+                    ...student,
+                    linkStatus: updated.linkStatus,
+                    unlinkRequestedById: updated.unlinkRequestedById,
+                    unlinkRequestedByRole: updated.unlinkRequestedByRole,
+                    unlinkRequestedAt: updated.unlinkRequestedAt,
+                  }
+                : student),
           }));
           return true;
         } catch (error: any) {

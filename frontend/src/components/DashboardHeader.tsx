@@ -4,12 +4,15 @@ import {
 } from 'lucide-react';
 import DashboardSidebar from './DashboardSidebar';
 import { motion, AnimatePresence } from 'motion/react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useCartStore } from '../store/useCartStore';
 import { useAuthStore } from '../store/useAuthStore';
 import type { Course } from '../data/mockCourses';
 import { inferGradeFromSearchQuery, searchCourses } from '../api/courseService';
 import { adaptCourseSummary } from '../api/adapter';
+import { getStudentLinkedParents, getStudentParentLinkInvitations } from '../api/studentParentLinkService';
+import { listUserNotifications, markUserNotificationRead } from '../api/notificationService';
+import type { StudentParentLinkInvitationResponse, UserNotification } from '../types/api';
 // ─── Highlight từ khớp trong text ────────────────────────────────────────────
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -130,8 +133,42 @@ function SearchDropdown({ query, results, loading, highlightedIdx, onSelect, onV
 
 // ─── Header chính ─────────────────────────────────────────────────────────────
 
+function formatNotificationTime(value?: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+  });
+}
+
+function notificationTypeLabel(type: string) {
+  switch (type) {
+    case 'parent_teacher_reply':
+      return 'Tin nhắn giáo viên';
+    case 'parent_teacher_message':
+      return 'Tin nhắn phụ huynh';
+    case 'course_purchased':
+      return 'Mua khóa học';
+    case 'course_approved':
+      return 'Duyệt khóa học';
+    case 'course_rejected':
+      return 'Từ chối khóa học';
+    case 'course_revision_requested':
+      return 'Yêu cầu chỉnh sửa';
+    case 'system':
+      return 'Hệ thống';
+    default:
+      return 'Thông báo';
+  }
+}
+
 export default function DashboardHeader() {
   const navigate = useNavigate();
+  const location = useLocation();
   const cartItems = useCartStore(state => state.items);
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
@@ -142,8 +179,15 @@ export default function DashboardHeader() {
   const [highlightedIdx, setHighlightedIdx] = useState(-1);
   const [results, setResults] = useState<Course[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [pendingNotificationCount, setPendingNotificationCount] = useState(0);
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [notificationLoading, setNotificationLoading] = useState(false);
+  const [userNotifications, setUserNotifications] = useState<UserNotification[]>([]);
+  const [studentInvitationNotifications, setStudentInvitationNotifications] = useState<StudentParentLinkInvitationResponse[]>([]);
+  const [studentUnlinkNotifications, setStudentUnlinkNotifications] = useState<StudentParentLinkInvitationResponse[]>([]);
   const searchRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
 
   // ── State: Avatar dropdown menu ──────────────────────────────────────────
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -172,6 +216,92 @@ export default function DashboardHeader() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (notificationRef.current && !notificationRef.current.contains(e.target as Node)) {
+        setIsNotificationOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  async function loadHeaderNotifications(markGenericRead = false) {
+    if (!user?.role) {
+      setPendingNotificationCount(0);
+      setUserNotifications([]);
+      setStudentInvitationNotifications([]);
+      setStudentUnlinkNotifications([]);
+      return;
+    }
+
+    setNotificationLoading(true);
+    try {
+      const genericSummary = await listUserNotifications(false).catch(error => {
+        console.error('Khong the tai thong bao nguoi dung:', error);
+        return { unreadCount: 0, notifications: [] as UserNotification[] };
+      });
+
+      let nextNotifications = genericSummary.notifications;
+      let genericUnreadCount = genericSummary.unreadCount;
+      let studentActionCount = 0;
+
+      if (user.role === 'student') {
+        try {
+          const [invitations, linkedParents] = await Promise.all([
+            getStudentParentLinkInvitations(),
+            getStudentLinkedParents(),
+          ]);
+          const unlinkRequests = linkedParents.filter(parent => parent.unlinkRequestedByRole === 'parent');
+          setStudentInvitationNotifications(invitations);
+          setStudentUnlinkNotifications(unlinkRequests);
+          studentActionCount = invitations.length + unlinkRequests.length;
+        } catch (error) {
+          console.error('Khong the tai thong bao lien ket phu huynh:', error);
+          setStudentInvitationNotifications([]);
+          setStudentUnlinkNotifications([]);
+        }
+      } else {
+        setStudentInvitationNotifications([]);
+        setStudentUnlinkNotifications([]);
+      }
+
+      if (markGenericRead) {
+        const unreadNotifications = nextNotifications.filter(notification => !notification.read);
+        if (unreadNotifications.length > 0) {
+          await Promise.allSettled(
+            unreadNotifications.map(notification => markUserNotificationRead(notification.id))
+          );
+          nextNotifications = nextNotifications.map(notification => ({ ...notification, read: true }));
+          genericUnreadCount = 0;
+          window.dispatchEvent(new Event('bee:user-notifications-updated'));
+        }
+      }
+
+      setUserNotifications(nextNotifications);
+      setPendingNotificationCount(genericUnreadCount + studentActionCount);
+    } finally {
+      setNotificationLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadHeaderNotifications();
+
+    const reloadNotifications = () => loadHeaderNotifications();
+    window.addEventListener('bee:user-notifications-updated', reloadNotifications);
+    window.addEventListener('bee:student-parent-link-invitations-updated', reloadNotifications);
+    window.addEventListener('focus', reloadNotifications);
+    const intervalId = window.setInterval(reloadNotifications, 15000);
+
+    return () => {
+      window.removeEventListener('bee:user-notifications-updated', reloadNotifications);
+      window.removeEventListener('bee:student-parent-link-invitations-updated', reloadNotifications);
+      window.removeEventListener('focus', reloadNotifications);
+      window.clearInterval(intervalId);
+    };
+  }, [user?.role, location.pathname]);
 
   useEffect(() => {
     setHighlightedIdx(-1);
@@ -275,7 +405,43 @@ export default function DashboardHeader() {
     navigate('/');
   }
 
+  async function handleNotificationToggle() {
+    const shouldOpen = !isNotificationOpen;
+    setIsNotificationOpen(shouldOpen);
+    if (shouldOpen) {
+      await loadHeaderNotifications(true);
+    }
+  }
+
+  async function handleNotificationSelect(notification: UserNotification) {
+    if (!notification.read) {
+      try {
+        await markUserNotificationRead(notification.id);
+      } catch (error) {
+        console.error('Khong the danh dau thong bao da doc:', error);
+      }
+      setUserNotifications(items =>
+        items.map(item => item.id === notification.id ? { ...item, read: true } : item)
+      );
+      setPendingNotificationCount(count => Math.max(0, count - 1));
+      window.dispatchEvent(new Event('bee:user-notifications-updated'));
+    }
+
+    if (notification.targetUrl) {
+      setIsNotificationOpen(false);
+      navigate(notification.targetUrl);
+    }
+  }
+
+  function handleStudentNotificationSelect() {
+    setIsNotificationOpen(false);
+    navigate('/notifications');
+  }
+
   const isDropdownOpen = showDropdown && searchQuery.trim().length >= 1;
+  const totalNotificationItems =
+    userNotifications.length + studentInvitationNotifications.length + studentUnlinkNotifications.length;
+  const canUseCart = user?.role === 'student';
 
   // Avatar URL: dùng user.avatar nếu có, fallback sang ui-avatars với tên user
   const avatarSrc = user?.avatar ??
@@ -342,28 +508,169 @@ export default function DashboardHeader() {
         <div className="flex items-center gap-4 sm:gap-5 flex-shrink-0">
 
           {/* Notification Bell */}
-          <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-            <Bell className="w-6 h-6" />
-            <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-surface" />
-          </button>
+          <div ref={notificationRef} className="relative">
+            <button
+              type="button"
+              onClick={handleNotificationToggle}
+              className="relative text-on-surface-variant hover:text-primary transition-colors"
+              title="Thông báo"
+              aria-label="Thông báo"
+              aria-expanded={isNotificationOpen}
+            >
+              <Bell className="w-6 h-6" />
+              <AnimatePresence>
+                {pendingNotificationCount > 0 && (
+                  <motion.span
+                    key={pendingNotificationCount}
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0 }}
+                    className="absolute -top-2 -right-2 min-w-5 h-5 px-1 bg-red-500 text-white text-[10px] font-extrabold rounded-full flex items-center justify-center border-2 border-surface"
+                  >
+                    {pendingNotificationCount > 9 ? '9+' : pendingNotificationCount}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </button>
 
-          {/* Shopping Cart với badge số lượng */}
-          <Link to="/checkout" className="relative text-on-surface-variant hover:text-primary transition-colors">
-            <ShoppingCart className="w-6 h-6" />
             <AnimatePresence>
-              {cartItems.length > 0 && (
-                <motion.span
-                  key={cartItems.length}
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  exit={{ scale: 0 }}
-                  className="absolute -top-1 -right-1 w-4.5 h-4.5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-surface"
+              {isNotificationOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 top-full mt-3 w-[min(92vw,390px)] max-h-[70vh] overflow-hidden bg-surface border border-outline-variant/40 rounded-2xl shadow-2xl shadow-black/15 z-50"
                 >
-                  {cartItems.length}
-                </motion.span>
+                  <div className="px-4 py-3 border-b border-outline-variant/30 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-extrabold text-on-surface">Thông báo</p>
+                      <p className="text-xs text-on-surface-variant">
+                        {pendingNotificationCount > 0 ? `${pendingNotificationCount} thông báo mới` : 'Đã đọc tất cả'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => loadHeaderNotifications(true)}
+                      className="text-xs font-bold text-primary hover:bg-primary/8 px-3 py-1.5 rounded-full transition-colors"
+                    >
+                      Làm mới
+                    </button>
+                  </div>
+
+                  <div className="max-h-[56vh] overflow-y-auto py-2">
+                  {notificationLoading && totalNotificationItems === 0 ? (
+                    <div className="px-4 py-8 text-center text-sm text-on-surface-variant">
+                      <Loader2 className="w-6 h-6 mx-auto mb-2 animate-spin text-primary" />
+                      Đang tải thông báo...
+                    </div>
+                  ) : totalNotificationItems === 0 ? (
+                    <div className="px-4 py-8 text-center text-sm text-on-surface-variant">
+                      Chưa có thông báo
+                    </div>
+                  ) : (
+                    <>
+                      {studentInvitationNotifications.map(invitation => (
+                        <button
+                          key={`student-invitation-${invitation.parentId}`}
+                          type="button"
+                          onClick={handleStudentNotificationSelect}
+                          className="w-full px-4 py-3 text-left hover:bg-surface-container transition-colors flex gap-3"
+                        >
+                          <span className="mt-1 w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-bold text-primary mb-1">Liên kết phụ huynh</span>
+                            <span className="block text-sm font-bold text-on-surface line-clamp-1">
+                              {invitation.parentName}
+                            </span>
+                            <span className="block text-sm text-on-surface-variant line-clamp-2">
+                              Muốn liên kết tài khoản phụ huynh với bạn
+                            </span>
+                            <span className="block text-xs text-on-surface-variant/70 mt-1">
+                              {formatNotificationTime(invitation.invitedAt)}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+
+                      {studentUnlinkNotifications.map(invitation => (
+                        <button
+                          key={`student-unlink-${invitation.parentId}`}
+                          type="button"
+                          onClick={handleStudentNotificationSelect}
+                          className="w-full px-4 py-3 text-left hover:bg-surface-container transition-colors flex gap-3"
+                        >
+                          <span className="mt-1 w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-bold text-primary mb-1">Hủy liên kết</span>
+                            <span className="block text-sm font-bold text-on-surface line-clamp-1">
+                              {invitation.parentName}
+                            </span>
+                            <span className="block text-sm text-on-surface-variant line-clamp-2">
+                              Đã gửi yêu cầu hủy liên kết phụ huynh
+                            </span>
+                            <span className="block text-xs text-on-surface-variant/70 mt-1">
+                              {formatNotificationTime(invitation.unlinkRequestedAt)}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+
+                      {userNotifications.map(notification => (
+                        <button
+                          key={notification.id}
+                          type="button"
+                          onClick={() => handleNotificationSelect(notification)}
+                          className="w-full px-4 py-3 text-left hover:bg-surface-container transition-colors flex gap-3"
+                        >
+                          <span
+                            className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
+                              notification.read ? 'bg-outline-variant' : 'bg-red-500'
+                            }`}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-bold text-primary mb-1">
+                              {notificationTypeLabel(notification.type)}
+                            </span>
+                            <span className="block text-sm font-bold text-on-surface line-clamp-1">
+                              {notification.title}
+                            </span>
+                            <span className="block text-sm text-on-surface-variant line-clamp-2">
+                              {notification.body}
+                            </span>
+                            <span className="block text-xs text-on-surface-variant/70 mt-1">
+                              {formatNotificationTime(notification.createdAt)}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  </div>
+                </motion.div>
               )}
             </AnimatePresence>
-          </Link>
+          </div>
+
+          {/* Shopping Cart với badge số lượng */}
+          {canUseCart && (
+            <Link to="/checkout" className="relative text-on-surface-variant hover:text-primary transition-colors">
+              <ShoppingCart className="w-6 h-6" />
+              <AnimatePresence>
+                {cartItems.length > 0 && (
+                  <motion.span
+                    key={cartItems.length}
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0 }}
+                    className="absolute -top-1 -right-1 w-4.5 h-4.5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-surface"
+                  >
+                    {cartItems.length}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </Link>
+          )}
 
           {/* Nút Đăng xuất trực tiếp trên Header cho Phụ huynh */}
           {user?.role === 'parent' && (
