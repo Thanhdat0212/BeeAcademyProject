@@ -16,6 +16,7 @@ import {
   BookOpen, AlertCircle,
 } from 'lucide-react';
 import { notify } from '../../lib/toast';
+import LatexText from '../../components/LatexText';
 import * as quizSvc from '../../api/quizService';
 import { getCourseDetail } from '../../api/courseService';
 import { useCourseStore } from '../../store/useCourseStore';
@@ -129,7 +130,7 @@ function ResultDetailItem({ detail, index }: { detail: QuizResultDetail; index: 
         }
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-on-surface">
-            Câu {index + 1}: {detail.content}
+            Câu {index + 1}: <LatexText content={detail.content} />
           </p>
           {!open && !detail.isCorrect && (
             <p className="text-xs text-red-500 mt-1">Bạn chọn sai — nhấn để xem đáp án</p>
@@ -151,19 +152,19 @@ function ResultDetailItem({ detail, index }: { detail: QuizResultDetail; index: 
               <div className="flex items-center gap-2 text-sm">
                 <span className="font-semibold text-on-surface-variant w-28 flex-shrink-0">Bạn chọn:</span>
                 <span className={`font-bold ${detail.isCorrect ? 'text-green-600' : 'text-red-500'}`}>
-                  {detail.studentAnswer ?? '(Không trả lời)'}
+                  <LatexText content={detail.studentAnswer ?? '(Không trả lời)'} />
                 </span>
               </div>
               {!detail.isCorrect && (
                 <div className="flex items-center gap-2 text-sm">
                   <span className="font-semibold text-on-surface-variant w-28 flex-shrink-0">Đáp án đúng:</span>
-                  <span className="font-bold text-green-600">{detail.correctAnswer}</span>
+                  <span className="font-bold text-green-600"><LatexText content={detail.correctAnswer} /></span>
                 </div>
               )}
               {detail.explanation && (
                 <div className="mt-2 p-3 bg-surface-container rounded-xl">
                   <p className="text-xs font-bold text-on-surface-variant mb-1">Giải thích:</p>
-                  <p className="text-sm text-on-surface">{detail.explanation}</p>
+                  <p className="text-sm text-on-surface"><LatexText content={detail.explanation} /></p>
                 </div>
               )}
             </div>
@@ -562,7 +563,7 @@ export default function StudentQuizPage() {
                   Câu {currentIdx + 1} / {questions.length}
                 </p>
                 <h2 className="text-xl font-bold text-on-surface leading-relaxed">
-                  {currentQ.content}
+                  <LatexText content={currentQ.content} />
                 </h2>
               </div>
 
@@ -597,7 +598,7 @@ export default function StudentQuizPage() {
                       <span className={`font-medium text-sm leading-snug flex-1 ${
                         isSelected ? 'text-on-surface' : 'text-on-surface-variant'
                       }`}>
-                        {choice.content}
+                        <LatexText content={choice.content} />
                       </span>
                       {isSelected && (
                         <CheckCircle2 className="w-5 h-5 text-primary ml-auto flex-shrink-0" />

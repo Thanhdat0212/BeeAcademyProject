@@ -6,6 +6,7 @@ import {
   Clock, FileText, Loader2, RotateCcw, Trophy, XCircle,
 } from 'lucide-react';
 import { notify } from '../../lib/toast';
+import LatexText from '../../components/LatexText';
 import {
   startStudentExam,
   submitStudentExam,
@@ -202,7 +203,7 @@ export default function StudentExamPage() {
                       : <XCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500" />
                     }
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-on-surface">Câu {index + 1}: {detail.text}</p>
+                      <p className="font-semibold text-on-surface">Câu {index + 1}: <LatexText content={detail.text} /></p>
                       {detail.correctAnswers.length > 0 && (
                         <p className="mt-2 text-xs font-semibold text-on-surface-variant">
                           Đáp án đúng: {detail.correctAnswers.map(i => i + 1).join(', ')}
@@ -210,7 +211,7 @@ export default function StudentExamPage() {
                       )}
                       {detail.explanation && (
                         <p className="mt-2 rounded-xl bg-surface-container p-3 text-sm text-on-surface-variant">
-                          {detail.explanation}
+                          <LatexText content={detail.explanation} />
                         </p>
                       )}
                     </div>
@@ -281,7 +282,7 @@ export default function StudentExamPage() {
               </div>
 
               <p className="mb-6 rounded-2xl bg-surface-container p-4 text-base font-semibold leading-relaxed text-on-surface">
-                {currentQuestion.text}
+                <LatexText content={currentQuestion.text} />
               </p>
 
               <div className="space-y-3">
@@ -304,7 +305,7 @@ export default function StudentExamPage() {
                       }`}>
                         {index + 1}
                       </span>
-                      <span className="font-semibold">{option}</span>
+                      <span className="font-semibold"><LatexText content={option} /></span>
                     </button>
                   );
                 })}
