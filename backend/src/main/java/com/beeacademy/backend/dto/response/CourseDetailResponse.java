@@ -31,7 +31,10 @@ public record CourseDetailResponse(
         String slug,
         String title,
         String description,
+        String objective,
+        String audience,
         String thumbnailUrl,
+        String introVideoUrl,
         String categoryName,
         String categorySlug,
         String teacherName,
@@ -41,16 +44,18 @@ public record CourseDetailResponse(
         Integer effectivePriceVnd,
         boolean isOnSale,
         boolean hasFreePreview,
+        double averageRating,
+        long reviewCount,
+        int studentCount,
         Integer totalChapters,
         Integer totalLessons,
         Integer totalDurationSec,
+        Integer versionNo,
+        Integer submittedVersionNo,
         Instant publishedAt,
         List<ChapterResponse> chapters,
         /** true nếu user đã mua/enroll hoặc là GV sở hữu hoặc là Admin */
-        boolean enrolled,
-        Integer studentCount,
-        Double ratingAvg,
-        Integer reviewCount
+        boolean enrolled
 ) {
 
     /**
@@ -82,19 +87,6 @@ public record CourseDetailResponse(
                                                    Function<Lesson, String> resolver,
                                                    Map<UUID, List<CourseDocument>> docMap,
                                                    Set<UUID> chaptersWithQuiz) {
-        return fromEntity(course, canSeeAllVideos, resolver, docMap, chaptersWithQuiz, 0, null, 0);
-    }
-
-    /**
-     * Overload đầy đủ nhất: kèm số học viên thật ({@code studentCount}) và
-     * thống kê đánh giá ({@code ratingAvg}, {@code reviewCount}). {@code ratingAvg}
-     * null khi khóa chưa có đánh giá nào.
-     */
-    public static CourseDetailResponse fromEntity(Course course, boolean canSeeAllVideos,
-                                                   Function<Lesson, String> resolver,
-                                                   Map<UUID, List<CourseDocument>> docMap,
-                                                   Set<UUID> chaptersWithQuiz,
-                                                   int studentCount, Double ratingAvg, int reviewCount) {
         List<Integer> grades = Arrays.stream(course.getGrades()).boxed().collect(Collectors.toList());
 
         List<ChapterResponse> chapters = course.getChapters().stream()
@@ -111,7 +103,10 @@ public record CourseDetailResponse(
                 course.getSlug(),
                 course.getTitle(),
                 course.getDescription(),
+                course.getObjective(),
+                course.getAudience(),
                 course.getThumbnailUrl(),
+                course.getIntroVideoUrl(),
                 categoryName,
                 categorySlug,
                 teacherName,
@@ -121,15 +116,84 @@ public record CourseDetailResponse(
                 course.getEffectivePriceVnd(),
                 course.isOnSale(),
                 chapters.stream().anyMatch(ch -> ch.lessons().stream().anyMatch(lesson -> Boolean.TRUE.equals(lesson.isFree()))),
+                0.0,
+                0,
+                0,
                 course.getTotalChapters(),
                 course.getTotalLessons(),
                 course.getTotalDurationSec(),
+                course.getVersionNo(),
+                course.getSubmittedVersionNo(),
                 course.getPublishedAt(),
                 chapters,
-                canSeeAllVideos,   // enrolled = có quyền xem toàn bộ video
+                canSeeAllVideos   // enrolled = có quyền xem toàn bộ video
+        );
+    }
+
+    public CourseDetailResponse withRating(double averageRating, long reviewCount) {
+        return new CourseDetailResponse(
+                id,
+                slug,
+                title,
+                description,
+                objective,
+                audience,
+                thumbnailUrl,
+                introVideoUrl,
+                categoryName,
+                categorySlug,
+                teacherName,
+                grades,
+                priceVnd,
+                salePriceVnd,
+                effectivePriceVnd,
+                isOnSale,
+                hasFreePreview,
+                averageRating,
+                reviewCount,
                 studentCount,
-                ratingAvg,
-                reviewCount
+                totalChapters,
+                totalLessons,
+                totalDurationSec,
+                versionNo,
+                submittedVersionNo,
+                publishedAt,
+                chapters,
+                enrolled
+        );
+    }
+
+    // studentCount: feature riêng của local (team3 đã bỏ field này) — đếm số học viên đã ghi danh.
+    public CourseDetailResponse withStudentCount(int studentCount) {
+        return new CourseDetailResponse(
+                id,
+                slug,
+                title,
+                description,
+                objective,
+                audience,
+                thumbnailUrl,
+                introVideoUrl,
+                categoryName,
+                categorySlug,
+                teacherName,
+                grades,
+                priceVnd,
+                salePriceVnd,
+                effectivePriceVnd,
+                isOnSale,
+                hasFreePreview,
+                averageRating,
+                reviewCount,
+                studentCount,
+                totalChapters,
+                totalLessons,
+                totalDurationSec,
+                versionNo,
+                submittedVersionNo,
+                publishedAt,
+                chapters,
+                enrolled
         );
     }
 }

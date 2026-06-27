@@ -9,5 +9,6 @@ public record UpdateLessonRequest(
         @Size(max = 500)  String description,
         @Min(1) Integer position,
         Boolean isFree,
-        String videoEmbedUrl
+        String videoEmbedUrl,
+        String videoSource
 ) {}

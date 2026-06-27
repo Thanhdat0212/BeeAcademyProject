@@ -3,6 +3,8 @@ package com.beeacademy.backend.controller;
 import com.beeacademy.backend.dto.request.CreateChapterRequest;
 import com.beeacademy.backend.dto.request.CreateCourseRequest;
 import com.beeacademy.backend.dto.request.CreateLessonRequest;
+import com.beeacademy.backend.dto.request.ReorderChaptersRequest;
+import com.beeacademy.backend.dto.request.ReorderLessonsRequest;
 import com.beeacademy.backend.dto.request.UpdateChapterRequest;
 import com.beeacademy.backend.dto.request.UpdateCourseRequest;
 import com.beeacademy.backend.dto.request.UpdateLessonRequest;
@@ -118,6 +120,15 @@ public class TeacherCourseController {
 
     // ── Lesson ────────────────────────────────────────────────────────────────
 
+    @PutMapping("/courses/{courseId}/chapters/reorder")
+    public ApiResponse<TeacherCourseDetailResponse> reorderChapters(
+            @PathVariable UUID courseId,
+            @Valid @RequestBody ReorderChaptersRequest req) {
+        return ApiResponse.ok(
+                courseService.reorderChapters(courseId, CurrentUser.required(), req),
+                "Đã cập nhật thứ tự chương");
+    }
+
     @PostMapping("/courses/{courseId}/chapters/{chapterId}/lessons")
     public ApiResponse<TeacherLessonResponse> addLesson(
             @PathVariable UUID courseId,
@@ -146,5 +157,14 @@ public class TeacherCourseController {
             @PathVariable UUID lessonId) {
         courseService.deleteLesson(courseId, chapterId, lessonId, CurrentUser.required());
         return ApiResponse.ok(null, "Xóa bài giảng thành công");
+    }
+    @PutMapping("/courses/{courseId}/chapters/{chapterId}/lessons/reorder")
+    public ApiResponse<TeacherCourseDetailResponse> reorderLessons(
+            @PathVariable UUID courseId,
+            @PathVariable UUID chapterId,
+            @Valid @RequestBody ReorderLessonsRequest req) {
+        return ApiResponse.ok(
+                courseService.reorderLessons(courseId, chapterId, CurrentUser.required(), req),
+                "Đã cập nhật thứ tự bài giảng");
     }
 }

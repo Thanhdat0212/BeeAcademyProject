@@ -23,8 +23,8 @@ import java.util.UUID;
  *
  * <p>Cần cấu hình application.yml:
  * <pre>
- *   spring.servlet.multipart.max-file-size: 500MB
- *   spring.servlet.multipart.max-request-size: 500MB
+ *   spring.servlet.multipart.max-file-size: 2GB
+ *   spring.servlet.multipart.max-request-size: 2GB
  * </pre>
  */
 @RestController
@@ -44,10 +44,11 @@ public class UploadController {
             @PathVariable UUID courseId,
             @PathVariable UUID chapterId,
             @PathVariable UUID lessonId,
-            @RequestParam("file") MultipartFile file) {
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "durationSec", required = false) Integer durationSec) {
         UploadResponse result = uploadService.uploadVideo(
                 courseId, chapterId, lessonId,
-                CurrentUser.required().userId(), file);
+                CurrentUser.required().userId(), file, durationSec);
         return ApiResponse.ok(result, "Upload video thành công");
     }
 
@@ -76,5 +77,17 @@ public class UploadController {
         UploadResponse result = uploadService.uploadCourseThumbnail(
                 CurrentUser.required().userId(), file);
         return ApiResponse.ok(result, "Upload anh bia thanh cong");
+    }
+
+    /**
+     * Upload video gioi thieu khoa hoc.
+     * Path: /api/upload/course-intro-video
+     */
+    @PostMapping("/course-intro-video")
+    public ApiResponse<UploadResponse> uploadCourseIntroVideo(
+            @RequestParam("file") MultipartFile file) {
+        UploadResponse result = uploadService.uploadCourseIntroVideo(
+                CurrentUser.required().userId(), file);
+        return ApiResponse.ok(result, "Upload video gioi thieu thanh cong");
     }
 }

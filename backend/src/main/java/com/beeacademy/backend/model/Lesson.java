@@ -120,12 +120,27 @@ public class Lesson {
 
     /** Cập nhật thông tin bài học (không thay đổi video). */
     public void update(String title, String description, Integer position,
-                       boolean isFree, String videoEmbedUrl) {
+                       boolean isFree) {
         if (title != null && !title.isBlank()) this.title = title.trim();
         if (description != null) this.description = description;
         if (position != null && position > 0) this.position = position;
-        this.isFree       = isFree;
-        this.videoEmbedUrl = videoEmbedUrl;
+        this.isFree = isFree;
+    }
+
+    /** Chuyển bài học sang dùng video nhúng công khai. */
+    public void setVideoEmbedUrl(String videoEmbedUrl) {
+        this.videoEmbedUrl = videoEmbedUrl != null ? videoEmbedUrl.trim() : null;
+        this.videoStoragePath = null;
+        this.videoUrl = null;
+        this.durationSec = 0;
+    }
+
+    /** Xóa toàn bộ thông tin video khỏi bài học. */
+    public void clearVideo() {
+        this.videoEmbedUrl = null;
+        this.videoStoragePath = null;
+        this.videoUrl = null;
+        this.durationSec = 0;
     }
 
     /**
@@ -135,6 +150,7 @@ public class Lesson {
     public void setVideoStoragePath(String path, int durationSec) {
         this.videoStoragePath = path;
         this.videoUrl         = null;   // xoá URL cũ nếu có, ưu tiên storage path
+        this.videoEmbedUrl    = null;   // upload mới thay thế embed cũ
         this.durationSec      = durationSec;
     }
 }

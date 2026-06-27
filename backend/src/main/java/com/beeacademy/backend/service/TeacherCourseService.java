@@ -3,6 +3,9 @@ package com.beeacademy.backend.service;
 import com.beeacademy.backend.dto.request.CreateChapterRequest;
 import com.beeacademy.backend.dto.request.CreateCourseRequest;
 import com.beeacademy.backend.dto.request.CreateLessonRequest;
+import com.beeacademy.backend.dto.request.ReorderChaptersRequest;
+import com.beeacademy.backend.dto.request.ReorderItemRequest;
+import com.beeacademy.backend.dto.request.ReorderLessonsRequest;
 import com.beeacademy.backend.dto.request.UpdateChapterRequest;
 import com.beeacademy.backend.dto.request.UpdateCourseRequest;
 import com.beeacademy.backend.dto.request.UpdateLessonRequest;
@@ -14,17 +17,23 @@ import com.beeacademy.backend.dto.response.TeacherLessonResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.ApprovalHistory;
+import com.beeacademy.backend.model.AdminNotification;
 import com.beeacademy.backend.model.Category;
 import com.beeacademy.backend.model.Chapter;
 import com.beeacademy.backend.model.Course;
+import com.beeacademy.backend.model.CourseDocument;
 import com.beeacademy.backend.model.CourseStatus;
+import com.beeacademy.backend.model.CourseVersion;
 import com.beeacademy.backend.model.Lesson;
 import com.beeacademy.backend.model.Profile;
+import com.beeacademy.backend.repository.AdminNotificationRepository;
 import com.beeacademy.backend.repository.ApprovalHistoryRepository;
 import com.beeacademy.backend.repository.CategoryRepository;
 import com.beeacademy.backend.repository.ChapterRepository;
 import com.beeacademy.backend.repository.CourseContentCount;
+import com.beeacademy.backend.repository.CourseDocumentRepository;
 import com.beeacademy.backend.repository.CourseRepository;
+import com.beeacademy.backend.repository.CourseVersionRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
 import com.beeacademy.backend.repository.LessonRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
@@ -38,9 +47,18 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -72,8 +90,13 @@ public class TeacherCourseService {
     private final ProfileRepository         profileRepository;
     private final ChapterRepository         chapterRepository;
     private final LessonRepository          lessonRepository;
+    private final CourseDocumentRepository  documentRepository;
     private final EnrollmentRepository      enrollmentRepository;
     private final ApprovalHistoryRepository approvalHistoryRepository;
+    private final CourseVersionRepository   courseVersionRepository;
+    private final AdminNotificationRepository notificationRepository;
+    private final ContentUploadService      contentUploadService;
+    private final ObjectMapper              objectMapper;
 
     // ========================================================================
     // Course CRUD
@@ -93,9 +116,13 @@ public class TeacherCourseService {
         validatePrice(req.priceVnd());
         // Validate: giá khuyến mãi phải nhỏ hơn giá gốc (cross-field validation)
         validateSalePrice(req.salePriceVnd(), req.priceVnd());
+        validateThumbnailUrl(req.thumbnailUrl());
+        validateIntroVideoUrl(req.introVideoUrl());
 
         int[] grades = req.grades().stream().mapToInt(Integer::intValue).toArray();
         Course course = Course.createByTeacher(teacher, req.title(), req.description(),
+                                               trimToNull(req.objective()),
+                                               trimToNull(req.audience()),
                                                category, grades, req.priceVnd());
 
         // Đảm bảo slug unique: thêm suffix -2, -3... nếu đã tồn tại
@@ -111,10 +138,14 @@ public class TeacherCourseService {
         // 0 sẽ không ghi đè priceVnd đã được set bởi factory ở trên.
         // KHÔNG truyền null vì priceVnd là primitive int — sẽ gây NullPointerException khi unbox.
         if (req.salePriceVnd() != null) {
-            course.update(null, null, null, null, 0, req.salePriceVnd(), null);
+            course.update(null, null, null, null, 0, req.salePriceVnd(), null,
+                          null, null, null);
         }
         if (req.thumbnailUrl() != null && !req.thumbnailUrl().isBlank()) {
             course.setThumbnailUrl(req.thumbnailUrl().trim());
+        }
+        if (req.introVideoUrl() != null && !req.introVideoUrl().isBlank()) {
+            course.setIntroVideoUrl(req.introVideoUrl());
         }
 
         Course saved = courseRepository.save(course);
@@ -159,8 +190,10 @@ public class TeacherCourseService {
         syncCourseCounters(course, chapters.size(), countLessons(chapters));
         List<ApprovalHistory> history =
                 approvalHistoryRepository.findByCourseIdOrderByCreatedAtAsc(courseId);
+        List<CourseVersion> versions =
+                courseVersionRepository.findByCourseIdOrderByVersionNoDesc(courseId);
         return TeacherCourseDetailResponse.fromEntity(
-                course, history, enrollmentRepository.countByCourseId(courseId), chapters);
+                course, history, enrollmentRepository.countByCourseId(courseId), chapters, versions);
     }
 
     /** Cập nhật thông tin cơ bản (chỉ khi DRAFT/NEEDS_REVISION). */
@@ -180,6 +213,8 @@ public class TeacherCourseService {
         validatePrice(effectivePrice);
         // Validate: giá khuyến mãi phải nhỏ hơn giá gốc (sau khi tính giá hiệu dụng)
         validateSalePrice(effectiveSalePrice, effectivePrice);
+        validateThumbnailUrl(req.thumbnailUrl());
+        validateIntroVideoUrl(req.introVideoUrl());
 
         Category category = req.categoryId() != null ? loadCategory(req.categoryId()) : null;
         int[] grades = req.grades() != null
@@ -189,7 +224,10 @@ public class TeacherCourseService {
                       grades,
                       effectivePrice,
                       effectiveSalePrice,
-                      req.thumbnailUrl());
+                      req.thumbnailUrl(),
+                      req.objective(),
+                      req.audience(),
+                      req.introVideoUrl());
         Course saved = courseRepository.save(course);
         return TeacherCourseResponse.fromEntity(saved, enrollmentRepository.countByCourseId(saved.getId()));
     }
@@ -202,7 +240,11 @@ public class TeacherCourseService {
             throw new BusinessException("CANNOT_DELETE",
                     "Chỉ có thể xóa khóa học ở trạng thái Bản nháp.");
         }
+        List<Lesson> lessons = loadLessonsForCourse(courseId);
+        List<CourseDocument> documents = loadDocumentsForLessons(lessons);
+        documentRepository.deleteAll(documents);
         courseRepository.delete(course);
+        contentUploadService.deleteLessonFilesAfterCommit(lessons, documents);
         log.info("GV {} xóa khóa học {}", me.userId(), courseId);
     }
 
@@ -212,7 +254,7 @@ public class TeacherCourseService {
         Course course = loadAndVerifyOwner(courseId, me.userId());
 
         // BUG FIX: load chapters một lần duy nhất — trước đây query 2 lần cùng một kết quả
-        List<Chapter> chapters = chapterRepository.findByCourseIdOrderByPositionAsc(courseId);
+        List<Chapter> chapters = chapterRepository.findWithLessonsByCourseId(courseId);
 
         // Validate: khóa học phải có ít nhất 1 chương
         if (chapters.isEmpty()) {
@@ -222,14 +264,19 @@ public class TeacherCourseService {
 
         // Validate: mỗi chương phải có ít nhất 1 bài giảng
         boolean anyLessonless = chapters.stream()
-                .anyMatch(ch -> lessonRepository.countByChapterId(ch.getId()) == 0);
+                .anyMatch(ch -> ch.getLessons().isEmpty());
         if (anyLessonless) {
             throw new BusinessException("EMPTY_CHAPTER",
                     "Mỗi chương phải có ít nhất 1 bài giảng.");
         }
 
+        int nextVersion = courseVersionRepository.findMaxVersionNo(courseId) + 1;
+        course.markSubmittedVersion(nextVersion);
         course.submitForReview();
         Course saved = courseRepository.save(course);
+        courseVersionRepository.save(CourseVersion.create(
+                saved, saved.getTeacher(), nextVersion, buildCourseSnapshotJson(saved, chapters)));
+        notificationRepository.save(AdminNotification.courseSubmitted(saved, saved.getTeacher()));
         log.info("GV {} nộp khóa học {} để duyệt", me.userId(), courseId);
         return TeacherCourseResponse.fromEntity(saved, enrollmentRepository.countByCourseId(saved.getId()));
     }
@@ -282,8 +329,13 @@ public class TeacherCourseService {
         Chapter chapter = chapterRepository.findByIdAndCourseId(chapterId, courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Chapter", chapterId));
 
+        List<Lesson> lessons = lessonRepository.findByChapterIdOrderByPositionAsc(chapterId);
+        List<CourseDocument> documents = loadDocumentsForLessons(lessons);
+        documentRepository.deleteAll(documents);
+
         // CascadeType.ALL + orphanRemoval trên lessons → xóa lessons theo tự động
         chapterRepository.delete(chapter);
+        contentUploadService.deleteLessonFilesAfterCommit(lessons, documents);
         refreshCourseCounts(courseId);
         log.info("Xóa chương {} khỏi khóa học {}", chapterId, courseId);
     }
@@ -309,7 +361,7 @@ public class TeacherCourseService {
         Lesson lesson = Lesson.createNew(chapter, req.title(), req.description(),
                                          position, req.isFree());
         if (req.videoEmbedUrl() != null && !req.videoEmbedUrl().isBlank()) {
-            lesson.update(null, null, null, req.isFree(), req.videoEmbedUrl());
+            lesson.setVideoEmbedUrl(req.videoEmbedUrl());
         }
 
         Lesson saved = lessonRepository.save(lesson);
@@ -332,12 +384,33 @@ public class TeacherCourseService {
         Lesson lesson = lessonRepository.findByIdAndChapterId(lessonId, chapterId)
                 .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
 
+        String oldVideoPath = lesson.getVideoStoragePath();
+        String videoSource = normalizeVideoSource(req.videoSource());
+
         lesson.update(
                 req.title(),
                 req.description(),
                 req.position(),
-                req.isFree() != null ? req.isFree() : lesson.getIsFree(),
-                req.videoEmbedUrl());
+                req.isFree() != null ? req.isFree() : lesson.getIsFree());
+
+        if ("embed".equals(videoSource)) {
+            String embedUrl = trimToNull(req.videoEmbedUrl());
+            if (embedUrl == null) {
+                throw new BusinessException("INVALID_VIDEO_SOURCE",
+                        "Vui lòng nhập URL YouTube/Vimeo khi chọn video nhúng.");
+            }
+            lesson.setVideoEmbedUrl(embedUrl);
+            contentUploadService.deleteVideoAfterCommit(oldVideoPath);
+        } else if ("none".equals(videoSource)) {
+            lesson.clearVideo();
+            contentUploadService.deleteVideoAfterCommit(oldVideoPath);
+        } else if (videoSource == null && req.videoEmbedUrl() != null) {
+            String embedUrl = trimToNull(req.videoEmbedUrl());
+            if (embedUrl != null) {
+                lesson.setVideoEmbedUrl(embedUrl);
+                contentUploadService.deleteVideoAfterCommit(oldVideoPath);
+            }
+        }
 
         return TeacherLessonResponse.fromEntity(lessonRepository.save(lesson));
     }
@@ -354,14 +427,204 @@ public class TeacherCourseService {
         Lesson lesson = lessonRepository.findByIdAndChapterId(lessonId, chapterId)
                 .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
 
+        List<CourseDocument> documents = documentRepository.findByLessonIdOrderByPositionAsc(lessonId);
+        documentRepository.deleteAll(documents);
         lessonRepository.delete(lesson);
+        contentUploadService.deleteLessonFilesAfterCommit(List.of(lesson), documents);
         refreshCourseCounts(courseId);
         log.info("Xóa bài giảng {} khỏi chương {}", lessonId, chapterId);
+    }
+
+    @Transactional
+    public TeacherCourseDetailResponse reorderChapters(UUID courseId, AuthenticatedUser me,
+                                                       ReorderChaptersRequest req) {
+        Course course = loadAndVerifyOwner(courseId, me.userId());
+        assertEditable(course);
+
+        List<Chapter> chapters = chapterRepository.findByCourseIdOrderByPositionAsc(courseId);
+        validateReorderIds(
+                chapters.stream().map(Chapter::getId).collect(java.util.stream.Collectors.toSet()),
+                req.chapters().stream().map(ReorderItemRequest::id).toList(),
+                "Danh sách chương không khớp với khóa học hiện tại.");
+
+        Map<UUID, Chapter> byId = chapters.stream()
+                .collect(java.util.stream.Collectors.toMap(Chapter::getId, ch -> ch));
+        List<ReorderItemRequest> ordered = req.chapters().stream()
+                .sorted(Comparator.comparing(ReorderItemRequest::position))
+                .toList();
+
+        for (int i = 0; i < ordered.size(); i++) {
+            byId.get(ordered.get(i).id()).update(null, null, i + 1);
+        }
+        chapterRepository.saveAll(chapters);
+        return getCourseDetail(courseId, me);
+    }
+
+    @Transactional
+    public TeacherCourseDetailResponse reorderLessons(UUID courseId, UUID chapterId,
+                                                      AuthenticatedUser me,
+                                                      ReorderLessonsRequest req) {
+        Course course = loadAndVerifyOwner(courseId, me.userId());
+        assertEditable(course);
+
+        chapterRepository.findByIdAndCourseId(chapterId, courseId)
+                .orElseThrow(() -> new ResourceNotFoundException("Chapter", chapterId));
+
+        List<Lesson> lessons = lessonRepository.findByChapterIdOrderByPositionAsc(chapterId);
+        validateReorderIds(
+                lessons.stream().map(Lesson::getId).collect(java.util.stream.Collectors.toSet()),
+                req.lessons().stream().map(ReorderItemRequest::id).toList(),
+                "Danh sách bài giảng không khớp với chương hiện tại.");
+
+        Map<UUID, Lesson> byId = lessons.stream()
+                .collect(java.util.stream.Collectors.toMap(Lesson::getId, lesson -> lesson));
+        List<ReorderItemRequest> ordered = req.lessons().stream()
+                .sorted(Comparator.comparing(ReorderItemRequest::position))
+                .toList();
+
+        for (int i = 0; i < ordered.size(); i++) {
+            Lesson lesson = byId.get(ordered.get(i).id());
+            lesson.update(null, null, i + 1, Boolean.TRUE.equals(lesson.getIsFree()));
+        }
+        lessonRepository.saveAll(lessons);
+        return getCourseDetail(courseId, me);
     }
 
     // ========================================================================
     // Private helpers
     // ========================================================================
+
+    private List<Lesson> loadLessonsForCourse(UUID courseId) {
+        return chapterRepository.findWithLessonsByCourseId(courseId).stream()
+                .flatMap(chapter -> chapter.getLessons().stream())
+                .toList();
+    }
+
+    private List<CourseDocument> loadDocumentsForLessons(List<Lesson> lessons) {
+        if (lessons == null || lessons.isEmpty()) return List.of();
+        List<UUID> lessonIds = lessons.stream().map(Lesson::getId).toList();
+        return documentRepository.findByLessonIdIn(lessonIds);
+    }
+
+    private String normalizeVideoSource(String videoSource) {
+        if (videoSource == null || videoSource.isBlank()) return null;
+        String normalized = videoSource.trim().toLowerCase();
+        if (normalized.equals("upload") || normalized.equals("embed") || normalized.equals("none")) {
+            return normalized;
+        }
+        throw new BusinessException("INVALID_VIDEO_SOURCE",
+                "Nguồn video không hợp lệ. Chỉ chấp nhận upload, embed hoặc none.");
+    }
+
+    private void validateReorderIds(Set<UUID> expectedIds, List<UUID> requestedIds, String message) {
+        Set<UUID> uniqueIds = new HashSet<>(requestedIds);
+        if (requestedIds.size() != uniqueIds.size() || !expectedIds.equals(uniqueIds)) {
+            throw new BusinessException("INVALID_REORDER", message);
+        }
+    }
+
+    private void validateThumbnailUrl(String url) {
+        if (url == null || url.isBlank()) return;
+        String trimmed = url.trim();
+        String lower = trimmed.toLowerCase();
+        if (lower.matches(".*\\.(mp4|webm|mov)(\\?.*)?(#.*)?$")) {
+            throw new BusinessException("INVALID_THUMBNAIL_URL",
+                    "Ảnh bìa khóa học phải là ảnh, không dùng URL video giới thiệu.");
+        }
+    }
+
+    private void validateIntroVideoUrl(String url) {
+        if (url == null || url.isBlank()) return;
+        String trimmed = url.trim();
+        try {
+            URI uri = new URI(trimmed);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
+                throw new BusinessException("INVALID_INTRO_VIDEO",
+                        "URL video giới thiệu phải bắt đầu bằng http:// hoặc https://.");
+            }
+            if (host == null || host.isBlank()) {
+                throw new BusinessException("INVALID_INTRO_VIDEO",
+                        "URL video giới thiệu không hợp lệ.");
+            }
+            String lowerHost = host.toLowerCase();
+            String lowerPath = uri.getPath() != null ? uri.getPath().toLowerCase() : "";
+            boolean accepted = lowerHost.contains("youtube.com")
+                    || lowerHost.contains("youtu.be")
+                    || lowerHost.contains("vimeo.com")
+                    || lowerPath.endsWith(".mp4")
+                    || lowerPath.endsWith(".webm")
+                    || lowerPath.endsWith(".mov");
+            if (!accepted) {
+                throw new BusinessException("INVALID_INTRO_VIDEO",
+                        "Video giới thiệu chỉ hỗ trợ YouTube, Vimeo hoặc file MP4/WebM/MOV công khai.");
+            }
+        } catch (URISyntaxException e) {
+            throw new BusinessException("INVALID_INTRO_VIDEO",
+                    "URL video giới thiệu không hợp lệ.");
+        }
+    }
+
+    private String buildCourseSnapshotJson(Course course, List<Chapter> chapters) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("courseId", course.getId());
+        snapshot.put("versionNo", course.getSubmittedVersionNo());
+        snapshot.put("slug", course.getSlug());
+        snapshot.put("title", course.getTitle());
+        snapshot.put("description", course.getDescription());
+        snapshot.put("objective", course.getObjective());
+        snapshot.put("audience", course.getAudience());
+        snapshot.put("thumbnailUrl", course.getThumbnailUrl());
+        snapshot.put("introVideoUrl", course.getIntroVideoUrl());
+        snapshot.put("categoryId", course.getCategory() != null ? course.getCategory().getId() : null);
+        snapshot.put("categoryName", course.getCategory() != null ? course.getCategory().getName() : null);
+        snapshot.put("teacherId", course.getTeacher() != null ? course.getTeacher().getId() : null);
+        snapshot.put("teacherName", course.getTeacher() != null ? course.getTeacher().getFullName() : null);
+        snapshot.put("grades", java.util.Arrays.stream(course.getGrades()).boxed().toList());
+        snapshot.put("priceVnd", course.getPriceVnd());
+        snapshot.put("salePriceVnd", course.getSalePriceVnd());
+        snapshot.put("status", course.getStatus().toDbValue());
+        snapshot.put("totalChapters", chapters.size());
+        snapshot.put("totalLessons", countLessons(chapters));
+        snapshot.put("chapters", chapters.stream()
+                .sorted(Comparator.comparing(Chapter::getPosition))
+                .map(this::chapterSnapshot)
+                .toList());
+        try {
+            return objectMapper.writeValueAsString(snapshot);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException("SNAPSHOT_FAILED",
+                    "Không thể tạo phiên bản khóa học để nộp duyệt.");
+        }
+    }
+
+    private Map<String, Object> chapterSnapshot(Chapter chapter) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", chapter.getId());
+        row.put("title", chapter.getTitle());
+        row.put("description", chapter.getDescription());
+        row.put("position", chapter.getPosition());
+        row.put("lessons", chapter.getLessons().stream()
+                .sorted(Comparator.comparing(Lesson::getPosition))
+                .map(this::lessonSnapshot)
+                .toList());
+        return row;
+    }
+
+    private Map<String, Object> lessonSnapshot(Lesson lesson) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", lesson.getId());
+        row.put("title", lesson.getTitle());
+        row.put("description", lesson.getDescription());
+        row.put("position", lesson.getPosition());
+        row.put("isFree", lesson.getIsFree());
+        row.put("videoEmbedUrl", lesson.getVideoEmbedUrl());
+        row.put("videoStoragePath", lesson.getVideoStoragePath());
+        row.put("videoUrl", lesson.getVideoUrl());
+        row.put("durationSec", lesson.getDurationSec());
+        return row;
+    }
 
     /**
      * Load course và verify GV là owner.
@@ -537,5 +800,11 @@ public class TeacherCourseService {
     private Profile loadProfile(UUID id) {
         return profileRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Profile", id));
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }
