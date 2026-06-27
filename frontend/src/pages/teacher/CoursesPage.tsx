@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 /**
  * TeacherCoursesPage — Trang "Khóa học của tôi" cho Giáo viên (UC27)
  *
@@ -25,7 +26,7 @@ import {
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, CheckCircle2, Clock, AlertTriangle,
   Megaphone, Database, Send, RefreshCcw, Eye, Save, Loader2, ChevronDown,
-  Upload, Image as ImageIcon, MessageSquare,
+  Upload, Image as ImageIcon, MessageSquare, UserCircle, Lock, Video,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -44,6 +45,8 @@ const NAV_ITEMS = [
   { icon: Megaphone,       label: 'Khiếu nại',          path: '/teacher/complaints'},
   { icon: BarChart2,       label: 'Doanh thu',          path: '/teacher/revenue'   },
   { icon: Landmark,        label: 'TK ngân hàng',       path: '/teacher/bank'      },
+  { icon: UserCircle,      label: 'Hồ sơ',              path: '/teacher/profile'   },
+  { icon: Lock,            label: 'Tài khoản',           path: '/teacher/account'   },
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -118,6 +121,20 @@ function formatDate(iso: string): string {
 
 // Các status cho phép nộp duyệt lại
 const SUBMITTABLE: CourseStatus[] = ['draft', 'rejected', 'needs_revision'];
+const EDITABLE_STATUSES: CourseStatus[] = ['draft', 'rejected', 'needs_revision'];
+
+function courseEditLockMessage(status: CourseStatus): string {
+  switch (status) {
+    case 'pending_review':
+      return 'Dang cho Admin duyet, khong the chinh sua.';
+    case 'approved':
+      return 'Khoa hoc da duyet, khong the chinh sua luc nay.';
+    case 'published':
+      return 'Khoa hoc da xuat ban, khong the chinh sua truc tiep.';
+    default:
+      return 'Trang thai hien tai khong cho phep chinh sua.';
+  }
+}
 
 // Spinner nhỏ dùng cho loading row
 function Spinner() {
@@ -136,7 +153,10 @@ function Spinner() {
 interface CourseForm {
   title: string;
   description: string;
+  objective: string;
+  audience: string;
   thumbnailUrl: string;
+  introVideoUrl: string;
   categoryId: string;
   grades: number[];
   priceVnd: string;
@@ -144,13 +164,19 @@ interface CourseForm {
 }
 
 const EMPTY_FORM: CourseForm = {
-  title: '', description: '', thumbnailUrl: '', categoryId: '',
+  title: '', description: '', objective: '', audience: '', thumbnailUrl: '', introVideoUrl: '', categoryId: '',
   grades: [], priceVnd: '', salePriceVnd: '',
 };
 
 const ALL_GRADES = [6, 7, 8, 9];
 const ALLOWED_THUMBNAIL_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_THUMBNAIL_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_INTRO_VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'];
+const MAX_INTRO_VIDEO_SIZE_BYTES = 2 * 1024 * 1024 * 1024;
+
+function isDirectVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov)(\?|#|$)/i.test(url);
+}
 
 interface CourseFormPanelProps {
   open: boolean;
@@ -166,6 +192,9 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
   const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
   const [thumbnailPreviewUrl, setThumbnailPreviewUrl] = useState('');
   const [thumbnailInputKey, setThumbnailInputKey] = useState(0);
+  const [introVideoFile, setIntroVideoFile] = useState<File | null>(null);
+  const [introVideoPreviewUrl, setIntroVideoPreviewUrl] = useState('');
+  const [introVideoInputKey, setIntroVideoInputKey] = useState(0);
 
   useEffect(() => {
     if (!thumbnailFile) {
@@ -179,15 +208,31 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
   }, [thumbnailFile]);
 
   useEffect(() => {
+    if (!introVideoFile) {
+      setIntroVideoPreviewUrl('');
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(introVideoFile);
+    setIntroVideoPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [introVideoFile]);
+
+  useEffect(() => {
     if (!open) return;
     setThumbnailFile(null);
     setThumbnailInputKey(k => k + 1);
+    setIntroVideoFile(null);
+    setIntroVideoInputKey(k => k + 1);
     if (editing) {
       // TeacherCourseResponse đã có categoryId → set form ngay không cần đợi API
       setForm({
         title:        editing.title,
         description:  '',
+        objective:    '',
+        audience:     '',
         thumbnailUrl: editing.thumbnailUrl ?? '',
+        introVideoUrl: editing.introVideoUrl ?? '',
         categoryId:   editing.categoryId ?? '',
         grades:       editing.grades ?? [],
         priceVnd:     editing.priceVnd.toString(),
@@ -203,7 +248,10 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
         if (isMounted) setForm(f => ({
           ...f,
           description: d.description ?? '',
+          objective: d.objective ?? '',
+          audience: d.audience ?? '',
           thumbnailUrl: d.thumbnailUrl ?? editing.thumbnailUrl ?? '',
+          introVideoUrl: d.introVideoUrl ?? editing.introVideoUrl ?? '',
         }));
       }).catch(() => {});
       return () => { isMounted = false; };
@@ -234,9 +282,39 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
     setThumbnailFile(file);
   }
 
+  function handleIntroVideoChange(file: File | undefined) {
+    if (!file) return;
+    if (!ALLOWED_INTRO_VIDEO_TYPES.includes(file.type)) {
+      notify.error('Chỉ chấp nhận video MP4, WebM hoặc MOV');
+      setIntroVideoInputKey(k => k + 1);
+      return;
+    }
+    if (file.size > MAX_INTRO_VIDEO_SIZE_BYTES) {
+      notify.error('Video giới thiệu không được vượt quá 2GB');
+      setIntroVideoInputKey(k => k + 1);
+      return;
+    }
+    setIntroVideoFile(file);
+  }
+
   function cancelThumbnailSelection() {
     setThumbnailFile(null);
     setThumbnailInputKey(k => k + 1);
+  }
+
+  function cancelIntroVideoSelection() {
+    setIntroVideoFile(null);
+    setIntroVideoInputKey(k => k + 1);
+  }
+
+  function clearIntroVideo() {
+    cancelIntroVideoSelection();
+    setForm(f => ({ ...f, introVideoUrl: '' }));
+  }
+
+  function textPayload(value: string, allowBlank: boolean): string | undefined {
+    const trimmed = value.trim();
+    return trimmed || (allowBlank ? '' : undefined);
   }
 
   async function handleSave() {
@@ -247,12 +325,32 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
       notify.error('Giá tối thiểu 1,000 VND'); return;
     }
     // FIX: validate giá khuyến mãi phải nhỏ hơn giá gốc (trước đây không có check này)
+    if (/\.(mp4|webm|mov)(\?|#|$)/i.test(form.thumbnailUrl.trim())) {
+      notify.error('Ảnh bìa khóa học phải là ảnh, không dùng URL video giới thiệu.');
+      return;
+    }
     if (form.salePriceVnd) {
       const saleNum  = Number(form.salePriceVnd);
       const priceNum = Number(form.priceVnd);
       if (saleNum < 1000) { notify.error('Giá khuyến mãi tối thiểu 1,000 VND'); return; }
       if (saleNum >= priceNum) {
         notify.error('Giá khuyến mãi phải nhỏ hơn giá gốc'); return;
+      }
+    }
+
+    if (!introVideoFile && form.introVideoUrl.trim()) {
+      const introUrl = form.introVideoUrl.trim();
+      const isSupportedIntro =
+        /^https?:\/\//i.test(introUrl)
+        && (
+          introUrl.includes('youtube.com')
+          || introUrl.includes('youtu.be')
+          || introUrl.includes('vimeo.com')
+          || /\.(mp4|webm|mov)(\?|#|$)/i.test(introUrl)
+        );
+      if (!isSupportedIntro) {
+        notify.error('Video giới thiệu chỉ hỗ trợ YouTube, Vimeo hoặc link MP4/WebM/MOV công khai');
+        return;
       }
     }
 
@@ -267,10 +365,22 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
         thumbnailUrl = uploaded.publicUrl;
       }
 
+      let introVideoUrl = form.introVideoUrl.trim() || undefined;
+      if (introVideoFile) {
+        const uploaded = await teacherCourseService.uploadCourseIntroVideo(introVideoFile);
+        if (!uploaded.publicUrl) {
+          throw new Error('Upload video giới thiệu không trả về URL');
+        }
+        introVideoUrl = uploaded.publicUrl;
+      }
+
       const req: CreateCourseRequest = {
         title:       form.title.trim(),
-        description: form.description.trim() || undefined,
+        description: textPayload(form.description, Boolean(editing)),
+        objective: textPayload(form.objective, Boolean(editing)),
+        audience: textPayload(form.audience, Boolean(editing)),
         thumbnailUrl,
+        introVideoUrl: textPayload(introVideoUrl ?? '', Boolean(editing)),
         categoryId:  form.categoryId,
         grades:      form.grades,
         priceVnd:    Number(form.priceVnd),
@@ -295,6 +405,13 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
       setSaving(false);
     }
   }
+
+  const persistedIntroVideoUrl = form.introVideoUrl.trim();
+  const introVideoPreviewSrc = introVideoPreviewUrl
+    || (isDirectVideoUrl(persistedIntroVideoUrl) ? persistedIntroVideoUrl : '');
+  const hasLegacyIntroVideoLink = Boolean(persistedIntroVideoUrl)
+    && !introVideoPreviewUrl
+    && !isDirectVideoUrl(persistedIntroVideoUrl);
 
   return (
     <>
@@ -347,9 +464,102 @@ function CourseFormPanel({ open, editing, categories, onClose, onSaved }: Course
                   value={form.description}
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                   rows={4}
-                  placeholder="Nội dung khóa học, đối tượng học sinh, mục tiêu..."
+                  placeholder="Tóm tắt nội dung và điểm nổi bật của khóa học..."
                   className="w-full px-3 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary resize-none"
                 />
+              </div>
+
+              {/* Mục tiêu và đối tượng */}
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-1.5">Mục tiêu khóa học</label>
+                <textarea
+                  value={form.objective}
+                  maxLength={5000}
+                  onChange={e => setForm(f => ({ ...f, objective: e.target.value }))}
+                  rows={3}
+                  placeholder="VD: Nắm vững kiến thức trọng tâm, giải được các dạng bài thường gặp..."
+                  className="w-full px-3 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-1.5">Đối tượng học viên</label>
+                <textarea
+                  value={form.audience}
+                  maxLength={5000}
+                  onChange={e => setForm(f => ({ ...f, audience: e.target.value }))}
+                  rows={3}
+                  placeholder="VD: Học sinh lớp 8 cần củng cố nền tảng hoặc ôn thi giữa kỳ..."
+                  className="w-full px-3 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-1.5">Video giới thiệu khóa học</label>
+                <label className="flex items-center justify-center gap-2 w-full px-3 py-3 text-sm font-bold bg-surface-container border border-dashed border-outline-variant rounded-xl text-on-surface-variant hover:border-primary hover:text-primary cursor-pointer transition-colors">
+                  <Upload className="w-4 h-4" />
+                  {introVideoFile ? introVideoFile.name : 'Chọn video từ máy'}
+                  <input
+                    key={introVideoInputKey}
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime,.mov"
+                    onChange={e => handleIntroVideoChange(e.target.files?.[0])}
+                    className="hidden"
+                  />
+                </label>
+                <p className="mt-1.5 text-xs text-on-surface-variant">
+                  Hỗ trợ MP4, WebM, MOV. Video sẽ được tải lên khi bấm lưu để Admin và học sinh xem trước.
+                </p>
+                {(introVideoFile || persistedIntroVideoUrl) && (
+                  <div className="mt-2 flex items-center gap-3">
+                    {introVideoFile && (
+                      <button
+                        type="button"
+                        onClick={cancelIntroVideoSelection}
+                        className="text-xs font-bold text-primary hover:underline"
+                      >
+                        Hủy chọn video mới
+                      </button>
+                    )}
+                    {persistedIntroVideoUrl && (
+                      <button
+                        type="button"
+                        onClick={clearIntroVideo}
+                        className="text-xs font-bold text-red-600 hover:underline"
+                      >
+                        Gỡ video hiện tại
+                      </button>
+                    )}
+                  </div>
+                )}
+                {introVideoPreviewSrc && (
+                  <div className="mt-3 overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container">
+                    <video
+                      src={introVideoPreviewSrc}
+                      controls
+                      preload="metadata"
+                      className="w-full h-48 bg-black object-cover"
+                    />
+                  </div>
+                )}
+                {hasLegacyIntroVideoLink && (
+                  <div className="mt-3 rounded-xl border border-outline-variant/30 bg-surface-container px-3 py-3">
+                    <p className="text-xs font-bold text-on-surface-variant mb-1">Video hiện tại</p>
+                    <a
+                      href={persistedIntroVideoUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="break-all text-sm font-bold text-primary hover:underline"
+                    >
+                      {persistedIntroVideoUrl}
+                    </a>
+                  </div>
+                )}
+                {!introVideoPreviewSrc && !hasLegacyIntroVideoLink && (
+                  <div className="mt-3 h-28 rounded-xl border border-outline-variant/30 bg-surface-container/60 flex items-center justify-center">
+                    <Video className="w-8 h-8 text-on-surface-variant/40" />
+                  </div>
+                )}
               </div>
 
               {/* Ảnh bìa */}
@@ -721,9 +931,7 @@ export default function TeacherCoursesPage() {
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Khóa học của tôi</h1>
 
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <TeacherNotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold text-on-surface leading-none">{user?.name ?? 'Giáo viên'}</p>
@@ -732,7 +940,7 @@ export default function TeacherCoursesPage() {
               <img
                 src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'GV')}&background=7c3aed&color=fff&bold=true&size=64`}
                 alt="Avatar"
-                className="w-9 h-9 rounded-full border-2 border-primary/30"
+                className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
               />
             </div>
           </div>
@@ -848,6 +1056,7 @@ export default function TeacherCoursesPage() {
                         {courses.map((course, idx) => {
                           // Chỉ draft | rejected | needs_revision mới cho nộp duyệt
                           const canSubmit = SUBMITTABLE.includes(course.status);
+                          const canEdit = EDITABLE_STATUSES.includes(course.status);
                           // Chỉ draft | needs_revision mới cho xóa (không xóa khi đang pending hoặc published)
                           const canDelete = course.status === 'draft';
                           const isSubmitting = submittingId === course.id;
@@ -944,11 +1153,19 @@ export default function TeacherCoursesPage() {
 
                                   {/* Chỉnh sửa */}
                                   <button
-                                    onClick={() => handleEdit(course)}
-                                    title="Chỉnh sửa"
-                                    className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-colors"
+                                    onClick={() => {
+                                      if (canEdit) handleEdit(course);
+                                    }}
+                                    disabled={!canEdit}
+                                    title={canEdit ? 'Chinh sua' : courseEditLockMessage(course.status)}
+                                    aria-label={canEdit ? 'Chinh sua khoa hoc' : courseEditLockMessage(course.status)}
+                                    className={`p-2 rounded-lg transition-colors ${
+                                      canEdit
+                                        ? 'text-blue-500 hover:bg-blue-500/10'
+                                        : 'text-on-surface-variant/40 bg-surface-container cursor-not-allowed'
+                                    }`}
                                   >
-                                    <Pencil className="w-4 h-4" />
+                                    {canEdit ? <Pencil className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
                                   </button>
 
                                   <button

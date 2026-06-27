@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 /**
  * TeacherContentPage — UC28 — Bài giảng
  * Kết nối API thật: chapter CRUD + lesson CRUD + video/doc upload.
@@ -20,7 +21,8 @@ import {
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, ChevronDown, ChevronRight, Save,
   Upload, Link2, Video, FileImage, Presentation,
-  Youtube, Megaphone, Database, Loader2, CheckCircle2, AlertTriangle,
+  Youtube, Megaphone, Database, Loader2, CheckCircle2, AlertTriangle, UserCircle, Lock,
+  GripVertical,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -52,6 +54,17 @@ type ChapterEditingState =
   | { mode: 'closed' }
   | { mode: 'new' }
   | { mode: 'edit'; chapterId: string };
+
+type DragState =
+  | { type: 'chapter'; id: string }
+  | { type: 'lesson'; chapterId: string; id: string }
+  | null;
+
+type CourseStatus = TeacherCourseResponse['status'];
+
+const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
+const EDITABLE_STATUSES: CourseStatus[] = ['draft', 'rejected', 'needs_revision'];
 
 // ═══════════════════════════════════════════════════════════════════
 //  HELPERS
@@ -93,6 +106,60 @@ function sortChapters(chapters: TeacherChapterResponse[]): TeacherChapterRespons
     .sort((a, b) => a.position - b.position);
 }
 
+function moveItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+  const next = [...items];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
+function isCourseEditable(status: CourseStatus): boolean {
+  return EDITABLE_STATUSES.includes(status);
+}
+
+function courseEditLockMessage(status: CourseStatus): string {
+  switch (status) {
+    case 'pending_review':
+      return 'Dang cho Admin duyet, khong the chinh sua cau truc khoa hoc.';
+    case 'approved':
+      return 'Khoa hoc da duyet, khong the chinh sua luc nay.';
+    case 'published':
+      return 'Khoa hoc da xuat ban, khong the chinh sua truc tiep.';
+    default:
+      return 'Trang thai hien tai khong cho phep chinh sua.';
+  }
+}
+
+async function getVideoDurationSec(file: File): Promise<number | null> {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    return await new Promise<number | null>((resolve) => {
+      const video = document.createElement('video');
+      const cleanup = () => {
+        video.removeAttribute('src');
+        video.load();
+      };
+
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        const durationSec = Number.isFinite(video.duration) && video.duration > 0
+          ? Math.round(video.duration)
+          : null;
+        cleanup();
+        resolve(durationSec);
+      };
+      video.onerror = () => {
+        cleanup();
+        resolve(null);
+      };
+      video.src = objectUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  NAV
 // ═══════════════════════════════════════════════════════════════════
@@ -109,6 +176,8 @@ const NAV_ITEMS = [
   { icon: Megaphone,       label: 'Khiếu nại',         path: '/teacher/complaints'},
   { icon: BarChart2,       label: 'Doanh thu',         path: '/teacher/revenue'   },
   { icon: Landmark,        label: 'TK ngân hàng',      path: '/teacher/bank'      },
+  { icon: UserCircle,      label: 'Hồ sơ',             path: '/teacher/profile'   },
+  { icon: Lock,            label: 'Tài khoản',          path: '/teacher/account'   },
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -160,7 +229,7 @@ function FileSlot({ label, icon, accept, existingName, file, onSelect, onRemove 
           </button>
           {/* FIX: hiển thị giới hạn file size tài liệu */}
           <p className="text-xs text-on-surface-variant text-center">
-            PDF, PPTX, DOCX · Tối đa <strong>50 MB</strong>
+            PDF, PPTX, DOCX · Tối đa <strong>100 MB</strong>
           </p>
         </div>
       )}
@@ -172,9 +241,9 @@ function FileSlot({ label, icon, accept, existingName, file, onSelect, onRemove 
         onChange={e => {
           const f = e.target.files?.[0];
           if (f) {
-            // FIX: check file size tại client (50MB cho tài liệu)
-            if (f.size > 50 * 1024 * 1024) {
-              alert('File tài liệu vượt quá giới hạn 50 MB. Vui lòng chọn file nhỏ hơn.');
+            // FIX: check file size tại client (100MB cho tài liệu)
+            if (f.size > MAX_DOCUMENT_BYTES) {
+              alert('File tài liệu vượt quá giới hạn 100 MB. Vui lòng chọn file nhỏ hơn.');
               e.target.value = '';
               return;
             }
@@ -205,7 +274,8 @@ function VideoSlot({
   const inputRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<'upload' | 'embed'>(videoSource === 'embed' ? 'embed' : 'upload');
 
-  const hasExistingUpload = videoSource === 'upload' && !!videoStoragePath;
+  const hasStoredVideo = !!videoStoragePath;
+  const hasExistingUpload = videoSource === 'upload' && hasStoredVideo;
   const displayFileName = videoFile?.name ?? (hasExistingUpload ? '(Video đã tải lên)' : undefined);
 
   return (
@@ -274,7 +344,7 @@ function VideoSlot({
               </button>
               {/* FIX: hiển thị giới hạn file size để GV biết trước khi chọn */}
               <p className="text-xs text-on-surface-variant text-center">
-                Chấp nhận MP4, WebM, MOV · Tối đa <strong>500 MB</strong>
+                Chấp nhận MP4, WebM, MOV · Tối đa <strong>2 GB</strong>
               </p>
             </div>
           )}
@@ -286,8 +356,8 @@ function VideoSlot({
               const f = e.target.files?.[0];
               if (f) {
                 // FIX: check file size ngay tại client trước khi upload
-                if (f.size > 500 * 1024 * 1024) {
-                  alert('File video vượt quá giới hạn 500 MB. Vui lòng chọn file nhỏ hơn.');
+                if (f.size > MAX_VIDEO_BYTES) {
+                  alert('File video vượt quá giới hạn 2 GB. Vui lòng chọn file nhỏ hơn.');
                   e.target.value = '';
                   return;
                 }
@@ -300,13 +370,12 @@ function VideoSlot({
         </>
       ) : (
         <div className="space-y-2">
-          {/* FIX: cảnh báo khi GV đã upload video nhưng chuyển sang embed
-              — file video cũ trên server sẽ trở thành orphan (không bị xóa tự động) */}
-          {hasExistingUpload && (
+          {/* Khi đổi sang embed, backend sẽ dọn file upload cũ sau khi lưu thành công. */}
+          {hasStoredVideo && (
             <div className="flex items-start gap-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
               <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-amber-700">
-                Bạn đã có video đã tải lên. Thay bằng YouTube/Vimeo sẽ <strong>không xóa</strong> file cũ khỏi server.
+                Video đã tải lên trước đó sẽ được xóa khỏi storage sau khi bạn lưu link YouTube/Vimeo.
               </p>
             </div>
           )}
@@ -343,6 +412,8 @@ export default function TeacherContentPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [dragging, setDragging] = useState<DragState>(null);
+  const [reorderSaving, setReorderSaving] = useState(false);
 
   // Lesson form state
   const [lessonEditing, setLessonEditing] = useState<LessonEditingState>({ mode: 'closed' });
@@ -368,6 +439,17 @@ export default function TeacherContentPage() {
   const location = useLocation();
   const logout = useAuthStore(s => s.logout);
   const user = useAuthStore(s => s.user);
+  const selectedCourse = courses.find(course => course.id === selectedCourseId) ?? null;
+  const selectedCourseEditable = selectedCourse ? isCourseEditable(selectedCourse.status) : false;
+  const selectedCourseLockMessage = selectedCourse && !selectedCourseEditable
+    ? courseEditLockMessage(selectedCourse.status)
+    : '';
+
+  function notifyCourseLocked() {
+    if (selectedCourseLockMessage) {
+      notify.error(selectedCourseLockMessage);
+    }
+  }
 
   // Load course list
   useEffect(() => {
@@ -397,6 +479,14 @@ export default function TeacherContentPage() {
       .finally(() => setLoadingDetail(false));
   }, [selectedCourseId]);
 
+  useEffect(() => {
+    if (selectedCourse && !selectedCourseEditable) {
+      setLessonEditing({ mode: 'closed' });
+      setChapterEditing({ mode: 'closed' });
+      setDragging(null);
+    }
+  }, [selectedCourse?.id, selectedCourse?.status, selectedCourseEditable]);
+
   function toggleChapter(id: string) {
     setExpandedChapters(prev => {
       const next = new Set(prev);
@@ -409,9 +499,74 @@ export default function TeacherContentPage() {
     setVideoFile(null); setPdfFile(null); setSlideFile(null);
   }
 
+  async function refreshSelectedCourseDetail() {
+    const detail = await svc.getCourseDetail(selectedCourseId);
+    setChapters(sortChapters(detail.chapters));
+  }
+
+  async function reorderChapter(draggedId: string, targetId: string) {
+    if (!selectedCourseId || draggedId === targetId || reorderSaving) return;
+    if (!selectedCourseEditable) {
+      notifyCourseLocked();
+      return;
+    }
+    const fromIndex = chapters.findIndex(ch => ch.id === draggedId);
+    const toIndex = chapters.findIndex(ch => ch.id === targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+
+    const next = moveItem(chapters, fromIndex, toIndex)
+      .map((chapter, idx) => ({ ...chapter, position: idx + 1 }));
+    setChapters(next);
+    setReorderSaving(true);
+    try {
+      const detail = await svc.reorderChapters(selectedCourseId, next.map(ch => ch.id));
+      setChapters(sortChapters(detail.chapters));
+    } catch (err: unknown) {
+      notify.error(err instanceof Error ? err.message : 'Không lưu được thứ tự chương');
+      await refreshSelectedCourseDetail().catch(() => {});
+    } finally {
+      setReorderSaving(false);
+      setDragging(null);
+    }
+  }
+
+  async function reorderLesson(chapterId: string, draggedId: string, targetId: string) {
+    if (!selectedCourseId || draggedId === targetId || reorderSaving) return;
+    if (!selectedCourseEditable) {
+      notifyCourseLocked();
+      return;
+    }
+    const chapter = chapters.find(ch => ch.id === chapterId);
+    if (!chapter) return;
+    const fromIndex = chapter.lessons.findIndex(lesson => lesson.id === draggedId);
+    const toIndex = chapter.lessons.findIndex(lesson => lesson.id === targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+
+    const nextLessons = moveItem(chapter.lessons, fromIndex, toIndex)
+      .map((lesson, idx) => ({ ...lesson, position: idx + 1 }));
+    const nextChapters = chapters.map(ch =>
+      ch.id === chapterId ? { ...ch, lessons: nextLessons } : ch);
+    setChapters(nextChapters);
+    setReorderSaving(true);
+    try {
+      const detail = await svc.reorderLessons(selectedCourseId, chapterId, nextLessons.map(lesson => lesson.id));
+      setChapters(sortChapters(detail.chapters));
+    } catch (err: unknown) {
+      notify.error(err instanceof Error ? err.message : 'Không lưu được thứ tự bài giảng');
+      await refreshSelectedCourseDetail().catch(() => {});
+    } finally {
+      setReorderSaving(false);
+      setDragging(null);
+    }
+  }
+
   // ── Lesson handlers ──────────────────────────────────────────────
 
   function startAddLesson(chapterId: string) {
+    if (!selectedCourseEditable) {
+      notifyCourseLocked();
+      return;
+    }
     const chapter = chapters.find(c => c.id === chapterId);
     setLessonForm(emptyLessonForm((chapter?.lessons.length ?? 0) + 1));
     clearFiles();
@@ -420,6 +575,10 @@ export default function TeacherContentPage() {
   }
 
   function startEditLesson(chapterId: string, lesson: TeacherLessonResponse) {
+    if (!selectedCourseEditable) {
+      notifyCourseLocked();
+      return;
+    }
     setLessonForm(lessonToForm(lesson));
     clearFiles();
     setLessonEditing({ mode: 'edit', chapterId, lessonId: lesson.id });
@@ -436,6 +595,10 @@ export default function TeacherContentPage() {
   async function saveLesson() {
     if (!lessonForm.title.trim()) { notify.error('Vui lòng nhập tên bài giảng'); return; }
     if (lessonEditing.mode === 'closed') return;
+    if (!selectedCourseEditable) {
+      notifyCourseLocked();
+      return;
+    }
 
     // FIX: validate embed URL phải là YouTube hoặc Vimeo hợp lệ
     if (lessonForm.videoSource === 'embed' && lessonForm.videoEmbedUrl.trim()) {
@@ -459,6 +622,7 @@ export default function TeacherContentPage() {
         description:  lessonForm.description.trim() || undefined,
         position:     lessonForm.position,
         isFree:       lessonForm.isFree,
+        videoSource:  lessonForm.videoSource,
         // Chỉ gửi embedUrl khi user chọn tab embed và đã nhập URL
         videoEmbedUrl: lessonForm.videoSource === 'embed' && lessonForm.videoEmbedUrl.trim()
           ? lessonForm.videoEmbedUrl.trim() : undefined,
@@ -478,8 +642,11 @@ export default function TeacherContentPage() {
       let uploadError = false;
       try {
         if (videoFile) {
-          await svc.uploadVideo(selectedCourseId, chapterId, lesson.id, videoFile,
-            pct => setUploadProgress(pct));
+          const durationSec = await getVideoDurationSec(videoFile);
+          await svc.uploadVideo(selectedCourseId, chapterId, lesson.id, videoFile, {
+            durationSec: durationSec ?? undefined,
+            onProgress: (pct) => setUploadProgress(pct),
+          });
         }
         if (pdfFile) {
           await svc.uploadDocument(lesson.id, pdfFile);
@@ -518,10 +685,19 @@ export default function TeacherContentPage() {
 
   // FIX: thay window.confirm bằng confirm inline — không blocking, có loading state
   function deleteLessonHandler(chapterId: string, lessonId: string, title: string) {
+    if (!selectedCourseEditable) {
+      notifyCourseLocked();
+      return;
+    }
     setDeleteConfirm({ type: 'lesson', id: lessonId, chapterId, title });
   }
 
   async function confirmDeleteLesson(lessonId: string, chapterId: string) {
+    if (!selectedCourseEditable) {
+      setDeleteConfirm(null);
+      notifyCourseLocked();
+      return;
+    }
     setDeleteConfirm(null);
     try {
       await svc.deleteLesson(selectedCourseId, chapterId, lessonId);
@@ -541,12 +717,20 @@ export default function TeacherContentPage() {
   // ── Chapter handlers ─────────────────────────────────────────────
 
   function startAddChapter() {
+    if (!selectedCourseEditable) {
+      notifyCourseLocked();
+      return;
+    }
     setChapterForm(emptyChapterForm(chapters.length + 1));
     setChapterEditing({ mode: 'new' });
     setLessonEditing({ mode: 'closed' });
   }
 
   function startEditChapter(ch: TeacherChapterResponse) {
+    if (!selectedCourseEditable) {
+      notifyCourseLocked();
+      return;
+    }
     setChapterForm({ title: ch.title, description: ch.description ?? '', position: ch.position });
     setChapterEditing({ mode: 'edit', chapterId: ch.id });
     setLessonEditing({ mode: 'closed' });
@@ -555,6 +739,10 @@ export default function TeacherContentPage() {
   async function saveChapter() {
     if (!chapterForm.title.trim()) { notify.error('Vui lòng nhập tên chương'); return; }
     if (chapterEditing.mode === 'closed') return;
+    if (!selectedCourseEditable) {
+      notifyCourseLocked();
+      return;
+    }
     setSaving(true);
     try {
       const req: svc.CreateChapterRequest = {
@@ -586,10 +774,19 @@ export default function TeacherContentPage() {
   }
 
   function deleteChapterHandler(chapterId: string, title: string) {
+    if (!selectedCourseEditable) {
+      notifyCourseLocked();
+      return;
+    }
     setDeleteConfirm({ type: 'chapter', id: chapterId, title });
   }
 
   async function confirmDeleteChapter(chapterId: string) {
+    if (!selectedCourseEditable) {
+      setDeleteConfirm(null);
+      notifyCourseLocked();
+      return;
+    }
     setDeleteConfirm(null);
     try {
       await svc.deleteChapter(selectedCourseId, chapterId);
@@ -608,6 +805,20 @@ export default function TeacherContentPage() {
   // ─────────────────────────────────────────────────────────────────
 
   const rightPanel = () => {
+    if (selectedCourseLockMessage) {
+      return (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/10 text-amber-600">
+            <Lock className="h-6 w-6" />
+          </div>
+          <h3 className="text-lg font-extrabold text-on-surface">Khong the chinh sua noi dung</h3>
+          <p className="mt-2 max-w-md text-sm text-on-surface-variant">
+            {selectedCourseLockMessage}
+          </p>
+        </div>
+      );
+    }
+
     // Chapter form
     if (chapterEditing.mode !== 'closed') {
       return (
@@ -740,7 +951,6 @@ export default function TeacherContentPage() {
                     ...lessonForm,
                     videoSource: url ? 'embed' : 'none',
                     videoEmbedUrl: url,
-                    videoStoragePath: '',  // xóa path upload cũ khi chuyển sang embed
                   })}
                   onFileSelect={f => {
                     setVideoFile(f);
@@ -835,8 +1045,8 @@ export default function TeacherContentPage() {
                 </h3>
                 <p className="text-sm text-on-surface-variant mt-1">
                   {deleteConfirm.type === 'chapter'
-                    ? `Xóa chương "${deleteConfirm.title}" sẽ xóa toàn bộ bài giảng bên trong. Hành động này không thể hoàn tác.`
-                    : `Xóa bài giảng "${deleteConfirm.title}"? Hành động này không thể hoàn tác.`
+                    ? `Xóa chương "${deleteConfirm.title}" sẽ xóa toàn bộ bài giảng và file đã upload bên trong. Hành động này không thể hoàn tác.`
+                    : `Xóa bài giảng "${deleteConfirm.title}" sẽ xóa cả file đã upload. Hành động này không thể hoàn tác.`
                   }
                 </p>
               </div>
@@ -931,13 +1141,11 @@ export default function TeacherContentPage() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Bài giảng</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <TeacherNotificationBell />
             <img
-              src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
+              src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
               alt="Teacher avatar"
-              className="w-9 h-9 rounded-full border-2 border-primary/30"
+              className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
             />
           </div>
         </header>
@@ -976,6 +1184,16 @@ export default function TeacherContentPage() {
                 </select>
               </label>
             )}
+
+            {selectedCourseLockMessage && (
+              <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700">
+                <Lock className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                <div>
+                  <p className="font-bold">Khoa hoc dang bi khoa chinh sua</p>
+                  <p>{selectedCourseLockMessage}</p>
+                </div>
+              </div>
+            )}
           </motion.div>
 
           {/* Content grid */}
@@ -992,6 +1210,12 @@ export default function TeacherContentPage() {
                     <BookOpen className="w-4 h-4 text-primary" />
                     Cấu trúc khóa học
                   </h3>
+                  {reorderSaving && (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-primary">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Đang lưu
+                    </span>
+                  )}
                 </div>
 
                 {loadingDetail ? (
@@ -1012,12 +1236,33 @@ export default function TeacherContentPage() {
                       return (
                         <div
                           key={chapter.id}
+                          draggable={selectedCourseEditable && !reorderSaving}
+                          onDragStart={e => {
+                            e.dataTransfer.effectAllowed = 'move';
+                            setDragging({ type: 'chapter', id: chapter.id });
+                          }}
+                          onDragOver={e => e.preventDefault()}
+                          onDrop={e => {
+                            e.preventDefault();
+                            if (dragging?.type === 'chapter') reorderChapter(dragging.id, chapter.id);
+                          }}
+                          onDragEnd={() => setDragging(null)}
                           className={`border rounded-xl overflow-hidden ${
                             isChapterEditing ? 'border-primary/50' : 'border-outline-variant/30'
-                          }`}
+                          } ${dragging?.type === 'chapter' && dragging.id === chapter.id ? 'opacity-60' : ''}`}
                         >
                           {/* Chapter header */}
                           <div className="flex items-center bg-surface-container/50 hover:bg-surface-container transition-colors">
+                            <span
+                              title={selectedCourseEditable ? 'Keo de doi thu tu chuong' : selectedCourseLockMessage}
+                              className={`pl-2 ${
+                                selectedCourseEditable
+                                  ? 'text-on-surface-variant/60 cursor-grab active:cursor-grabbing'
+                                  : 'text-on-surface-variant/25 cursor-not-allowed'
+                              }`}
+                            >
+                              <GripVertical className="w-4 h-4" />
+                            </span>
                             <button
                               onClick={() => toggleChapter(chapter.id)}
                               className="flex items-center gap-2 px-3 py-2.5 flex-1 text-left min-w-0"
@@ -1036,15 +1281,25 @@ export default function TeacherContentPage() {
                             <div className="flex items-center gap-0.5 pr-2">
                               <button
                                 onClick={() => startEditChapter(chapter)}
-                                title="Sửa chương"
-                                className="p-1.5 text-blue-500 hover:bg-blue-500/10 rounded transition-colors"
+                                disabled={!selectedCourseEditable}
+                                title={selectedCourseEditable ? 'Sua chuong' : selectedCourseLockMessage}
+                                className={`p-1.5 rounded transition-colors ${
+                                  selectedCourseEditable
+                                    ? 'text-blue-500 hover:bg-blue-500/10'
+                                    : 'text-on-surface-variant/40 cursor-not-allowed'
+                                }`}
                               >
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 onClick={() => deleteChapterHandler(chapter.id, chapter.title)}
-                                title="Xóa chương"
-                                className="p-1.5 text-red-500 hover:bg-red-500/10 rounded transition-colors"
+                                disabled={!selectedCourseEditable}
+                                title={selectedCourseEditable ? 'Xoa chuong' : selectedCourseLockMessage}
+                                className={`p-1.5 rounded transition-colors ${
+                                  selectedCourseEditable
+                                    ? 'text-red-500 hover:bg-red-500/10'
+                                    : 'text-on-surface-variant/40 cursor-not-allowed'
+                                }`}
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -1068,10 +1323,39 @@ export default function TeacherContentPage() {
                                     return (
                                       <div
                                         key={lesson.id}
+                                        draggable={selectedCourseEditable && !reorderSaving}
+                                        onDragStart={e => {
+                                          e.stopPropagation();
+                                          e.dataTransfer.effectAllowed = 'move';
+                                          setDragging({ type: 'lesson', chapterId: chapter.id, id: lesson.id });
+                                        }}
+                                        onDragOver={e => {
+                                          if (dragging?.type === 'lesson' && dragging.chapterId === chapter.id) {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                          }
+                                        }}
+                                        onDrop={e => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          if (dragging?.type === 'lesson' && dragging.chapterId === chapter.id) {
+                                            reorderLesson(chapter.id, dragging.id, lesson.id);
+                                          }
+                                        }}
+                                        onDragEnd={() => setDragging(null)}
                                         className={`flex items-center gap-2 px-2 py-2 rounded-lg group ${
                                           isEditing ? 'bg-primary/10' : 'hover:bg-surface-container/50'
-                                        }`}
+                                        } ${dragging?.type === 'lesson' && dragging.id === lesson.id ? 'opacity-60' : ''}`}
                                       >
+                                        <span title={selectedCourseEditable ? 'Keo de doi thu tu bai giang' : selectedCourseLockMessage}>
+                                          <GripVertical
+                                            className={`w-3.5 h-3.5 flex-shrink-0 ${
+                                              selectedCourseEditable
+                                                ? 'text-on-surface-variant/50 cursor-grab active:cursor-grabbing'
+                                                : 'text-on-surface-variant/25 cursor-not-allowed'
+                                            }`}
+                                          />
+                                        </span>
                                         <span className="text-xs font-mono text-on-surface-variant flex-shrink-0 w-5 text-right">
                                           {lesson.position}.
                                         </span>
@@ -1083,15 +1367,25 @@ export default function TeacherContentPage() {
                                         )}
                                         <button
                                           onClick={() => startEditLesson(chapter.id, lesson)}
-                                          title="Sửa"
-                                          className="p-1.5 text-blue-500 hover:bg-blue-500/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                          disabled={!selectedCourseEditable}
+                                          title={selectedCourseEditable ? 'Sua' : selectedCourseLockMessage}
+                                          className={`p-1.5 rounded opacity-0 transition-opacity group-hover:opacity-100 ${
+                                            selectedCourseEditable
+                                              ? 'text-blue-500 hover:bg-blue-500/10'
+                                              : 'text-on-surface-variant/40 cursor-not-allowed'
+                                          }`}
                                         >
                                           <Pencil className="w-3.5 h-3.5" />
                                         </button>
                                         <button
                                           onClick={() => deleteLessonHandler(chapter.id, lesson.id, lesson.title)}
-                                          title="Xóa"
-                                          className="p-1.5 text-red-500 hover:bg-red-500/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                          disabled={!selectedCourseEditable}
+                                          title={selectedCourseEditable ? 'Xoa' : selectedCourseLockMessage}
+                                          className={`p-1.5 rounded opacity-0 transition-opacity group-hover:opacity-100 ${
+                                            selectedCourseEditable
+                                              ? 'text-red-500 hover:bg-red-500/10'
+                                              : 'text-on-surface-variant/40 cursor-not-allowed'
+                                          }`}
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
@@ -1100,7 +1394,13 @@ export default function TeacherContentPage() {
                                   })}
                                   <button
                                     onClick={() => startAddLesson(chapter.id)}
-                                    className="w-full flex items-center justify-center gap-2 mt-1 px-2 py-2 text-sm font-bold text-primary hover:bg-primary/5 rounded-lg transition-colors"
+                                    disabled={!selectedCourseEditable}
+                                    title={selectedCourseEditable ? 'Them bai giang' : selectedCourseLockMessage}
+                                    className={`w-full flex items-center justify-center gap-2 mt-1 px-2 py-2 text-sm font-bold rounded-lg transition-colors ${
+                                      selectedCourseEditable
+                                        ? 'text-primary hover:bg-primary/5'
+                                        : 'text-on-surface-variant/40 cursor-not-allowed'
+                                    }`}
                                   >
                                     <Plus className="w-4 h-4" />
                                     Thêm bài giảng
@@ -1119,7 +1419,13 @@ export default function TeacherContentPage() {
                 {!loadingDetail && (
                   <button
                     onClick={startAddChapter}
-                    className="w-full mt-3 flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-on-surface-variant border-2 border-dashed border-outline-variant hover:border-primary hover:text-primary rounded-xl transition-colors"
+                    disabled={!selectedCourseEditable}
+                    title={selectedCourseEditable ? 'Them chuong' : selectedCourseLockMessage}
+                    className={`w-full mt-3 flex items-center justify-center gap-2 py-2.5 text-sm font-bold border-2 border-dashed rounded-xl transition-colors ${
+                      selectedCourseEditable
+                        ? 'text-on-surface-variant border-outline-variant hover:border-primary hover:text-primary'
+                        : 'text-on-surface-variant/40 border-outline-variant/40 cursor-not-allowed'
+                    }`}
                   >
                     <Plus className="w-4 h-4" />
                     Thêm chương

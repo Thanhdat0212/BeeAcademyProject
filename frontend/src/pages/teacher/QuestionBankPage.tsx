@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
@@ -17,10 +18,10 @@ import {
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Megaphone, RefreshCcw, Filter,
   ChevronDown, Zap, TrendingUp, Minus, Database,
-  Save, Loader2, CheckCircle2, Circle, FileSpreadsheet, Sparkles, Lock,
+  Save, Loader2, CheckCircle2, Circle, FileSpreadsheet, Sparkles, Lock, UserCircle,
 } from 'lucide-react';
-import ExcelImportModal from '../../components/teacher/ExcelImportModal';
-import AIScanModal from '../../components/teacher/AIScanModal';
+import ExcelImportModal from './ExcelImportModal';
+import AIScanModal from './AIScanModal';
 
 // ═══════════════════════════════════════════════════════════════════
 //  NAVIGATION
@@ -38,6 +39,8 @@ const NAV_ITEMS = [
   { icon: Megaphone,       label: 'Khiếu nại',          path: '/teacher/complaints' },
   { icon: BarChart2,       label: 'Doanh thu',          path: '/teacher/revenue'    },
   { icon: Landmark,        label: 'TK ngân hàng',       path: '/teacher/bank'       },
+  { icon: UserCircle,      label: 'Hồ sơ',              path: '/teacher/profile'    },
+  { icon: Lock,            label: 'Tài khoản',           path: '/teacher/account'    },
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -889,7 +892,7 @@ export default function QuestionBankPage() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Ngân hàng câu hỏi</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="text-on-surface-variant hover:text-primary"><Bell className="w-5 h-5" /></button>
+            <TeacherNotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold text-on-surface leading-none">{user?.name ?? 'Giáo viên'}</p>
@@ -897,7 +900,7 @@ export default function QuestionBankPage() {
               </div>
               <img
                 src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'GV')}&background=7c3aed&color=fff&bold=true&size=64`}
-                alt="Avatar" className="w-9 h-9 rounded-full border-2 border-primary/30"
+                alt="Avatar" className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
               />
             </div>
           </div>

@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 /**
  * TeacherRevenuePage — Trang "Doanh thu" cho Giáo viên (UC26 chi tiết + UC33)
  *
@@ -26,7 +27,7 @@ import {
   Bell, LogOut, Menu, X,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, DollarSign, Clock, CheckCircle2,
-  TrendingUp, Calendar, Receipt, ArrowRight, Megaphone, Database,
+  TrendingUp, Calendar, Receipt, ArrowRight, Megaphone, Database, UserCircle, Lock,
 } from 'lucide-react';
 
 type PayoutStatus = 'PENDING' | 'PROCESSING' | 'PAID';
@@ -53,6 +54,8 @@ const NAV_ITEMS = [
   { icon: Megaphone,       label: 'Khiếu nại',          path: '/teacher/complaints',},
   { icon: BarChart2,       label: 'Doanh thu',          path: '/teacher/revenue',  },
   { icon: Landmark,        label: 'TK ngân hàng',       path: '/teacher/bank',     },
+  { icon: UserCircle,      label: 'Hồ sơ',              path: '/teacher/profile',  },
+  { icon: Lock,            label: 'Tài khoản',           path: '/teacher/account',  },
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -294,13 +297,11 @@ export default function TeacherRevenuePage() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Doanh thu</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <TeacherNotificationBell />
             <img
-              src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
+              src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
               alt="Teacher avatar"
-              className="w-9 h-9 rounded-full border-2 border-primary/30"
+              className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
             />
           </div>
         </header>

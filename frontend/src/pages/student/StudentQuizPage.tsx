@@ -17,11 +17,14 @@ import {
 } from 'lucide-react';
 import { notify } from '../../lib/toast';
 import * as quizSvc from '../../api/quizService';
+import { getCourseDetail } from '../../api/courseService';
+import { useCourseStore } from '../../store/useCourseStore';
 import type {
   QuizAttemptStartResponse,
   QuizResultResponse,
   QuizResultDetail,
 } from '../../api/quizService';
+import type { ChapterDetail, LessonDetail } from '../../types/api';
 
 // ═══════════════════════════════════════════════════════════════════
 //  ScoreCircle — SVG vòng tròn điểm số (tái sử dụng từ CourseDetailPage)
@@ -177,9 +180,23 @@ function ResultDetailItem({ detail, index }: { detail: QuizResultDetail; index: 
 
 type PagePhase = 'loading' | 'error' | 'quiz' | 'submitting' | 'results';
 
+function isVideoLesson(lesson: LessonDetail): boolean {
+  return Boolean(lesson.videoUrl || lesson.videoEmbedUrl) || (lesson.documents?.length ?? 0) === 0;
+}
+
+function getChapterVideoProgress(
+  chapter: ChapterDetail,
+  completedLessonIds: string[],
+): { total: number; completed: number } {
+  const videoLessons = chapter.lessons.filter(isVideoLesson);
+  const completed = videoLessons.filter(lesson => completedLessonIds.includes(lesson.id)).length;
+  return { total: videoLessons.length, completed };
+}
+
 export default function StudentQuizPage() {
   const { courseId, chapterId } = useParams<{ courseId: string; chapterId: string }>();
   const navigate = useNavigate();
+  const completedLessons = useCourseStore((state) => state.completedLessons);
 
   const [phase, setPhase] = useState<PagePhase>('loading');
   const [errorMsg, setErrorMsg] = useState('');
@@ -193,22 +210,55 @@ export default function StudentQuizPage() {
 
   // Bắt đầu quiz
   useEffect(() => {
-    if (!chapterId) { setErrorMsg('Không tìm thấy chương.'); setPhase('error'); return; }
+    if (!courseId || !chapterId) {
+      setErrorMsg('Không tìm thấy khóa học hoặc chương.');
+      setPhase('error');
+      return;
+    }
 
-    quizSvc.startQuiz(chapterId)
-      .then(data => {
+    let cancelled = false;
+
+    async function loadQuiz() {
+      setPhase('loading');
+      try {
+        const detail = await getCourseDetail(courseId!);
+        if (cancelled) return;
+
+        const chapter = detail.chapters.find(item => item.id === chapterId);
+        if (!chapter) {
+          setErrorMsg('Không tìm thấy chương.');
+          setPhase('error');
+          return;
+        }
+
+        const progress = getChapterVideoProgress(chapter, completedLessons[courseId!] ?? []);
+        if (progress.total > 0 && progress.completed < progress.total) {
+          setErrorMsg(`Bạn cần hoàn thành ${progress.completed}/${progress.total} video trong chương này trước khi làm quiz.`);
+          setPhase('error');
+          return;
+        }
+
+        const data = await quizSvc.startQuiz(chapterId!);
+        if (cancelled) return;
         setAttempt(data);
         const init: Record<string, null> = {};
         data.questions.forEach(q => { init[q.id] = null; });
         setAnswers(init);
         setPhase('quiz');
-      })
-      .catch(err => {
+      } catch (err) {
+        if (cancelled) return;
         const msg = err instanceof Error ? err.message : 'Không thể bắt đầu quiz.';
         setErrorMsg(msg);
         setPhase('error');
-      });
-  }, [chapterId]);
+      }
+    }
+
+    loadQuiz();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chapterId, completedLessons, courseId]);
 
   // Nộp bài — được gọi cả khi user tự nộp lẫn khi hết giờ
   const handleSubmit = useCallback(async () => {
@@ -233,11 +283,26 @@ export default function StudentQuizPage() {
 
   // Làm lại — gọi lại startQuiz
   async function handleRetry() {
-    if (!chapterId) return;
+    if (!courseId || !chapterId) return;
     setPhase('loading');
     setCurrentIdx(0);
     setResult(null);
     try {
+      const detail = await getCourseDetail(courseId);
+      const chapter = detail.chapters.find(item => item.id === chapterId);
+      if (!chapter) {
+        setErrorMsg('Không tìm thấy chương.');
+        setPhase('error');
+        return;
+      }
+
+      const progress = getChapterVideoProgress(chapter, completedLessons[courseId] ?? []);
+      if (progress.total > 0 && progress.completed < progress.total) {
+        setErrorMsg(`Bạn cần hoàn thành ${progress.completed}/${progress.total} video trong chương này trước khi làm quiz.`);
+        setPhase('error');
+        return;
+      }
+
       const data = await quizSvc.startQuiz(chapterId);
       setAttempt(data);
       const init: Record<string, null> = {};

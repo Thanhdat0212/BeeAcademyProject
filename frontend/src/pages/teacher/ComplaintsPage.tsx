@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 /**
  * TeacherComplaintsPage — Trang "Gửi khiếu nại cho Admin" (mở rộng UC11 cho GV)
  *
@@ -45,7 +46,7 @@ import {
   Bell, LogOut, Menu, X, Send, Plus,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, CheckCircle2, Clock, AlertTriangle,
-  XCircle, Megaphone, Database, MessageSquare, AlertCircle,
+  XCircle, Megaphone, Database, MessageSquare, AlertCircle, UserCircle, Lock,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -75,6 +76,8 @@ const NAV_ITEMS = [
   { icon: Megaphone,       label: 'Khiếu nại',          path: '/teacher/complaints',},
   { icon: BarChart2,       label: 'Doanh thu',          path: '/teacher/revenue',  },
   { icon: Landmark,        label: 'TK ngân hàng',       path: '/teacher/bank',     },
+  { icon: UserCircle,      label: 'Hồ sơ',              path: '/teacher/profile',  },
+  { icon: Lock,            label: 'Tài khoản',           path: '/teacher/account',  },
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -436,13 +439,11 @@ export default function TeacherComplaintsPage() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Khiếu nại</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <TeacherNotificationBell />
             <img
-              src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
+              src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
               alt="Teacher avatar"
-              className="w-9 h-9 rounded-full border-2 border-primary/30"
+              className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
             />
           </div>
         </header>

@@ -14,9 +14,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -51,8 +55,8 @@ public class ContentUploadService {
     private static final Set<String> ALLOWED_THUMBNAIL_MIME = Set.of(
             "image/jpeg", "image/png", "image/webp");
 
-    private static final long MAX_VIDEO_BYTES = 500L * 1024 * 1024;  // 500 MB
-    private static final long MAX_DOC_BYTES   =  50L * 1024 * 1024;  // 50 MB
+    private static final long MAX_VIDEO_BYTES = 2L * 1024 * 1024 * 1024; // 2 GB
+    private static final long MAX_DOC_BYTES   = 100L * 1024 * 1024;      // 100 MB
     private static final long MAX_THUMBNAIL_BYTES = 5L * 1024 * 1024; // 5 MB
 
     private final SupabaseStorageClient  storageClient;
@@ -67,16 +71,17 @@ public class ContentUploadService {
     /**
      * Upload video bài giảng lên private bucket.
      *
-     * <p>Path = {@code {courseId}/{chapterId}/{lessonId}.ext}
-     * — cố định theo lessonId, cho phép upsert khi GV upload lại video mới.
+     * <p>Path = {@code {courseId}/{chapterId}/{lessonId}/{uuid}.ext}
+     * — tạo object mới cho mỗi lần upload, rồi cleanup file cũ sau khi DB commit.
      *
      * @return UploadResponse với storagePath (không có publicUrl — private bucket)
      */
     @Transactional
     public UploadResponse uploadVideo(UUID courseId, UUID chapterId, UUID lessonId,
-                                       UUID teacherId, MultipartFile file) {
+                                       UUID teacherId, MultipartFile file,
+                                       Integer durationSec) {
         validateFile(file, ALLOWED_VIDEO_MIME, MAX_VIDEO_BYTES,
-                     "video MP4, WebM hoặc QuickTime", "500MB");
+                     "video MP4, WebM hoặc QuickTime", "2GB");
 
         // Load course để verify ownership
         Course course = courseRepository.findWithCategoryAndTeacherById(courseId)
@@ -88,23 +93,22 @@ public class ContentUploadService {
         Lesson lesson = lessonRepository.findByIdAndChapterId(lessonId, chapterId)
                 .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
 
+        String oldPath = lesson.getVideoStoragePath();
         String ext  = getExtension(file.getOriginalFilename(), "mp4");
-        // Path cố định theo lessonId → upload lại sẽ overwrite file cũ (upsert)
-        String path = courseId + "/" + chapterId + "/" + lessonId + "." + ext;
+        String path = courseId + "/" + chapterId + "/" + lessonId + "/"
+                + UUID.randomUUID() + "." + ext;
 
-        try {
-            storageClient.upload(VIDEO_BUCKET, path,
-                                 file.getContentType(), file.getBytes());
-        } catch (IOException e) {
-            throw new BusinessException("UPLOAD_FAILED",
-                    "Không thể đọc file video. Vui lòng thử lại.");
-        }
+        storageClient.upload(VIDEO_BUCKET, path,
+                             file.getContentType(), file.getResource(), file.getSize());
+        deleteUploadedObjectOnRollback(VIDEO_BUCKET, path);
 
-        // Ghi nhận path vào lesson (durationSec=0, GV cập nhật sau nếu cần)
-        lesson.setVideoStoragePath(path, 0);
+        // Lưu kèm duration do trình duyệt đọc từ metadata video trước khi upload.
+        int normalizedDuration = durationSec != null && durationSec > 0 ? durationSec : 0;
+        lesson.setVideoStoragePath(path, normalizedDuration);
         // BUG FIX: save lesson trực tiếp thay vì save cả Course aggregate
         // — tránh dirty-check toàn bộ chapters/lessons không liên quan
         lessonRepository.save(lesson);
+        deleteVideoAfterCommit(oldPath);
 
         log.info("Upload video thành công: bucket={} path={} size={}",
                  VIDEO_BUCKET, path, file.getSize());
@@ -131,7 +135,7 @@ public class ContentUploadService {
     public UploadResponse uploadDocument(UUID lessonId, UUID teacherId,
                                           String displayName, MultipartFile file) {
         validateFile(file, ALLOWED_DOC_MIME, MAX_DOC_BYTES,
-                     "PDF, PPTX hoặc DOCX", "50MB");
+                     "PDF, PPTX hoặc DOCX", "100MB");
 
         // SECURITY FIX: verify GV là chủ lesson trước khi cho phép upload.
         // Trước đây không có check này → bất kỳ GV nào cũng upload được vào lesson của người khác.
@@ -151,14 +155,9 @@ public class ContentUploadService {
         String path     = lessonId + "/" + UUID.randomUUID() + "." + ext;
         String fileType = ext;
 
-        String publicUrl;
-        try {
-            publicUrl = storageClient.upload(DOCS_BUCKET, path,
-                                              file.getContentType(), file.getBytes());
-        } catch (IOException e) {
-            throw new BusinessException("UPLOAD_FAILED",
-                    "Không thể đọc file tài liệu. Vui lòng thử lại.");
-        }
+        String publicUrl = storageClient.upload(DOCS_BUCKET, path,
+                                                file.getContentType(), file.getResource(), file.getSize());
+        deleteUploadedObjectOnRollback(DOCS_BUCKET, path);
 
         // DATA FIX: lưu CourseDocument vào DB để lesson detail có thể load lại được.
         // Position = số tài liệu hiện tại + 1 (thêm vào cuối)
@@ -190,27 +189,120 @@ public class ContentUploadService {
         String ext = imageExtension(file.getContentType());
         String path = "thumbnails/" + teacherId + "/" + UUID.randomUUID() + "." + ext;
 
-        String publicUrl;
-        try {
-            publicUrl = storageClient.upload(THUMBNAIL_BUCKET, path,
-                                             file.getContentType(), file.getBytes());
-        } catch (IOException e) {
-            throw new BusinessException("UPLOAD_FAILED",
-                    "Khong the doc file anh. Vui long thu lai.");
-        }
+        String publicUrl = storageClient.upload(THUMBNAIL_BUCKET, path,
+                                                file.getContentType(), file.getResource(), file.getSize());
 
         log.info("Upload course thumbnail thanh cong: teacherId={} path={} url={}",
                  teacherId, path, publicUrl);
         return new UploadResponse(path, publicUrl, ext, file.getSize());
     }
 
+    @Transactional
+    public UploadResponse uploadCourseIntroVideo(UUID teacherId, MultipartFile file) {
+        validateFile(file, ALLOWED_VIDEO_MIME, MAX_VIDEO_BYTES,
+                     "video MP4, WebM hoac QuickTime", "2GB");
+
+        String ext = getExtension(file.getOriginalFilename(), "mp4");
+        String path = "course-intros/" + teacherId + "/" + UUID.randomUUID() + "." + ext;
+
+        String publicUrl = storageClient.upload(DOCS_BUCKET, path,
+                                                file.getContentType(), file.getResource(), file.getSize());
+
+        log.info("Upload course intro video thanh cong: teacherId={} path={} url={}",
+                 teacherId, path, publicUrl);
+        return new UploadResponse(path, publicUrl, file.getContentType(), file.getSize());
+    }
+
     public String generateSignedVideoUrl(String storagePath) {
         return storageClient.generateSignedUrl(VIDEO_BUCKET, storagePath, 3600);
+    }
+
+    public void deleteVideoAfterCommit(String storagePath) {
+        scheduleDeleteAfterCommit(VIDEO_BUCKET, storagePath);
+    }
+
+    public void deleteLessonFilesAfterCommit(Collection<Lesson> lessons,
+                                             Collection<CourseDocument> documents) {
+        LinkedHashSet<String> videoPaths = new LinkedHashSet<>();
+        if (lessons != null) {
+            lessons.stream()
+                    .map(Lesson::getVideoStoragePath)
+                    .filter(Objects::nonNull)
+                    .filter(path -> !path.isBlank())
+                    .forEach(videoPaths::add);
+        }
+        videoPaths.forEach(path -> scheduleDeleteAfterCommit(VIDEO_BUCKET, path));
+
+        LinkedHashSet<String> docPaths = new LinkedHashSet<>();
+        if (documents != null) {
+            documents.stream()
+                    .map(CourseDocument::getFileUrl)
+                    .map(url -> extractPublicObjectPath(DOCS_BUCKET, url))
+                    .filter(Objects::nonNull)
+                    .filter(path -> !path.isBlank())
+                    .forEach(docPaths::add);
+        }
+        docPaths.forEach(path -> scheduleDeleteAfterCommit(DOCS_BUCKET, path));
     }
 
     // ========================================================================
     // Private helpers
     // ========================================================================
+
+    private void deleteUploadedObjectOnRollback(String bucket, String path) {
+        if (path == null || path.isBlank()) return;
+
+        Runnable cleanup = () -> deleteObjectQuietly(bucket, path);
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_ROLLED_BACK) {
+                    cleanup.run();
+                }
+            }
+        });
+    }
+
+    private void scheduleDeleteAfterCommit(String bucket, String path) {
+        if (path == null || path.isBlank()) return;
+
+        Runnable cleanup = () -> deleteObjectQuietly(bucket, path);
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            cleanup.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                cleanup.run();
+            }
+        });
+    }
+
+    private void deleteObjectQuietly(String bucket, String path) {
+        try {
+            storageClient.delete(bucket, path);
+        } catch (RuntimeException ex) {
+            log.warn("Không thể cleanup storage object {}/{}: {}", bucket, path, ex.getMessage());
+        }
+    }
+
+    private String extractPublicObjectPath(String bucket, String publicUrl) {
+        if (publicUrl == null || publicUrl.isBlank()) return null;
+        String marker = "/storage/v1/object/public/" + bucket + "/";
+        int markerIndex = publicUrl.indexOf(marker);
+        if (markerIndex >= 0) {
+            return publicUrl.substring(markerIndex + marker.length());
+        }
+        if (!publicUrl.startsWith("http://") && !publicUrl.startsWith("https://")) {
+            return publicUrl;
+        }
+        log.warn("Không xác định được object path từ public URL: {}", publicUrl);
+        return null;
+    }
 
     private void validateFile(MultipartFile file, Set<String> allowedMime,
                                long maxBytes, String typeDesc, String sizeDesc) {

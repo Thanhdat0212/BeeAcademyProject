@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -25,6 +26,8 @@ import {
   RefreshCw,
   Search,
   Send,
+  UserCircle,
+  Lock,
   X,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -57,6 +60,8 @@ const NAV_ITEMS = [
   { icon: Megaphone, label: 'Khiếu nại', path: '/teacher/complaints' },
   { icon: BarChart2, label: 'Doanh thu', path: '/teacher/revenue' },
   { icon: Landmark, label: 'TK ngân hàng', path: '/teacher/bank' },
+  { icon: UserCircle, label: 'Hồ sơ', path: '/teacher/profile' },
+  { icon: Lock, label: 'Tài khoản', path: '/teacher/account' },
 ];
 
 const QUICK_REPLY_TEMPLATES = [
@@ -103,6 +108,14 @@ function roleLabel(role: CourseDiscussionThread['authorRole']): string {
 
 function hasTeacherReply(thread: CourseDiscussionThread): boolean {
   return thread.replies.some(reply => reply.authorRole === 'teacher' || reply.authorRole === 'admin');
+}
+
+function directThreadDisplayName(thread: QaThread): string {
+  const firstMessage = thread.messages[0];
+  if (firstMessage?.authorRole === 'parent') {
+    return `${firstMessage.authorName} (phụ huynh của ${thread.studentName})`;
+  }
+  return thread.studentName;
 }
 
 function StatusBadge({ status }: { status: QaThreadStatus }) {
@@ -198,7 +211,10 @@ export default function TeacherQAPage() {
           t.studentName.toLowerCase().includes(q) ||
           t.courseTitle.toLowerCase().includes(q) ||
           (t.lessonTitle ?? '').toLowerCase().includes(q) ||
-          t.messages.some(m => m.content.toLowerCase().includes(q))
+          t.messages.some(m =>
+            m.authorName.toLowerCase().includes(q) ||
+            m.content.toLowerCase().includes(q)
+          )
         );
       });
   }, [courseFilter, searchTerm, statusFilter, threads]);
@@ -408,13 +424,11 @@ export default function TeacherQAPage() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Hỏi & Đáp</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <TeacherNotificationBell />
             <img
-              src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
+              src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
               alt="Teacher avatar"
-              className="w-9 h-9 rounded-full border-2 border-primary/30"
+              className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
             />
           </div>
         </header>
@@ -423,8 +437,8 @@ export default function TeacherQAPage() {
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-extrabold text-on-surface mb-1">Hỏi & Đáp với học sinh</h2>
-                <p className="text-on-surface-variant text-sm">Trả lời câu hỏi theo từng cuộc hội thoại và đánh dấu đã giải quyết khi xong.</p>
+                <h2 className="text-2xl font-extrabold text-on-surface mb-1">Hỏi & Đáp trực tiếp</h2>
+                <p className="text-on-surface-variant text-sm">Trả lời câu hỏi của học sinh hoặc phụ huynh theo từng cuộc hội thoại.</p>
               </div>
               <button
                 onClick={() => activeView === 'common' ? loadDiscussionThreads() : loadThreads()}
@@ -489,7 +503,7 @@ export default function TeacherQAPage() {
                     type="text"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
-                    placeholder="Tên học sinh, bài học, nội dung..."
+                    placeholder="Tên học sinh, phụ huynh, bài học, nội dung..."
                     className="w-full pl-9 pr-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant"
                   />
                 </div>
@@ -515,6 +529,7 @@ export default function TeacherQAPage() {
                   {filteredThreads.map(thread => {
                     const isSelected = thread.id === selectedId;
                     const firstMessage = thread.messages[0];
+                    const displayName = directThreadDisplayName(thread);
                     return (
                       <button
                         key={thread.id}
@@ -527,12 +542,12 @@ export default function TeacherQAPage() {
                       >
                         <div className="flex items-start gap-2 mb-2">
                           <img
-                            src={`https://ui-avatars.com/api/?name=${encodeURIComponent(thread.studentName)}&size=36&background=random&bold=true`}
-                            alt={thread.studentName}
+                            src={`https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&size=36&background=random&bold=true`}
+                            alt={displayName}
                             className="w-8 h-8 rounded-full flex-shrink-0"
                           />
                           <div className="min-w-0 flex-1">
-                            <p className={`font-bold text-sm line-clamp-1 ${isSelected ? 'text-primary' : 'text-on-surface'}`}>{thread.studentName}</p>
+                            <p className={`font-bold text-sm line-clamp-1 ${isSelected ? 'text-primary' : 'text-on-surface'}`}>{displayName}</p>
                             <p className="text-xs text-on-surface-variant line-clamp-1">{thread.lessonTitle ?? thread.courseTitle}</p>
                           </div>
                           <StatusBadge status={thread.status} />
@@ -560,7 +575,7 @@ export default function TeacherQAPage() {
                   <div className="px-5 py-4 border-b border-outline-variant/30">
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div className="min-w-0 flex-1">
-                        <p className="font-extrabold text-on-surface">{selectedThread.studentName}</p>
+                        <p className="font-extrabold text-on-surface">{directThreadDisplayName(selectedThread)}</p>
                         <p className="text-xs text-on-surface-variant">Bắt đầu: {formatDateTime(selectedThread.createdAt)}</p>
                       </div>
                       <StatusBadge status={selectedThread.status} />

@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
@@ -14,6 +15,7 @@ import {
   CheckCircle2, PlusCircle,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Megaphone, Database, Loader2, PackageOpen,
+  UserCircle, Lock,
 } from 'lucide-react';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -70,11 +72,13 @@ const NAV_ITEMS = [
   { icon: PenSquare,       label: 'Quiz chương',       path: '/teacher/quiz'      },
   { icon: Database,        label: 'Ngân hàng câu hỏi', path: '/teacher/questions' },
   { icon: GraduationCap,   label: 'Bài kiểm tra',      path: '/teacher/exam'      },
-  { icon: ClipboardList,   label: 'Chấm điểm',         path: '/teacher/grades'    },
+  { icon: ClipboardList,   label: 'Chấm tự luận',      path: '/teacher/grades'    },
   { icon: HelpCircle,      label: 'Hỏi & Đáp',         path: '/teacher/qa'        },
   { icon: Megaphone,       label: 'Khiếu nại',         path: '/teacher/complaints'},
   { icon: BarChart2,       label: 'Doanh thu',         path: '/teacher/revenue'   },
   { icon: Landmark,        label: 'TK ngân hàng',      path: '/teacher/bank'      },
+  { icon: UserCircle,      label: 'Hồ sơ',             path: '/teacher/profile'   },
+  { icon: Lock,            label: 'Tài khoản',         path: '/teacher/account'   },
 ];
 
 // ─── StatCard ────────────────────────────────────────────────────────────────
@@ -319,18 +323,16 @@ export default function DashboardTeacher() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Tổng quan</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <TeacherNotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold text-on-surface leading-none">{user?.name ?? 'Giáo viên'}</p>
                 <p className="text-xs text-on-surface-variant mt-0.5">Giáo viên</p>
               </div>
               <img
-                src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
+                src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
                 alt="avatar"
-                className="w-9 h-9 rounded-full border-2 border-primary/30"
+                className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
               />
             </div>
           </div>

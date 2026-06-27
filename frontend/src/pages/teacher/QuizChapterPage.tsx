@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 /**
  * QuizChapterPage — /teacher/quiz
  * GV chọn khóa học → chọn chương → cấu hình quiz
@@ -24,7 +25,7 @@ import {
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Megaphone, Database, CheckCircle2,
   ChevronDown, Shuffle, Timer, AlertTriangle,
-  Circle, ListChecks, Zap, TrendingUp, Minus,
+  Circle, ListChecks, Zap, TrendingUp, Minus, UserCircle, Lock,
 } from 'lucide-react';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
@@ -41,6 +42,8 @@ const NAV_ITEMS = [
   { icon: Megaphone,       label: 'Khiếu nại',          path: '/teacher/complaints'},
   { icon: BarChart2,       label: 'Doanh thu',          path: '/teacher/revenue'   },
   { icon: Landmark,        label: 'TK ngân hàng',       path: '/teacher/bank'      },
+  { icon: UserCircle,      label: 'Hồ sơ',              path: '/teacher/profile'   },
+  { icon: Lock,            label: 'Tài khoản',           path: '/teacher/account'   },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -317,13 +320,13 @@ export default function QuizChapterPage() {
           <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 text-on-surface-variant hover:bg-surface-container rounded-lg"><Menu className="w-5 h-5" /></button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Quiz chương</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="text-on-surface-variant hover:text-primary"><Bell className="w-5 h-5" /></button>
+            <TeacherNotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold text-on-surface leading-none">{user?.name ?? 'Giáo viên'}</p>
                 <p className="text-xs text-on-surface-variant mt-0.5">Giáo viên</p>
               </div>
-              <img src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'GV')}&background=7c3aed&color=fff&bold=true&size=64`} alt="avatar" className="w-9 h-9 rounded-full border-2 border-primary/30" />
+              <img src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'GV')}&background=7c3aed&color=fff&bold=true&size=64`} alt="avatar" className="w-9 h-9 rounded-full object-cover border-2 border-primary/30" />
             </div>
           </div>
         </header>

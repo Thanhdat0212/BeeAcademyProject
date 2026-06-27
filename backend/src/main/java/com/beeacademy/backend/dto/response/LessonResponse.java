@@ -34,7 +34,6 @@ public record LessonResponse(
     public static LessonResponse fromEntity(Lesson lesson, boolean includeUrl,
                                              String signedUrl,
                                              List<CourseDocument> docs) {
-        // [Đồng bộ team3/develop · trial-course] Bài học isFree cho xem video dù chưa mua khóa
         boolean canSee = includeUrl || Boolean.TRUE.equals(lesson.getIsFree());
         String videoUrl = canSee
                 ? firstNonBlank(signedUrl, lesson.getVideoUrl())

@@ -2,12 +2,14 @@ package com.beeacademy.backend.service;
 
 import com.beeacademy.backend.dto.request.ExamConfigRequest;
 import com.beeacademy.backend.dto.request.ExamQuestionRandomRequest;
+import com.beeacademy.backend.dto.request.GradeExamAttemptRequest;
 import com.beeacademy.backend.dto.request.SubmitExamRequest;
 import com.beeacademy.backend.dto.response.ExamConfigResponse;
 import com.beeacademy.backend.dto.response.QuestionStatsResponse;
 import com.beeacademy.backend.dto.response.StudentExamResultResponse;
 import com.beeacademy.backend.dto.response.StudentExamStartResponse;
 import com.beeacademy.backend.dto.response.StudentExamSummaryResponse;
+import com.beeacademy.backend.dto.response.TeacherExamAttemptResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Chapter;
@@ -297,6 +299,99 @@ public class ExamService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public List<TeacherExamAttemptResponse> listTeacherExamAttempts(AuthenticatedUser me) {
+        return examAttemptRepository.findSubmittedAttemptsForTeacher(me.userId()).stream()
+                .map(this::toTeacherExamAttemptResponse)
+                .toList();
+    }
+
+    @Transactional
+    public TeacherExamAttemptResponse gradeExamAttempt(
+            UUID attemptId,
+            AuthenticatedUser me,
+            GradeExamAttemptRequest request) {
+        ExamAttempt attempt = examAttemptRepository
+                .findSubmittedAttemptForTeacher(attemptId, me.userId())
+                .orElseThrow(() -> new ResourceNotFoundException("ExamAttempt", attemptId));
+
+        attempt.grade(request.scorePercent(), request.feedback());
+        ExamAttempt saved = examAttemptRepository.save(attempt);
+        log.info("Teacher {} graded exam attempt {} with score={}",
+                me.userId(), attemptId, request.scorePercent());
+        return toTeacherExamAttemptResponse(saved);
+    }
+
+    private TeacherExamAttemptResponse toTeacherExamAttemptResponse(ExamAttempt attempt) {
+        List<SnapshotExamQuestion> questions = readSnapshotQuestions(attempt.getQuestionsSnapshot());
+        Map<String, List<Integer>> answers = readAnswers(attempt.getAnswers());
+        List<TeacherExamAttemptResponse.QuestionReview> reviews = questions.stream()
+                .map(question -> {
+                    List<Integer> studentAnswers = normalizeAnswer(answers.get(question.id()));
+                    List<Integer> correctAnswers = normalizeAnswer(question.correctIndices());
+                    boolean correct = studentAnswers.equals(correctAnswers);
+                    double points = question.points() != null ? question.points() : 0.0;
+                    return new TeacherExamAttemptResponse.QuestionReview(
+                            question.id(),
+                            question.text(),
+                            question.type(),
+                            question.options(),
+                            studentAnswers,
+                            correctAnswers,
+                            correct,
+                            points,
+                            correct ? points : 0.0,
+                            question.explanation());
+                })
+                .toList();
+
+        Double autoScore = attempt.getScorePercent() != null
+                ? attempt.getScorePercent().doubleValue()
+                : null;
+        Double manualScore = attempt.getManualScorePercent() != null
+                ? attempt.getManualScorePercent().doubleValue()
+                : null;
+        Double effectiveScore = attempt.getEffectiveScorePercent() != null
+                ? attempt.getEffectiveScorePercent().doubleValue()
+                : null;
+
+        return new TeacherExamAttemptResponse(
+                attempt.getId(),
+                attempt.getStudent().getId(),
+                attempt.getStudent().getFullName(),
+                attempt.getExamConfig().getCourse().getId(),
+                attempt.getExamConfig().getCourse().getTitle(),
+                attempt.getExamConfig().getId(),
+                attempt.getExamConfig().getName(),
+                attempt.getExamConfig().getSlotIndex(),
+                attempt.getAttemptNumber(),
+                attempt.getStartedAt(),
+                attempt.getSubmittedAt(),
+                autoScore,
+                manualScore,
+                effectiveScore,
+                attempt.getExamConfig().getPassScorePercent(),
+                attempt.getPassed(),
+                attempt.getTeacherFeedback(),
+                attempt.getGradedAt(),
+                attempt.getGradedAt() == null ? "pending" : "graded",
+                reviews);
+    }
+
+    private Map<String, List<Integer>> readAnswers(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(
+                    json,
+                    new TypeReference<Map<String, List<Integer>>>() {});
+        } catch (Exception e) {
+            throw new BusinessException("INTERNAL_ERROR",
+                    "Không thể đọc đáp án bài kiểm tra.");
+        }
+    }
+
     private StudentExamSummaryResponse buildStudentExamSummary(
             ExamConfig config, int slotIndex, List<Chapter> requiredChapters, UUID studentId) {
         Map<UUID, QuizConfig> quizByChapter = new HashMap<>();
@@ -351,8 +446,8 @@ public class ExamService {
                 configured,
                 unlocked,
                 passed,
-                latestAttempt != null && latestAttempt.getScorePercent() != null
-                        ? latestAttempt.getScorePercent().doubleValue()
+                latestAttempt != null && latestAttempt.getEffectiveScorePercent() != null
+                        ? latestAttempt.getEffectiveScorePercent().doubleValue()
                         : null,
                 attemptsUsed,
                 requiredChapters.size(),

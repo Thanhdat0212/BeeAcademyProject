@@ -121,6 +121,42 @@ export interface StudentExamResultResponse {
   details: StudentExamResultDetail[];
 }
 
+export interface TeacherExamQuestionReview {
+  id: string;
+  text: string;
+  type: ExamQuestionType;
+  options: string[];
+  studentAnswers: number[];
+  correctAnswers: number[];
+  correct: boolean;
+  points: number;
+  earnedPoints: number;
+  explanation: string | null;
+}
+
+export interface TeacherExamAttemptResponse {
+  id: string;
+  studentId: string;
+  studentName: string | null;
+  courseId: string;
+  courseTitle: string;
+  examId: string;
+  examName: string;
+  slotIndex: number;
+  attemptNumber: number;
+  startedAt: string;
+  submittedAt: string;
+  autoScorePercent: number | null;
+  manualScorePercent: number | null;
+  effectiveScorePercent: number | null;
+  passScorePercent: number;
+  passed: boolean;
+  feedback: string | null;
+  gradedAt: string | null;
+  status: 'pending' | 'graded';
+  questions: TeacherExamQuestionReview[];
+}
+
 export async function listCourseExams(courseId: string): Promise<ExamConfigResponse[]> {
   const res = await apiClient.get<ApiResponse<ExamConfigResponse[]>>(
     `/api/teacher/courses/${courseId}/exams`,
@@ -196,6 +232,25 @@ export async function submitStudentExam(
   const res = await apiClient.post<ApiResponse<StudentExamResultResponse>>(
     `/api/student/exam-attempts/${attemptId}/submit`,
     { answers },
+  );
+  return unwrap(res.data);
+}
+
+export async function listTeacherExamAttempts(): Promise<TeacherExamAttemptResponse[]> {
+  const res = await apiClient.get<ApiResponse<TeacherExamAttemptResponse[]>>(
+    '/api/teacher/exam-attempts',
+  );
+  return unwrap(res.data);
+}
+
+export async function gradeTeacherExamAttempt(
+  attemptId: string,
+  scorePercent: number,
+  feedback: string,
+): Promise<TeacherExamAttemptResponse> {
+  const res = await apiClient.put<ApiResponse<TeacherExamAttemptResponse>>(
+    `/api/teacher/exam-attempts/${attemptId}/grade`,
+    { scorePercent, feedback },
   );
   return unwrap(res.data);
 }

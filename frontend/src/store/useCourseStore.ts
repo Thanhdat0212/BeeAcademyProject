@@ -12,7 +12,12 @@ interface CourseState {
 
   // Tiến độ học tập: mapping từ courseId -> danh sách các lessonId đã học xong
   completedLessons: Record<string, string[]>;
+  markLessonCompleted: (courseId: string, lessonId: string) => void;
   toggleLessonCompleted: (courseId: string, lessonId: string) => void;
+
+  // Thời lượng video lấy từ metadata trình duyệt khi backend chưa lưu durationSec.
+  lessonDurations: Record<string, Record<string, number>>;
+  saveLessonDuration: (courseId: string, lessonId: string, durationSec: number) => void;
 
   // Điểm số kiểm tra: mapping từ courseId -> lessonId -> điểm số cao nhất (%)
   quizScores: Record<string, Record<string, number>>;
@@ -44,6 +49,18 @@ export const useCourseStore = create<CourseState>()(
       }),
 
       completedLessons: {},
+      markLessonCompleted: (courseId, lessonId) => set((state) => {
+        const currentList = state.completedLessons[courseId] ?? [];
+        if (currentList.includes(lessonId)) {
+          return state;
+        }
+        return {
+          completedLessons: {
+            ...state.completedLessons,
+            [courseId]: [...currentList, lessonId]
+          }
+        };
+      }),
       toggleLessonCompleted: (courseId, lessonId) => set((state) => {
         const currentList = state.completedLessons[courseId] ?? [];
         const isCompleted = currentList.includes(lessonId);
@@ -55,6 +72,29 @@ export const useCourseStore = create<CourseState>()(
           completedLessons: {
             ...state.completedLessons,
             [courseId]: newList
+          }
+        };
+      }),
+
+      lessonDurations: {},
+      saveLessonDuration: (courseId, lessonId, durationSec) => set((state) => {
+        if (!Number.isFinite(durationSec) || durationSec <= 0) {
+          return state;
+        }
+
+        const normalizedDuration = Math.floor(durationSec);
+        const courseDurations = state.lessonDurations[courseId] ?? {};
+        if (courseDurations[lessonId] === normalizedDuration) {
+          return state;
+        }
+
+        return {
+          lessonDurations: {
+            ...state.lessonDurations,
+            [courseId]: {
+              ...courseDurations,
+              [lessonId]: normalizedDuration,
+            }
           }
         };
       }),

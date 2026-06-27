@@ -23,7 +23,7 @@
 
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  BookOpen, CreditCard, Heart, MessageSquare,
+  Bell, BookOpen, CreditCard, Heart, MessageSquare,
   ShoppingBag, UserCircle, Camera, LogOut, Lock, Megaphone,
   DollarSign, BarChart2, Settings, Calendar, TrendingUp, Database
 } from 'lucide-react';
@@ -31,6 +31,7 @@ import { useAuthStore } from '../store/useAuthStore';
 
 // ─── Cấu hình mục menu theo vai trò (Role-based menu items) ───────────────────
 const STUDENT_MENU_ITEMS = [
+  { icon: Bell,          label: 'Thông báo',              path: '/notifications' },
   { icon: BookOpen,      label: 'Khóa học và Bài tập', path: '/courses'       },
   { icon: CreditCard,    label: 'Loại tài khoản',       path: '/account/type'  },
   { icon: Heart,         label: 'Danh sách yêu thích',  path: '/favorites'     },
@@ -46,6 +47,7 @@ const PARENT_MENU_ITEMS = [
   { icon: BarChart2,     label: 'Tổng quan báo cáo',    path: '/parent'          },
   { icon: BookOpen,      label: 'Khóa học của con',     path: '/parent/courses'  },
   { icon: TrendingUp,    label: 'Tiến độ & Điểm số',    path: '/parent/progress' },
+  { icon: CreditCard,    label: 'Lịch sử thanh toán',    path: '/parent/payments' },
   { icon: MessageSquare, label: 'Tin nhắn giáo viên',    path: '/parent/messages' },
   { icon: Settings,      label: 'Liên kết tài khoản con',path: '/parent/link'     },
   { icon: Camera,        label: 'Ảnh đại diện phụ huynh',path: '/account/photo'   },
@@ -58,11 +60,13 @@ const TEACHER_MENU_ITEMS = [
   { icon: BookOpen,      label: 'Quản lý Quiz',         path: '/teacher/quiz'  },
   { icon: Database,      label: 'Ngân hàng câu hỏi',    path: '/teacher/questions' },
   { icon: BookOpen,      label: 'Quản lý Đề kiểm tra',  path: '/teacher/exam'  },
-  { icon: BookOpen,      label: 'Bảng điểm học sinh',   path: '/teacher/grades' },
+  { icon: BookOpen,      label: 'Chấm bài tự luận',     path: '/teacher/grades' },
   { icon: MessageSquare, label: 'Hỏi đáp (Q&A)',         path: '/teacher/qa'    },
   { icon: CreditCard,    label: 'Báo cáo doanh thu',    path: '/teacher/revenue'},
   { icon: CreditCard,    label: 'Tài khoản nhận tiền',  path: '/teacher/bank'   },
   { icon: Megaphone,     label: 'Khiếu nại/Hỗ trợ',     path: '/teacher/complaints' },
+  { icon: UserCircle,    label: 'Hồ sơ',                path: '/teacher/profile' },
+  { icon: Lock,          label: 'Tài khoản',            path: '/teacher/account'  },
   { icon: Camera,        label: 'Ảnh đại diện',         path: '/account/photo' },
 ] as const;
 

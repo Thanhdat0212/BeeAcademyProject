@@ -90,7 +90,6 @@ public final class CourseSpecifications {
         return (root, query, cb) -> matchGradePredicate(root, cb, grade);
     }
 
-    // ── [Đồng bộ team3/develop · search-course] Tìm kiếm mềm bỏ dấu tiếng Việt, tách token ──
     /**
      * Tìm kiếm mềm theo nhiều trường:
      * title, description, slug, category, teacher.

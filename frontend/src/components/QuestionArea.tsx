@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Question } from '../types/quiz';
+import { Question } from '../types';
 
 interface QuestionAreaProps {
   question: Question;

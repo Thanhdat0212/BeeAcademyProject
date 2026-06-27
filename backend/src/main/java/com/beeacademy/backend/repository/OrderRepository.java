@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,6 +20,12 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items WHERE o.userId = :userId ORDER BY o.createdAt DESC")
     List<Order> findByUserIdWithItems(@Param("userId") UUID userId);
+
+    @Query("SELECT DISTINCT o FROM Order o JOIN FETCH o.items i " +
+           "WHERE o.userId IN :userIds AND i.courseId IN :courseIds " +
+           "ORDER BY o.createdAt DESC")
+    List<Order> findParentChildHistoryWithItems(@Param("userIds") Collection<UUID> userIds,
+                                                @Param("courseIds") Collection<UUID> courseIds);
 
     /**
      * N đơn gần nhất theo trạng thái (truyền PageRequest.of(0, N)).

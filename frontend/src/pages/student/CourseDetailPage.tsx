@@ -21,7 +21,7 @@
 //   - ScoreCircle:   vòng tròn SVG hiển thị điểm số
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type SyntheticEvent } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -37,9 +37,14 @@ import { useCartStore } from '../../store/useCartStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useCourseStore } from '../../store/useCourseStore';
 // API integration (Giai đoạn 1C) - thay MOCK_COURSES bằng call BE thật
-import { getCourseDetail as courseServiceGetDetail } from '../../api/courseService';
+import {
+  getCourseDetail as courseServiceGetDetail,
+  getCourseReviews,
+  upsertCourseReview,
+} from '../../api/courseService';
 import { adaptCourseDetail, formatDurationSec } from '../../api/adapter';
 import { isApiError } from '../../api/client';
+import { listOrders, verifyPayment } from '../../api/orderService';
 import {
   addCourseDiscussionReply,
   createCourseDiscussionThread,
@@ -48,7 +53,7 @@ import {
 import { listStudentCourseExams } from '../../api/examService';
 import type { CourseDiscussionThread } from '../../api/courseDiscussionService';
 import type { StudentExamSummaryResponse } from '../../api/examService';
-import type { ChapterDetail, LessonDetail } from '../../types/api';
+import type { ChapterDetail, CourseReviewSummary, LessonDetail } from '../../types/api';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COMPONENT: ScoreCircle
@@ -139,6 +144,8 @@ interface QuizModalProps {
   onClose: () => void;
   onComplete: (lessonId: string, score: number) => void;
 }
+
+type MarketingSyllabusSection = Omit<ChapterDetail, 'lessons'> & { lessons: Lesson[] };
 
 function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalProps) {
   const questions: QuizQuestion[] = lesson.questions ?? [];
@@ -530,21 +537,124 @@ function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalProps) {
 //   'syllabus'   — Nội dung khóa học (danh sách bài học với icon type)
 //   'instructor' — Thông tin giảng viên (avatar + bio)
 // ═══════════════════════════════════════════════════════════════════════════════
-function MarketingView({ course, onStartPreview }: { course: Course; onStartPreview?: () => void }) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'syllabus' | 'instructor'>('overview');
+function MarketingView({
+  course,
+  rawChapters,
+  onStartPreview,
+  onOpenLearning,
+}: {
+  course: Course;
+  rawChapters: ChapterDetail[];
+  onStartPreview?: (lessonId?: string) => void;
+  onOpenLearning?: (lessonId?: string) => void;
+}) {
+  const [activeTab, setActiveTab] = useState<'overview' | 'syllabus' | 'instructor' | 'reviews'>('overview');
 
   const addToCart = useCartStore(state => state.addToCart);
   const isLoggedIn = useAuthStore(state => state.isLoggedIn);
+  const user = useAuthStore(state => state.user);
   const purchasedIds = useCourseStore(state => state.purchasedIds);
+  const enrollCourses = useCourseStore(state => state.enrollCourses);
+  const completedLessons = useCourseStore(state => state.completedLessons);
+  const lessonDurations = useCourseStore(state => state.lessonDurations);
   const navigate = useNavigate();
+  const [activating, setActivating] = useState(false);
+  const [reviewSummary, setReviewSummary] = useState<CourseReviewSummary | null>(null);
+  const [loadingReviews, setLoadingReviews] = useState(true);
+  const [savingReview, setSavingReview] = useState(false);
+  const [draftRating, setDraftRating] = useState(0);
+  const [draftComment, setDraftComment] = useState('');
+  const syllabusSections = useMemo<MarketingSyllabusSection[]>(() => (
+    rawChapters.length > 0
+      ? [...rawChapters]
+          .sort((a, b) => a.position - b.position)
+          .map(chapter => ({
+            ...chapter,
+            lessons: [...chapter.lessons]
+              .sort((a, b) => a.position - b.position)
+              .map(adaptLearningLesson),
+          }))
+      : [{
+          id: 'flat-lessons',
+          title: 'Nội dung khóa học',
+          description: null,
+          position: 1,
+          hasQuizConfig: false,
+          lessons: course.lessons ?? [],
+        }]
+  ), [rawChapters, course.lessons]);
+  const [expandedChapterIds, setExpandedChapterIds] = useState<Set<string>>(
+    () => new Set(syllabusSections.slice(0, 2).map(chapter => chapter.id))
+  );
   const previewLessons = useMemo(
     () => course.lessons?.filter(lesson => lesson.type !== 'quiz' && Boolean(lesson.isFree)) ?? [],
     [course.lessons],
   );
+  const completedList = completedLessons[course.id] ?? [];
+  const totalLessons = course.lessons?.length ?? 0;
+  const progressPercent = totalLessons > 0
+    ? Math.round((completedList.length / totalLessons) * 100)
+    : 0;
+  const isOwnedCourse = course.isEnrolled || purchasedIds.includes(course.id);
+  const canSubmitReview = isOwnedCourse && user?.role === 'student';
   const primaryPreviewLesson = previewLessons.find(lesson => lesson.type === 'video') ?? previewLessons[0] ?? null;
   const previewCtaLabel = primaryPreviewLesson?.type === 'video'
     ? 'Xem video học thử'
     : 'Xem nội dung học thử';
+  const displayRating = reviewSummary?.averageRating ?? course.rating;
+  const displayReviewCount = reviewSummary?.reviewCount ?? course.reviewCount ?? 0;
+  const visibleReviews = useMemo(() => {
+    const myReviewId = reviewSummary?.myReview?.id;
+    return (reviewSummary?.reviews ?? []).filter(review => review.id !== myReviewId);
+  }, [reviewSummary]);
+
+  const introVideoUrl = course.introVideoUrl?.trim();
+  const introEmbedUrl = introVideoUrl ? toEmbeddableVideoUrl(introVideoUrl) : null;
+  const introDirectUrl = introVideoUrl && isDirectVideoUrl(introVideoUrl) ? introVideoUrl : null;
+
+  useEffect(() => {
+    setExpandedChapterIds(new Set(syllabusSections.slice(0, 2).map(chapter => chapter.id)));
+  }, [syllabusSections]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadReviews() {
+      setLoadingReviews(true);
+      try {
+        const data = await getCourseReviews(course.id);
+        if (cancelled) return;
+        setReviewSummary(data);
+        setDraftRating(data.myReview?.rating ?? 0);
+        setDraftComment(data.myReview?.comment ?? '');
+      } catch (error) {
+        if (!cancelled) {
+          notify.error(isApiError(error) ? error.message : 'Không tải được đánh giá khóa học.');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingReviews(false);
+        }
+      }
+    }
+
+    loadReviews();
+    return () => {
+      cancelled = true;
+    };
+  }, [course.id]);
+
+  function toggleSyllabusChapter(chapterId: string) {
+    setExpandedChapterIds(prev => {
+      const next = new Set(prev);
+      if (next.has(chapterId)) {
+        next.delete(chapterId);
+      } else {
+        next.add(chapterId);
+      }
+      return next;
+    });
+  }
 
   function handleAddToCart() {
     // Guard 1: chưa đăng nhập → redirect sang /login
@@ -568,6 +678,86 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
     notify.success(`Đã thêm "${course.title}" vào giỏ hàng!`);
   }
 
+  // Kích hoạt khóa học khi đã thanh toán nhưng enrollment chưa được ghi
+  async function handleActivate() {
+    if (!isLoggedIn) {
+      navigate('/login', { state: { from: `/courses/${course.id}` } });
+      return;
+    }
+    setActivating(true);
+    try {
+      const orders = await listOrders();
+      const pending = orders.find(o =>
+        o.status === 'PENDING' &&
+        o.items.some(i => i.courseId === course.id)
+      );
+      if (!pending) {
+        notify.error('Không tìm thấy đơn hàng cho khóa học này.');
+        return;
+      }
+      const result = await verifyPayment(pending.id);
+      if (result.status === 'PAID') {
+        enrollCourses([course.id]);
+        notify.success('Kích hoạt thành công! Đang tải...');
+        window.location.reload();
+      } else {
+        notify.error('PayOS chưa xác nhận thanh toán. Vui lòng thử lại sau.');
+      }
+    } catch {
+      notify.error('Không thể kích hoạt. Vui lòng liên hệ hỗ trợ.');
+    } finally {
+      setActivating(false);
+    }
+  }
+
+  async function handleSubmitReview() {
+    if (!canSubmitReview) {
+      notify.error('Chỉ học sinh đã mua khóa học mới có thể đánh giá.');
+      return;
+    }
+    if (draftRating < 1 || draftRating > 5) {
+      notify.error('Vui lòng chọn số sao đánh giá từ 1 đến 5.');
+      return;
+    }
+
+    setSavingReview(true);
+    try {
+      await upsertCourseReview(course.id, {
+        rating: draftRating,
+        comment: draftComment,
+      });
+      const refreshed = await getCourseReviews(course.id);
+      setReviewSummary(refreshed);
+      setDraftRating(refreshed.myReview?.rating ?? draftRating);
+      setDraftComment(refreshed.myReview?.comment ?? draftComment);
+      notify.success(refreshed.myReview ? 'Đã lưu đánh giá khóa học.' : 'Đã gửi đánh giá khóa học.');
+    } catch (error) {
+      notify.error(isApiError(error) ? error.message : 'Không thể lưu đánh giá lúc này.');
+    } finally {
+      setSavingReview(false);
+    }
+  }
+
+  function renderReviewStars(value: number, clickable = false, onSelect?: (next: number) => void) {
+    return (
+      <div className="flex items-center gap-1">
+        {[1, 2, 3, 4, 5].map(star => (
+          <button
+            key={star}
+            type="button"
+            disabled={!clickable}
+            onClick={() => onSelect?.(star)}
+            className={clickable ? 'transition-transform hover:scale-110' : 'cursor-default'}
+          >
+            <Star
+              className={`h-5 w-5 ${star <= value ? 'fill-amber-500 text-amber-500' : 'text-outline-variant'}`}
+            />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-surface flex flex-col font-sans">
       <DashboardHeader />
@@ -587,19 +777,14 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
             {course.title}
           </h1>
           <p className="text-xl text-on-surface-variant mb-8 max-w-3xl leading-relaxed">{course.description}</p>
-          <div className="flex flex-wrap items-center gap-8 text-on-surface-variant font-medium">
-            {course.reviewCount && course.reviewCount > 0 ? (
+            <div className="flex flex-wrap items-center gap-8 text-on-surface-variant font-medium">
               <div className="flex items-center gap-2 text-amber-500 bg-amber-500/10 px-3 py-1.5 rounded-lg">
                 <Star className="w-5 h-5 fill-amber-500" />
-                <span className="text-lg font-bold">{course.rating}</span>
-                <span className="text-sm text-on-surface-variant">({course.reviewCount} đánh giá)</span>
+                <span className="text-lg font-bold">{displayRating > 0 ? displayRating.toFixed(1) : 'Mới'}</span>
+                <span className="text-sm text-amber-700/80">
+                  ({displayReviewCount.toLocaleString('vi-VN')} đánh giá)
+                </span>
               </div>
-            ) : (
-              <div className="flex items-center gap-2 text-on-surface-variant bg-surface-container px-3 py-1.5 rounded-lg">
-                <Star className="w-5 h-5" />
-                <span className="text-sm">Chưa có đánh giá</span>
-              </div>
-            )}
             <div className="flex items-center gap-2">
               <Users className="w-5 h-5" />
               <span>{course.students.toLocaleString('vi-VN')} học viên</span>
@@ -622,6 +807,7 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
                 { id: 'overview', label: 'Tổng quan' },
                 { id: 'syllabus', label: 'Nội dung học' },
                 { id: 'instructor', label: 'Giảng viên' },
+                { id: 'reviews', label: 'Đánh giá' },
               ] as const).map(tab => (
                 <button
                   key={tab.id}
@@ -647,6 +833,22 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
                     </h2>
                     <div className="text-on-surface-variant leading-relaxed space-y-4 text-lg">
                       <p>{course.detailedDescription}</p>
+                      {(course.objective || course.audience) && (
+                        <div className="grid md:grid-cols-2 gap-5">
+                          {course.objective && (
+                            <section className="border-l-4 border-primary/50 pl-4 py-1">
+                              <h3 className="text-sm font-extrabold text-on-surface mb-1">Mục tiêu khóa học</h3>
+                              <p className="text-sm leading-relaxed text-on-surface-variant whitespace-pre-line">{course.objective}</p>
+                            </section>
+                          )}
+                          {course.audience && (
+                            <section className="border-l-4 border-primary/50 pl-4 py-1">
+                              <h3 className="text-sm font-extrabold text-on-surface mb-1">Đối tượng học viên</h3>
+                              <p className="text-sm leading-relaxed text-on-surface-variant whitespace-pre-line">{course.audience}</p>
+                            </section>
+                          )}
+                        </div>
+                      )}
                       <p>Khóa học bao gồm đầy đủ hệ thống bài giảng video chất lượng cao, bài tập tự luyện và tài liệu PDF đính kèm.</p>
                       <ul className="grid sm:grid-cols-2 gap-4 mt-8">
                         {['Nắm vững kiến thức trọng tâm', 'Luyện tập với bài tập thực tế', 'Hỗ trợ giải đáp 24/7', 'Truy cập trọn đời'].map((item, idx) => (
@@ -662,47 +864,20 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
                 {activeTab === 'syllabus' && (
                   <motion.div key="syllabus" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
                     <div className="flex justify-between items-end mb-6">
-                      <h2 className="text-2xl font-bold text-on-surface">Nội dung khóa học</h2>
+                      <h2 className="text-2xl font-bold text-on-surface">Mục lục khóa học</h2>
                       <span className="text-on-surface-variant text-sm font-medium">{course.lessons?.length ?? 0} bài</span>
                     </div>
-                    {/* Danh sách bài học với icon theo type: video/pdf/quiz */}
-                    <div className="space-y-3">
-                      {course.lessons?.map(lesson => (
-                        <div
-                          key={lesson.id}
-                          className="p-4 rounded-2xl bg-surface hover:bg-surface-container transition-colors border border-outline-variant/30 flex items-center gap-4"
-                        >
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                            lesson.type === 'quiz'
-                              ? 'bg-amber-500/10 text-amber-500'
-                              : 'bg-surface-container-high text-on-surface-variant'
-                          }`}>
-                            {lesson.type === 'video'
-                              ? <PlayCircle className="w-5 h-5" />
-                              : lesson.type === 'pdf'
-                              ? <FileText className="w-5 h-5" />
-                              : <ClipboardList className="w-5 h-5" />
-                            }
-                          </div>
-                          <div className="flex-grow">
-                            <h4 className="font-bold text-on-surface text-base">{lesson.title}</h4>
-                            <div className="mt-1 flex flex-wrap items-center gap-2">
-                              <span className="text-sm text-on-surface-variant">
-                                {lesson.type === 'video' ? 'Video' : lesson.type === 'pdf' ? 'Tài liệu' : 'Bài kiểm tra'}
-                              </span>
-                              {lesson.isFree && lesson.type !== 'quiz' && (
-                                <span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-extrabold text-amber-600">
-                                  Học thử miễn phí
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="text-sm font-semibold text-on-surface-variant bg-surface-container px-3 py-1 rounded-lg flex-shrink-0">
-                            {lesson.duration}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <MarketingSyllabusList
+                      course={course}
+                      sections={syllabusSections}
+                      expandedChapterIds={expandedChapterIds}
+                      completedList={completedList}
+                      lessonDurations={lessonDurations}
+                      isOwnedCourse={isOwnedCourse}
+                      onToggleChapter={toggleSyllabusChapter}
+                      onStartPreview={onStartPreview}
+                      onOpenLearning={onOpenLearning}
+                    />
                   </motion.div>
                 )}
                 {activeTab === 'instructor' && (
@@ -724,6 +899,179 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
                     </div>
                   </motion.div>
                 )}
+                {activeTab === 'reviews' && (
+                  <motion.div key="reviews" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+                    <div className="flex flex-col gap-6">
+                      <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+                        <div className="rounded-3xl border border-outline-variant/30 bg-surface-container p-6 text-center">
+                          <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-on-surface-variant">Điểm đánh giá</p>
+                          <p className="mt-3 text-5xl font-extrabold text-on-surface">
+                            {displayRating > 0 ? displayRating.toFixed(1) : '0.0'}
+                          </p>
+                          <div className="mt-3 flex justify-center">
+                            {renderReviewStars(Math.round(displayRating))}
+                          </div>
+                          <p className="mt-2 text-sm text-on-surface-variant">
+                            {displayReviewCount.toLocaleString('vi-VN')} học viên đã đánh giá
+                          </p>
+                        </div>
+
+                        <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-low p-6">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <h2 className="text-2xl font-bold text-on-surface">Cảm nhận từ học viên</h2>
+                              <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
+                                Đánh giá công khai giúp học viên khác hiểu rõ hơn về chất lượng nội dung, cách giảng dạy và mức độ phù hợp của khóa học.
+                              </p>
+                            </div>
+                            <div className="rounded-2xl bg-primary/10 px-4 py-2 text-sm font-bold text-primary">
+                              UC19
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {canSubmitReview && (
+                        <section className="rounded-3xl border border-primary/15 bg-primary/5 p-6">
+                          <div className="flex flex-col gap-4">
+                            <div>
+                              <h3 className="text-lg font-extrabold text-on-surface">
+                                {reviewSummary?.myReview ? 'Cập nhật đánh giá của bạn' : 'Viết đánh giá khóa học'}
+                              </h3>
+                              <p className="mt-1 text-sm text-on-surface-variant">
+                                Chia sẻ cảm nhận thực tế sau khi học để giúp Bee Academy cải thiện nội dung tốt hơn.
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="mb-2 text-sm font-bold text-on-surface">Số sao đánh giá</p>
+                              {renderReviewStars(draftRating, true, setDraftRating)}
+                            </div>
+
+                            <label className="block">
+                              <span className="mb-2 block text-sm font-bold text-on-surface">Nhận xét</span>
+                              <textarea
+                                value={draftComment}
+                                onChange={event => setDraftComment(event.target.value)}
+                                rows={4}
+                                maxLength={2000}
+                                placeholder="Điều bạn thích nhất ở khóa học là gì? Nội dung, cách giảng dạy hoặc phần nào cần cải thiện?"
+                                className="w-full rounded-2xl border border-outline-variant/40 bg-surface px-4 py-3 text-sm text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/50 focus:border-primary"
+                              />
+                              <span className="mt-1 block text-right text-xs text-on-surface-variant">
+                                {draftComment.length}/2000
+                              </span>
+                            </label>
+
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                onClick={handleSubmitReview}
+                                disabled={savingReview}
+                                className="inline-flex items-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-extrabold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
+                              >
+                                {savingReview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                {reviewSummary?.myReview ? 'Cập nhật đánh giá' : 'Gửi đánh giá'}
+                              </button>
+                            </div>
+                          </div>
+                        </section>
+                      )}
+
+                      {!canSubmitReview && isOwnedCourse && (
+                        <section className="rounded-3xl border border-outline-variant/30 bg-surface-container p-5">
+                          <p className="text-sm text-on-surface-variant">
+                            Tài khoản hiện tại không phải học sinh, nên không thể gửi đánh giá cho khóa học này.
+                          </p>
+                        </section>
+                      )}
+
+                      <section className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6">
+                        <div className="mb-5 flex items-center justify-between gap-4">
+                          <div>
+                            <h3 className="text-xl font-extrabold text-on-surface">Đánh giá gần đây</h3>
+                            <p className="mt-1 text-sm text-on-surface-variant">
+                              Hiển thị những nhận xét mới nhất từ học viên đã tham gia khóa học.
+                            </p>
+                          </div>
+                        </div>
+
+                        {loadingReviews ? (
+                          <div className="flex justify-center py-12 text-on-surface-variant">
+                            <Loader2 className="h-7 w-7 animate-spin" />
+                          </div>
+                        ) : visibleReviews.length === 0 && !reviewSummary?.myReview ? (
+                          <div className="rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container p-8 text-center">
+                            <MessageSquare className="mx-auto mb-3 h-10 w-10 text-on-surface-variant/40" />
+                            <p className="font-bold text-on-surface">Chưa có đánh giá nào</p>
+                            <p className="mt-1 text-sm text-on-surface-variant">
+                              Hãy trở thành người đầu tiên chia sẻ trải nghiệm của bạn về khóa học này.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            {reviewSummary?.myReview && (
+                              <article className="rounded-3xl border border-primary/20 bg-primary/5 p-5">
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex items-center gap-3">
+                                    <img
+                                      src={reviewSummary.myReview.studentAvatarUrl ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(reviewSummary.myReview.studentName ?? 'Bạn')}&background=feb700&color=1f2937&bold=true`}
+                                      alt={reviewSummary.myReview.studentName ?? 'Bạn'}
+                                      className="h-12 w-12 rounded-full object-cover"
+                                    />
+                                    <div>
+                                      <p className="font-extrabold text-on-surface">
+                                        {reviewSummary.myReview.studentName ?? 'Bạn'}
+                                      </p>
+                                      <p className="text-xs font-semibold text-primary">Đánh giá của bạn</p>
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    {renderReviewStars(reviewSummary.myReview.rating)}
+                                    <p className="mt-1 text-xs text-on-surface-variant">
+                                      {new Date(reviewSummary.myReview.updatedAt).toLocaleDateString('vi-VN')}
+                                    </p>
+                                  </div>
+                                </div>
+                                {reviewSummary.myReview.comment && (
+                                  <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-on-surface-variant">
+                                    {reviewSummary.myReview.comment}
+                                  </p>
+                                )}
+                              </article>
+                            )}
+
+                            {visibleReviews.map(review => (
+                              <article key={review.id} className="rounded-3xl border border-outline-variant/25 bg-surface p-5">
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex items-center gap-3">
+                                    <img
+                                      src={review.studentAvatarUrl ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(review.studentName ?? 'Học viên')}&background=e5e7eb&color=111827&bold=true`}
+                                      alt={review.studentName ?? 'Học viên'}
+                                      className="h-11 w-11 rounded-full object-cover"
+                                    />
+                                    <div>
+                                      <p className="font-bold text-on-surface">{review.studentName ?? 'Học viên Bee Academy'}</p>
+                                      <p className="text-xs text-on-surface-variant">
+                                        {new Date(review.updatedAt).toLocaleDateString('vi-VN')}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  {renderReviewStars(review.rating)}
+                                </div>
+                                {review.comment && (
+                                  <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-on-surface-variant">
+                                    {review.comment}
+                                  </p>
+                                )}
+                              </article>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    </div>
+                  </motion.div>
+                )}
               </AnimatePresence>
             </div>
           </div>
@@ -732,38 +1080,99 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
           <div className="lg:col-span-1 relative">
             <div className="bg-surface-container-lowest border border-outline-variant/40 rounded-[2rem] p-6 shadow-2xl shadow-primary/10 sticky top-28">
               <div className="rounded-2xl overflow-hidden mb-6 aspect-video relative group">
-                <img src={course.image} alt={course.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                <div className="absolute inset-0 bg-black/20" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  {primaryPreviewLesson && onStartPreview ? (
-                    <button
-                      type="button"
-                      onClick={onStartPreview}
-                      className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg cursor-pointer hover:scale-110 transition-transform"
-                    >
-                      <PlayCircle className="w-8 h-8 ml-1" />
-                    </button>
-                  ) : (
-                    <div className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg">
-                      <PlayCircle className="w-8 h-8 ml-1" />
+                {introEmbedUrl ? (
+                  <iframe
+                    src={introEmbedUrl}
+                    title={`Video giới thiệu ${course.title}`}
+                    className="w-full h-full"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : introDirectUrl ? (
+                  <video
+                    src={introDirectUrl}
+                    poster={course.image && !isDirectVideoUrl(course.image) ? course.image : undefined}
+                    controls
+                    className="w-full h-full object-cover bg-black"
+                  />
+                ) : (
+                  <>
+                    <SafeCourseImage
+                      course={course}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                    <div className="absolute inset-0 bg-black/20" />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      {primaryPreviewLesson && onStartPreview ? (
+                        <button
+                          type="button"
+                          onClick={() => onStartPreview(primaryPreviewLesson.id)}
+                          className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg cursor-pointer hover:scale-110 transition-transform"
+                        >
+                          <PlayCircle className="w-8 h-8 ml-1" />
+                        </button>
+                      ) : (
+                        <div className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-lg">
+                          <PlayCircle className="w-8 h-8 ml-1" />
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
-              {/* Giá: hiển thị giá gốc + giá gạch ngang (giả lập 1.5x) */}
-              <div className="text-3xl font-extrabold text-primary mb-1 text-center">{course.price}</div>
-              <div className="text-center text-sm text-on-surface-variant line-through mb-6">
-                {(parseInt(course.price?.replace(/\D/g, '') ?? '0') * 1.5).toLocaleString('vi-VN')}đ
-              </div>
-              {/* CTA: handleAddToCart() — chỉ thêm vào giỏ khi đã đăng nhập */}
-              <button
-                onClick={handleAddToCart}
-                className="w-full py-4 bg-primary text-on-primary rounded-xl font-bold text-lg shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:-translate-y-1 transition-all flex items-center justify-center gap-2 mb-3"
-              >
-                <ShoppingCart className="w-6 h-6" />
-                Thêm vào giỏ hàng
-              </button>
-              {primaryPreviewLesson && onStartPreview && (
+              {isOwnedCourse ? (
+                <>
+                  <div className="mb-4 rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-green-500/10 text-green-600">
+                        <CheckCircle2 className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-extrabold text-on-surface">Bạn đã sở hữu khóa học này</p>
+                        <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
+                          {progressPercent > 0
+                            ? `Bạn đã hoàn thành ${completedList.length}/${totalLessons} bài học.`
+                            : 'Khóa học đã sẵn sàng để bạn bắt đầu học ngay.'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onOpenLearning()}
+                    className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-4 text-lg font-bold text-on-primary shadow-lg shadow-primary/30 transition-all hover:-translate-y-1 hover:shadow-primary/50"
+                  >
+                    <PlayCircle className="h-6 w-6" />
+                    {progressPercent > 0 ? 'Tiếp tục học' : 'Vào học ngay'}
+                  </button>
+                  <div className="mb-6 rounded-2xl bg-surface-container p-4">
+                    <div className="mb-2 flex items-center justify-between text-sm font-semibold">
+                      <span className="text-primary">Tiến độ học tập</span>
+                      <span className="text-on-surface">{progressPercent}%</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-surface-container-high">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${progressPercent}%` }} />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Giá: hiển thị giá gốc + giá gạch ngang (giả lập 1.5x) */}
+                  <div className="text-3xl font-extrabold text-primary mb-1 text-center">{course.price}</div>
+                  <div className="text-center text-sm text-on-surface-variant line-through mb-6">
+                    {(parseInt(course.price?.replace(/\D/g, '') ?? '0') * 1.5).toLocaleString('vi-VN')}đ
+                  </div>
+                  {/* CTA: handleAddToCart() — chỉ thêm vào giỏ khi đã đăng nhập */}
+                  <button
+                    onClick={handleAddToCart}
+                    className="w-full py-4 bg-primary text-on-primary rounded-xl font-bold text-lg shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:-translate-y-1 transition-all flex items-center justify-center gap-2 mb-3"
+                  >
+                    <ShoppingCart className="w-6 h-6" />
+                    Thêm vào giỏ hàng
+                  </button>
+                </>
+              )}
+              {!isOwnedCourse && primaryPreviewLesson && onStartPreview && (
                 <div className="mb-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
@@ -778,15 +1187,23 @@ function MarketingView({ course, onStartPreview }: { course: Course; onStartPrev
                   </div>
                   <button
                     type="button"
-                    onClick={onStartPreview}
+                    onClick={() => onStartPreview(primaryPreviewLesson.id)}
                     className="mt-4 w-full rounded-xl bg-amber-500 px-4 py-3 text-sm font-extrabold text-white transition-colors hover:bg-amber-500/90"
                   >
                     {previewCtaLabel}
                   </button>
                 </div>
               )}
-              {/* Đã bỏ nút "Đã thanh toán? Kích hoạt khóa học": tránh người dùng tự enroll ở client.
-                  Quyền truy cập khóa học chỉ được cấp qua webhook PayOS xác nhận thanh toán phía backend. */}
+              {!isOwnedCourse && isLoggedIn && (
+                <button
+                  onClick={handleActivate}
+                  disabled={activating}
+                  className="w-full py-2.5 border border-outline-variant text-on-surface-variant rounded-xl text-sm font-medium hover:bg-surface-container transition-colors flex items-center justify-center gap-2 mb-4 disabled:opacity-50"
+                >
+                  {activating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  {activating ? 'Đang kích hoạt...' : 'Đã thanh toán? Kích hoạt khóa học'}
+                </button>
+              )}
               <div className="text-center text-xs font-semibold text-on-surface-variant mb-6 uppercase tracking-wider">
                 Thanh toán an toàn · Truy cập trọn đời
               </div>
@@ -867,6 +1284,68 @@ function roleLabel(role: string): string {
   return 'Học viên';
 }
 
+function toEmbeddableVideoUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes('youtu.be')) {
+      const id = parsed.pathname.replace('/', '');
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    if (host.includes('youtube.com')) {
+      if (parsed.pathname.includes('/embed/')) return url;
+      const id = parsed.searchParams.get('v');
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    if (host.includes('vimeo.com')) {
+      const id = parsed.pathname.split('/').filter(Boolean).pop();
+      return id ? `https://player.vimeo.com/video/${id}` : null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isDirectVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov)(\?|#|$)/i.test(url);
+}
+
+function SafeCourseImage({
+  course,
+  className,
+  fallbackClassName = '',
+  alt = '',
+}: {
+  course: Course;
+  className: string;
+  fallbackClassName?: string;
+  alt?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const imageUrl = course.image?.trim();
+  const canUseImage = Boolean(imageUrl) && !isDirectVideoUrl(imageUrl) && !failed;
+
+  if (canUseImage) {
+    return (
+      <img
+        src={imageUrl}
+        alt={alt || course.title}
+        onError={() => setFailed(true)}
+        className={className}
+      />
+    );
+  }
+
+  return (
+    <div className={`${className} ${fallbackClassName} bg-surface-container-high flex flex-col items-center justify-center text-center px-5`}>
+      <BookOpen className="w-10 h-10 text-primary mb-3" />
+      <p className="text-sm font-extrabold text-on-surface line-clamp-2">{course.title}</p>
+      <p className="text-xs font-semibold text-on-surface-variant mt-1">{course.subject} · {course.grade}</p>
+    </div>
+  );
+}
+
 function adaptLearningLesson(lesson: LessonDetail): Lesson {
   const hasVideo = Boolean(lesson.videoUrl || lesson.videoEmbedUrl);
   const hasDocuments = (lesson.documents?.length ?? 0) > 0;
@@ -889,10 +1368,199 @@ function canOpenLesson(course: Course, lesson: Lesson): boolean {
   return course.isEnrolled || Boolean(lesson.isFree);
 }
 
-function LearningView({ course, rawChapters, courseId, onExitPreview }: {
+function getLessonDisplayDuration(
+  courseId: string,
+  lesson: Lesson,
+  lessonDurations: Record<string, Record<string, number>>,
+): string {
+  const durationSec = lessonDurations[courseId]?.[lesson.id];
+  return durationSec && durationSec > 0 ? formatDurationSec(durationSec) : lesson.duration;
+}
+
+function preloadLessonDuration(
+  lesson: Lesson,
+  onResolved: (durationSec: number) => void,
+): () => void {
+  const video = document.createElement('video');
+  const cleanup = () => {
+    video.onloadedmetadata = null;
+    video.onerror = null;
+    video.removeAttribute('src');
+    video.load();
+  };
+
+  video.preload = 'metadata';
+  video.onloadedmetadata = () => {
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      onResolved(video.duration);
+    }
+    cleanup();
+  };
+  video.onerror = cleanup;
+  video.src = lesson.url;
+
+  return cleanup;
+}
+
+function MarketingSyllabusList({
+  course,
+  sections,
+  expandedChapterIds,
+  completedList,
+  lessonDurations,
+  isOwnedCourse,
+  onToggleChapter,
+  onStartPreview,
+  onOpenLearning,
+}: {
+  course: Course;
+  sections: MarketingSyllabusSection[];
+  expandedChapterIds: Set<string>;
+  completedList: string[];
+  lessonDurations: Record<string, Record<string, number>>;
+  isOwnedCourse: boolean;
+  onToggleChapter: (chapterId: string) => void;
+  onStartPreview?: (lessonId?: string) => void;
+  onOpenLearning?: (lessonId?: string) => void;
+}) {
+  return (
+    <div className="space-y-7">
+      {sections.map((chapter, chapterIndex) => {
+        const isExpanded = expandedChapterIds.has(chapter.id);
+        const videoLessons = chapter.lessons.filter(lesson => lesson.type === 'video');
+        const completedVideoCount = videoLessons.filter(lesson =>
+          completedList.includes(lesson.id)
+        ).length;
+
+        return (
+          <section key={chapter.id} className="space-y-3">
+            <button
+              type="button"
+              onClick={() => onToggleChapter(chapter.id)}
+              aria-expanded={isExpanded}
+              className="w-full flex items-start justify-between gap-4 text-left"
+            >
+              <div className="min-w-0">
+                <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                  Chương {chapterIndex + 1}
+                </p>
+                <h3 className="text-base font-extrabold leading-snug text-on-surface">
+                  {chapter.title}
+                </h3>
+              </div>
+              <span className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container">
+                {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              </span>
+            </button>
+
+            <AnimatePresence initial={false}>
+              {isExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-2 pl-1 sm:pl-3">
+                    {chapter.lessons.map((lesson, lessonIndex) => {
+                      const isLessonCompleted = completedList.includes(lesson.id);
+                      const canPreviewLesson = Boolean(lesson.isFree && onStartPreview);
+                      const canOpen = isOwnedCourse || canPreviewLesson;
+
+                      return (
+                        <button
+                          type="button"
+                          key={lesson.id}
+                          onClick={() => {
+                            if (isOwnedCourse) {
+                              onOpenLearning?.(lesson.id);
+                            } else if (canPreviewLesson) {
+                              onStartPreview?.(lesson.id);
+                            }
+                          }}
+                          disabled={!canOpen}
+                          className={`w-full rounded-2xl border px-4 py-3 text-left transition-all disabled:cursor-default ${
+                            isLessonCompleted
+                              ? 'border-green-500/25 bg-green-500/5 text-green-700'
+                              : canPreviewLesson
+                              ? 'border-primary/30 bg-primary/5 text-primary hover:bg-primary/10'
+                              : 'border-transparent bg-surface hover:bg-surface-container disabled:hover:bg-surface'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={`mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${
+                              isLessonCompleted
+                                ? 'bg-green-500/15 text-green-600'
+                                : canPreviewLesson
+                                ? 'bg-primary/10 text-primary'
+                                : 'bg-surface-container-high text-on-surface-variant'
+                            }`}>
+                              {isLessonCompleted
+                                ? <CheckCircle2 className="h-4 w-4" />
+                                : lesson.type === 'video'
+                                ? <PlayCircle className="h-4 w-4" />
+                                : lesson.type === 'pdf'
+                                ? <FileText className="h-4 w-4" />
+                                : <ClipboardList className="h-4 w-4" />
+                              }
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h4 className="text-sm font-extrabold leading-snug text-current">
+                                Bài {lessonIndex + 1}: {lesson.title.replace(/^Bài\s*\d+\s*[:.-]?\s*/i, '')}
+                              </h4>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium">
+                                <span className={canPreviewLesson ? 'text-primary' : 'text-on-surface-variant'}>
+                                  {getLessonDisplayDuration(course.id, lesson, lessonDurations)}
+                                </span>
+                                {canPreviewLesson && (
+                                  <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-extrabold text-amber-600">
+                                    Học thử miễn phí
+                                  </span>
+                                )}
+                                {isLessonCompleted && (
+                                  <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-extrabold text-green-700">
+                                    Đã hoàn thành
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+
+                    {chapter.hasQuizConfig && chapter.id !== 'flat-lessons' && (
+                      <div className="w-full rounded-2xl border border-transparent bg-surface-container/60 px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant">
+                            <Lock className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-extrabold text-on-surface-variant">Quiz chương {chapterIndex + 1}</p>
+                            <p className="text-xs font-medium text-on-surface-variant">
+                              Hoàn thành {completedVideoCount}/{videoLessons.length} video để mở quiz
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPreview }: {
   course: Course;
   rawChapters: ChapterDetail[];
   courseId: string;
+  initialLessonId?: string | null;
   onExitPreview?: () => void;
 }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -902,7 +1570,11 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
   const navigate = useNavigate();
 
   // BUG FIX: guard khi course không có lesson nào (tránh crash do undefined)
-  const firstLesson = course.lessons?.find(l => l.type !== 'quiz' && canOpenLesson(course, l))
+  const requestedLesson = initialLessonId
+    ? course.lessons?.find(l => l.id === initialLessonId && l.type !== 'quiz' && canOpenLesson(course, l))
+    : null;
+  const firstLesson = requestedLesson
+    ?? course.lessons?.find(l => l.type !== 'quiz' && canOpenLesson(course, l))
     ?? course.lessons?.find(l => canOpenLesson(course, l))
     ?? null;
 
@@ -919,7 +1591,10 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
 
   // Lấy dữ liệu và actions từ Zustand store
   const completedLessons = useCourseStore((state) => state.completedLessons);
+  const markLessonCompleted = useCourseStore((state) => state.markLessonCompleted);
   const toggleLessonCompleted = useCourseStore((state) => state.toggleLessonCompleted);
+  const lessonDurations = useCourseStore((state) => state.lessonDurations);
+  const saveLessonDuration = useCourseStore((state) => state.saveLessonDuration);
   const quizScores = useCourseStore((state) => state.quizScores);
   const saveQuizScore = useCourseStore((state) => state.saveQuizScore);
   const lessonNotes = useCourseStore((state) => state.lessonNotes);
@@ -1068,6 +1743,21 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
   }
 
   // Callback từ QuizModal khi user nộp bài
+  function handleVideoEnded() {
+    if (!activeLesson || completedList.includes(activeLesson.id)) {
+      return;
+    }
+    markLessonCompleted(course.id, activeLesson.id);
+    notify.success('Đã đánh dấu hoàn thành bài học!');
+  }
+
+  function handleVideoMetadataLoaded(event: SyntheticEvent<HTMLVideoElement>) {
+    if (!activeLesson) {
+      return;
+    }
+    saveLessonDuration(course.id, activeLesson.id, event.currentTarget.duration);
+  }
+
   function toggleChapter(chapterId: string) {
     setExpandedChapterIds(prev => {
       const next = new Set(prev);
@@ -1206,7 +1896,7 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
             {/* Hiển thị thông báo khi signed URL hết hạn (sau 1 giờ) */}
             {videoUrlExpired ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-white gap-3 px-8 text-center">
-                <img src={course.image} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
+                <SafeCourseImage course={course} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
                 <AlertCircle className="w-14 h-14 text-orange-400 relative z-10" />
                 <p className="text-base font-semibold relative z-10">Link video đã hết hạn</p>
                 <p className="text-sm text-white/60 relative z-10 max-w-xs">
@@ -1243,13 +1933,15 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
                   controls
                   controlsList="nodownload"
                   playsInline
+                  onLoadedMetadata={handleVideoMetadataLoaded}
+                  onEnded={handleVideoEnded}
                   onError={() => setVideoUrlExpired(true)}
                 />
               )
             ) : activeLesson?.type === 'video' ? (
               // Video chưa có URL — có thể chưa upload hoặc backend chưa trả signed URL
               <div className="absolute inset-0 flex flex-col items-center justify-center text-white gap-3 px-8 text-center">
-                <img src={course.image} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
+                <SafeCourseImage course={course} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
                 <AlertCircle className="w-14 h-14 text-yellow-400 relative z-10" />
                 <p className="text-base font-semibold relative z-10">
                   {activeLesson.isFree ? 'Bài học thử chưa có video' : 'Video chưa sẵn sàng'}
@@ -1269,7 +1961,7 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
             ) : activeLesson?.type === 'pdf' ? (
               // PDF viewer
               <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
-                <img src={course.image} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
+                <SafeCourseImage course={course} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
                 <FileText className="w-16 h-16 mb-4 opacity-80 text-blue-400 relative z-10" />
                 <h3 className="text-2xl font-bold relative z-10">Tài liệu PDF</h3>
                 {activeLesson?.url && activeLesson.url !== '#' ? (
@@ -1287,7 +1979,7 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
               </div>
             ) : (
               // Thumbnail mặc định
-              <img src={course.image} alt="Thumbnail" className="absolute inset-0 w-full h-full object-cover opacity-40" />
+              <SafeCourseImage course={course} alt="Thumbnail" className="absolute inset-0 w-full h-full object-cover opacity-40" />
             )}
           </div>
 
@@ -1560,6 +2252,12 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
                   const examSlotIndex = Math.floor(chapterIndex / 3);
                   const exam = studentExams.find(item => item.slotIndex === examSlotIndex);
                   const shouldShowExam = (chapterIndex + 1) % 3 === 0 && exam;
+                  const videoLessonsInChapter = chapter.lessons.filter(lesson => lesson.type === 'video');
+                  const completedVideoCount = videoLessonsInChapter.filter(lesson =>
+                    completedList.includes(lesson.id)
+                  ).length;
+                  const isChapterVideoCompleted = videoLessonsInChapter.length === 0 ||
+                    completedVideoCount === videoLessonsInChapter.length;
 
                   return (
                     <div key={chapter.id} className="space-y-2">
@@ -1625,7 +2323,9 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
                                         Bài {lessonIndex + 1}: {lesson.title.replace(/^Bài\s*\d+\s*[:.-]?\s*/i, '')}
                                       </p>
                                       <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                                        <span className="text-xs text-on-surface-variant">{lesson.duration}</span>
+                                        <span className="text-xs text-on-surface-variant">
+                                          {getLessonDisplayDuration(course.id, lesson, lessonDurations)}
+                                        </span>
                                         {lesson.isFree && isPreviewMode && (
                                           <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-extrabold text-amber-600">
                                             Học thử
@@ -1643,7 +2343,7 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
                               })}
 
                               {chapter.hasQuizConfig && chapter.id !== 'flat-lessons' && (
-                                course.isEnrolled ? (
+                                course.isEnrolled && isChapterVideoCompleted ? (
                                   <Link
                                     to={`/courses/${courseId}/chapters/${chapter.id}/quiz`}
                                     className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 flex items-center gap-3 bg-surface hover:bg-amber-500/5 hover:border-amber-500/20 transition-all group"
@@ -1663,7 +2363,11 @@ function LearningView({ course, rawChapters, courseId, onExitPreview }: {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <p className="text-sm font-semibold text-on-surface line-clamp-1">Quiz chương {chapterIndex + 1}</p>
-                                      <p className="text-xs text-on-surface-variant font-medium">Cần mua khóa để làm quiz</p>
+                                      <p className="text-xs text-on-surface-variant font-medium">
+                                        {course.isEnrolled
+                                          ? `Hoàn thành ${completedVideoCount}/${videoLessonsInChapter.length} video để mở quiz`
+                                          : 'Cần mua khóa để làm quiz'}
+                                      </p>
                                     </div>
                                   </div>
                                 )
@@ -1759,6 +2463,8 @@ export default function CourseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const purchasedIds = useCourseStore((state) => state.purchasedIds);
+  const lessonDurations = useCourseStore((state) => state.lessonDurations);
+  const saveLessonDuration = useCourseStore((state) => state.saveLessonDuration);
 
   // ── State fetch từ API ──────────────────────────────────────────────────
   const [course, setCourse] = useState<Course | null>(null);
@@ -1791,6 +2497,35 @@ export default function CourseDetailPage() {
   }, [id, purchasedIds]);
 
   // ── Loading state ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!course?.lessons?.length) {
+      return;
+    }
+
+    const storedDurations = lessonDurations[course.id] ?? {};
+    const candidates = course.lessons.filter((lesson) =>
+      lesson.type === 'video' &&
+      lesson.duration === '00:00' &&
+      lesson.url !== '#' &&
+      isDirectVideoUrl(lesson.url) &&
+      !storedDurations[lesson.id]
+    );
+
+    if (candidates.length === 0) {
+      return;
+    }
+
+    const cleanups = candidates.map((lesson) =>
+      preloadLessonDuration(lesson, (durationSec) => {
+        saveLessonDuration(course.id, lesson.id, durationSec);
+      })
+    );
+
+    return () => {
+      cleanups.forEach((cleanup) => cleanup());
+    };
+  }, [course, lessonDurations, saveLessonDuration]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-surface flex flex-col items-center justify-center">
@@ -1819,11 +2554,19 @@ export default function CourseDetailPage() {
     lesson.type !== 'quiz' && Boolean(lesson.isFree)
   ) ?? false;
   const isPreviewRequested = searchParams.get('preview') === '1';
+  const isLearningRequested = searchParams.get('learn') === '1';
+  const requestedLessonId = searchParams.get('lesson');
 
-  function openPreview() {
+  function openPreview(lessonId?: string) {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
+      next.delete('learn');
       next.set('preview', '1');
+      if (lessonId) {
+        next.set('lesson', lessonId);
+      } else {
+        next.delete('lesson');
+      }
       return next;
     });
   }
@@ -1832,6 +2575,30 @@ export default function CourseDetailPage() {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete('preview');
+      next.delete('lesson');
+      return next;
+    });
+  }
+
+  function openLearning(lessonId?: string) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('preview');
+      next.set('learn', '1');
+      if (lessonId) {
+        next.set('lesson', lessonId);
+      } else {
+        next.delete('lesson');
+      }
+      return next;
+    });
+  }
+
+  function closeLearning() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('learn');
+      next.delete('lesson');
       return next;
     });
   }
@@ -1851,17 +2618,20 @@ export default function CourseDetailPage() {
     );
   }
 
-  return isEnrolled || (hasFreePreviewLesson && isPreviewRequested) ? (
+  return (isEnrolled && isLearningRequested) || (hasFreePreviewLesson && isPreviewRequested) ? (
     <LearningView
       course={courseWithAccess}
       rawChapters={rawChapters}
       courseId={id!}
-      onExitPreview={isEnrolled ? undefined : closePreview}
+      initialLessonId={requestedLessonId}
+      onExitPreview={isEnrolled ? closeLearning : closePreview}
     />
   ) : (
     <MarketingView
       course={courseWithAccess}
-      onStartPreview={hasFreePreviewLesson ? openPreview : undefined}
+      rawChapters={rawChapters}
+      onStartPreview={!isEnrolled && hasFreePreviewLesson ? openPreview : undefined}
+      onOpenLearning={isEnrolled ? openLearning : undefined}
     />
   );
 }

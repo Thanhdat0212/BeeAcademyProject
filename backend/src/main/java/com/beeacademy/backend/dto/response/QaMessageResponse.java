@@ -11,14 +11,21 @@ public record QaMessageResponse(
         String authorName,
         String authorRole,
         String content,
+        String attachmentUrl,
+        String attachmentName,
+        String attachmentType,
+        Long attachmentSizeBytes,
         Instant sentAt
 ) {
     public static QaMessageResponse fromEntity(QaMessage message) {
         String name = message.getAuthor().getFullName();
         if (name == null || name.isBlank()) {
-            name = message.getAuthorRole().toDbValue().equals("teacher")
-                    ? "Giáo viên"
-                    : "Học sinh";
+            name = switch (message.getAuthorRole()) {
+                case TEACHER -> "Giáo viên";
+                case PARENT -> "Phụ huynh";
+                case ADMIN -> "Quản trị viên";
+                case STUDENT -> "Học sinh";
+            };
         }
         return new QaMessageResponse(
                 message.getId(),
@@ -26,6 +33,10 @@ public record QaMessageResponse(
                 name,
                 message.getAuthorRole().toDbValue(),
                 message.getContent(),
+                message.getAttachmentUrl(),
+                message.getAttachmentName(),
+                message.getAttachmentType(),
+                message.getAttachmentSizeBytes(),
                 message.getCreatedAt()
         );
     }

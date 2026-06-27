@@ -73,9 +73,18 @@ public class Course {
     @Column(name = "description")
     private String description;
 
+    @Column(name = "objective")
+    private String objective;
+
+    @Column(name = "audience")
+    private String audience;
+
     /** Public URL của thumbnail (Cloudinary / Supabase Storage). */
     @Column(name = "thumbnail_url")
     private String thumbnailUrl;
+
+    @Column(name = "intro_video_url")
+    private String introVideoUrl;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
@@ -119,6 +128,12 @@ public class Course {
 
     @Column(name = "total_duration_sec", nullable = false)
     private Integer totalDurationSec;
+
+    @Column(name = "version_no", nullable = false)
+    private Integer versionNo;
+
+    @Column(name = "submitted_version_no", nullable = false)
+    private Integer submittedVersionNo;
 
     /** Thời điểm publish - null nếu chưa published. */
     @Column(name = "published_at")
@@ -185,12 +200,15 @@ public class Course {
      * @param priceVnd   giá gốc (VND)
      */
     public static Course createByTeacher(Profile teacher, String title, String description,
+                                         String objective, String audience,
                                          Category category, int[] grades, int priceVnd) {
         Course c       = new Course();
         c.id           = UUID.randomUUID();
         c.teacher      = teacher;
         c.title        = title.trim();
         c.description  = description;
+        c.objective    = objective;
+        c.audience     = audience;
         c.category     = category;
         c.grades       = grades;
         c.priceVnd     = priceVnd;
@@ -199,6 +217,8 @@ public class Course {
         c.totalChapters    = 0;
         c.totalLessons     = 0;
         c.totalDurationSec = 0;
+        c.versionNo = 1;
+        c.submittedVersionNo = 0;
         // slug tạm thời — service sẽ tạo slug duy nhất sau
         c.slug = toSlug(title);
         return c;
@@ -232,19 +252,39 @@ public class Course {
 
     /** Cập nhật thông tin cơ bản khoá học (chỉ khi DRAFT/NEEDS_REVISION). */
     public void update(String title, String description, Category category,
-                       int[] grades, int priceVnd, Integer salePriceVnd, String thumbnailUrl) {
+                       int[] grades, int priceVnd, Integer salePriceVnd, String thumbnailUrl,
+                       String objective, String audience, String introVideoUrl) {
         if (title != null && !title.isBlank()) this.title = title.trim();
         if (description != null) this.description = description;
+        if (objective != null) this.objective = objective;
+        if (audience != null) this.audience = audience;
         if (category != null) this.category = category;
         if (grades != null) this.grades = grades;
         if (priceVnd > 0) this.priceVnd = priceVnd;
         this.salePriceVnd = salePriceVnd;
         if (thumbnailUrl != null) this.thumbnailUrl = thumbnailUrl;
+        if (introVideoUrl != null) {
+            String trimmed = introVideoUrl.trim();
+            this.introVideoUrl = trimmed.isEmpty() ? null : trimmed;
+        }
     }
 
     /** Cập nhật URL thumbnail sau khi upload ảnh bìa. */
     public void setThumbnailUrl(String url) {
         this.thumbnailUrl = url;
+    }
+
+    public void setIntroVideoUrl(String url) {
+        if (url == null || url.isBlank()) {
+            this.introVideoUrl = null;
+        } else {
+            this.introVideoUrl = url.trim();
+        }
+    }
+
+    public void markSubmittedVersion(int versionNo) {
+        this.versionNo = versionNo;
+        this.submittedVersionNo = versionNo;
     }
 
     /** Đếm lại tổng chapter/lesson (gọi sau mỗi thao tác thêm/xóa). */

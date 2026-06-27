@@ -11,12 +11,13 @@ import type {
   ApiResponse,
   Category,
   CourseDetail,
+  CourseReview,
+  CourseReviewSummary,
   CourseSummary,
   PageResponse,
   SearchCoursesParams,
 } from '../types/api';
 
-// [Đồng bộ team3/develop · search-course] Suy ra lớp 6-9 từ ô tìm kiếm
 /**
  * Query nhanh dạng "6", "7", "8", "9" được hiểu là tìm theo lớp tương ứng.
  * Header autocomplete và trang /courses dùng chung để kết quả không lệch nhau.
@@ -75,6 +76,24 @@ export async function getCourseDetail(id: string): Promise<CourseDetail> {
 export async function getCourseDetailBySlug(slug: string): Promise<CourseDetail> {
   const res = await apiClient.get<ApiResponse<CourseDetail>>(
     `/api/courses/by-slug/${encodeURIComponent(slug)}`,
+  );
+  return unwrap(res.data);
+}
+
+export async function getCourseReviews(courseId: string): Promise<CourseReviewSummary> {
+  const res = await apiClient.get<ApiResponse<CourseReviewSummary>>(
+    `/api/courses/${encodeURIComponent(courseId)}/reviews`,
+  );
+  return unwrap(res.data);
+}
+
+export async function upsertCourseReview(
+  courseId: string,
+  payload: { rating: number; comment: string },
+): Promise<CourseReview> {
+  const res = await apiClient.post<ApiResponse<CourseReview>>(
+    `/api/courses/${encodeURIComponent(courseId)}/reviews`,
+    payload,
   );
   return unwrap(res.data);
 }

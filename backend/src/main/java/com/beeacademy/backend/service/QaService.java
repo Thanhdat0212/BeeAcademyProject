@@ -22,6 +22,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -33,6 +35,8 @@ public class QaService {
     private final CourseRepository courseRepository;
     private final LessonRepository lessonRepository;
     private final EnrollmentRepository enrollmentRepository;
+    private final UserNotificationService notificationService;
+    private final ParentTeacherMessageEmailService parentTeacherMessageEmailService;
 
     @Transactional(readOnly = true)
     public List<QaThreadResponse> listStudentThreads(AuthenticatedUser me) {
@@ -102,7 +106,9 @@ public class QaService {
         QaThread thread = loadThread(threadId);
         verifyTeacherOwner(thread, me.userId());
         thread.addTeacherMessage(teacher, req.content());
-        return QaThreadResponse.fromEntity(qaThreadRepository.saveAndFlush(thread));
+        QaThread saved = qaThreadRepository.saveAndFlush(thread);
+        notifyParentsAboutTeacherReply(saved, teacher, req.content());
+        return QaThreadResponse.fromEntity(saved);
     }
 
     @Transactional
@@ -138,6 +144,46 @@ public class QaService {
         if (profile.getRole() != expected) {
             throwForbidden();
         }
+    }
+
+    private void notifyParentsAboutTeacherReply(QaThread thread, Profile teacher, String content) {
+        Map<UUID, Profile> parents = new LinkedHashMap<>();
+        thread.getMessages().stream()
+                .filter(message -> message.getAuthorRole() == UserRole.PARENT)
+                .forEach(message -> parents.putIfAbsent(message.getAuthor().getId(), message.getAuthor()));
+        if (parents.isEmpty()) return;
+
+        String teacherName = displayName(teacher, "Giáo viên");
+        String studentName = displayName(thread.getStudent(), "học sinh");
+        String courseTitle = thread.getCourse().getTitle();
+        for (Profile parent : parents.values()) {
+            notificationService.notify(
+                    parent.getId(),
+                    "parent_teacher_reply",
+                    "Giáo viên đã phản hồi",
+                    "%s đã phản hồi về %s trong khóa %s."
+                            .formatted(teacherName, studentName, courseTitle),
+                    "/parent/messages");
+            parentTeacherMessageEmailService.notifyParent(
+                    parent.getId(),
+                    displayName(parent, "Phụ huynh"),
+                    teacherName,
+                    studentName,
+                    courseTitle,
+                    excerpt(content));
+        }
+    }
+
+    private String displayName(Profile profile, String fallback) {
+        return profile.getFullName() == null || profile.getFullName().isBlank()
+                ? fallback
+                : profile.getFullName();
+    }
+
+    private String excerpt(String content) {
+        if (content == null || content.isBlank()) return "Tin nhắn mới";
+        String trimmed = content.trim();
+        return trimmed.length() <= 180 ? trimmed : trimmed.substring(0, 177) + "...";
     }
 
     private void throwForbidden() {

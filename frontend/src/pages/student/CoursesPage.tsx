@@ -25,7 +25,7 @@ import {
 } from '../../api/courseService';
 import { adaptCourseSummary } from '../../api/adapter';
 import { isApiError } from '../../api/client';
-import type { Category } from '../../types/api';
+import type { Category, CourseSummary } from '../../types/api';
 
 const GRADE_OPTIONS = [
   { value: null, label: 'Tất cả' },
@@ -36,6 +36,41 @@ const GRADE_OPTIONS = [
 ] as const;
 
 const PAGE_SIZE = 12;
+
+function isVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov)(\?|#|$)/i.test(url);
+}
+
+function CourseCover({
+  course,
+  className,
+}: {
+  course: UiCourse;
+  className: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const imageUrl = course.image?.trim();
+  const canUseImage = Boolean(imageUrl) && !isVideoUrl(imageUrl) && !failed;
+
+  if (canUseImage) {
+    return (
+      <img
+        src={imageUrl}
+        alt={course.title}
+        onError={() => setFailed(true)}
+        className={className}
+      />
+    );
+  }
+
+  return (
+    <div className={`${className} bg-surface-container-high flex flex-col items-center justify-center text-center px-5`}>
+      <BookOpen className="w-10 h-10 text-primary mb-3" />
+      <p className="text-sm font-extrabold text-on-surface line-clamp-2">{course.title}</p>
+      <p className="text-xs font-semibold text-on-surface-variant mt-1">{course.subject} · {course.grade}</p>
+    </div>
+  );
+}
 
 function parseSubjectParam(value: string | null): string | null {
   const subject = value?.trim();
@@ -88,6 +123,7 @@ export default function CoursesPage() {
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [courses, setCourses] = useState<UiCourse[]>([]);
+  const [enrolledCourseSummaries, setEnrolledCourseSummaries] = useState<CourseSummary[]>([]);
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -97,25 +133,28 @@ export default function CoursesPage() {
   const toggleFavorite = useCourseStore((state) => state.toggleFavorite);
   const completedLessons = useCourseStore((state) => state.completedLessons);
 
-  const [enrolledCourses, setEnrolledCourses] = useState<UiCourse[]>([]);
+  const enrolledCourses = useMemo(
+    () => enrolledCourseSummaries.map((summary) => {
+      const course = adaptCourseSummary(summary, true);
+      const completedList = completedLessons[course.id] ?? [];
+      const totalLessons = Math.max(summary.totalLessons ?? 0, 0);
+      const normalizedCompleted = totalLessons > 0
+        ? Math.min(completedList.length, totalLessons)
+        : 0;
+      const progress = totalLessons > 0
+        ? Math.round((normalizedCompleted / totalLessons) * 100)
+        : 0;
+      return { ...course, progress };
+    }),
+    [completedLessons, enrolledCourseSummaries],
+  );
 
   useEffect(() => {
     getEnrolledCourses()
-      .then((items) => setEnrolledCourses(
-        items.map((summary) => {
-          const course = adaptCourseSummary(summary, true);
-          const completedList = completedLessons[course.id] ?? [];
-          const totalLessons = course.lessons?.length ?? 0;
-          const progress = totalLessons > 0
-            ? Math.round((completedList.length / totalLessons) * 100)
-            : 0;
-          return { ...course, progress };
-        }),
-      ))
+      .then(setEnrolledCourseSummaries)
       .catch(() => {
         // Không cần chặn UX nếu user chưa có khóa học đã mua.
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -325,10 +364,13 @@ export default function CoursesPage() {
                     transition={{ delay: idx * 0.1 }}
                     className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/50 hover:shadow-lg hover:border-primary/30 transition-all group flex flex-col h-full"
                   >
-                    <div className="relative h-40 overflow-hidden">
-                      <Link to={`/courses/${course.id}`}>
-                        <img src={course.image} alt={course.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                      </Link>
+                      <div className="relative h-40 overflow-hidden">
+                        <Link to={`/courses/${course.id}`}>
+                          <CourseCover
+                            course={course}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
+                        </Link>
                       <div className="absolute top-3 left-3 bg-surface/90 backdrop-blur text-xs font-bold px-3 py-1 rounded-full text-on-surface pointer-events-none">
                         {course.grade}
                       </div>
@@ -537,9 +579,8 @@ export default function CoursesPage() {
                             >
                               <div className="relative h-48 overflow-hidden">
                                 <Link to={`/courses/${course.id}`}>
-                                  <img
-                                    src={course.image}
-                                    alt={course.title}
+                                  <CourseCover
+                                    course={course}
                                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
                                   />
                                 </Link>
@@ -559,13 +600,9 @@ export default function CoursesPage() {
                               </div>
                               <div className="p-6 flex flex-col flex-grow">
                                 <div className="flex items-center justify-between mb-3">
-                                  {course.reviewCount && course.reviewCount > 0 ? (
-                                    <div className="flex items-center gap-1 text-sm font-semibold text-amber-500">
-                                      <Star className="w-4 h-4 fill-amber-500" /> {course.rating}
-                                    </div>
-                                  ) : (
-                                    <span className="text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded">Mới</span>
-                                  )}
+                                  <div className="flex items-center gap-1 text-sm font-semibold text-amber-500">
+                                    <Star className="w-4 h-4 fill-amber-500" /> {course.rating}
+                                  </div>
                                   <div className="flex items-center gap-1 text-sm font-medium text-on-surface-variant">
                                     <Users className="w-4 h-4" /> {course.students.toLocaleString('vi-VN')}
                                   </div>
