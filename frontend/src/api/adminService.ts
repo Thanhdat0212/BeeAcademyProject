@@ -44,6 +44,41 @@ export async function getAdminOverview(): Promise<AdminOverview> {
   return unwrap(res.data);
 }
 
+export interface AdminNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  targetPath: string | null;
+  courseId: string | null;
+  actorName: string | null;
+  unread: boolean;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface AdminNotificationSummary {
+  unreadCount: number;
+  notifications: AdminNotification[];
+}
+
+export async function listAdminNotifications(unreadOnly = false):
+    Promise<AdminNotificationSummary> {
+  const res = await apiClient.get<ApiResponse<AdminNotificationSummary>>(
+    '/api/admin/notifications',
+    { params: { unreadOnly } },
+  );
+  return unwrap(res.data);
+}
+
+export async function markAdminNotificationRead(notificationId: string):
+    Promise<AdminNotification> {
+  const res = await apiClient.patch<ApiResponse<AdminNotification>>(
+    `/api/admin/notifications/${notificationId}/read`,
+  );
+  return unwrap(res.data);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Kế toán & Lương (UC37 / UC39 / UC40)
 //  GET   /api/admin/payouts          — danh sách kỳ đối soát theo GV/tháng
