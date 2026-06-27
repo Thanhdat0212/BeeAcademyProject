@@ -2,9 +2,12 @@ package com.beeacademy.backend.service;
 
 import com.beeacademy.backend.dto.response.StudentParentLinkInvitationResponse;
 import com.beeacademy.backend.exception.BusinessException;
+import com.beeacademy.backend.model.ParentLinkAuditLog;
 import com.beeacademy.backend.model.ParentStudentLink;
 import com.beeacademy.backend.model.ParentStudentLinkStatus;
 import com.beeacademy.backend.model.Profile;
+import com.beeacademy.backend.model.UserRole;
+import com.beeacademy.backend.repository.ParentLinkAuditLogRepository;
 import com.beeacademy.backend.repository.ParentStudentLinkRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
@@ -14,6 +17,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -22,8 +27,12 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class StudentParentLinkService {
 
+    private static final Duration INVITATION_TTL = Duration.ofDays(7);
+
     private final ParentStudentLinkRepository linkRepository;
     private final ProfileRepository profileRepository;
+    private final ParentLinkAuditLogRepository auditLogRepository;
+    private final UserNotificationService notificationService;
 
     @Transactional(readOnly = true)
     public List<StudentParentLinkInvitationResponse> listPendingInvitations(AuthenticatedUser me) {
@@ -52,8 +61,11 @@ public class StudentParentLinkService {
     @Transactional
     public StudentParentLinkInvitationResponse acceptInvitation(AuthenticatedUser me, UUID parentId) {
         ParentStudentLink link = requirePendingInvitation(me.userId(), parentId);
+        ParentStudentLinkStatus oldStatus = link.getStatus();
         link.accept();
         ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        auditStatusChange(savedLink, me.userId(), "accept_invitation", oldStatus, savedLink.getStatus());
+        notifyParentAboutDecision(savedLink, true);
         log.info("Student {} accepted parent link invitation from {}", me.userId(), parentId);
         return toResponse(savedLink);
     }
@@ -61,8 +73,11 @@ public class StudentParentLinkService {
     @Transactional
     public StudentParentLinkInvitationResponse rejectInvitation(AuthenticatedUser me, UUID parentId) {
         ParentStudentLink link = requirePendingInvitation(me.userId(), parentId);
+        ParentStudentLinkStatus oldStatus = link.getStatus();
         link.reject();
         ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        auditStatusChange(savedLink, me.userId(), "reject_invitation", oldStatus, savedLink.getStatus());
+        notifyParentAboutDecision(savedLink, false);
         log.info("Student {} rejected parent link invitation from {}", me.userId(), parentId);
         return toResponse(savedLink);
     }
@@ -123,7 +138,50 @@ public class StudentParentLinkService {
                     HttpStatus.CONFLICT);
         }
 
+        if (isExpired(link)) {
+            throw new BusinessException(
+                    "PARENT_LINK_INVITATION_EXPIRED",
+                    "Yeu cau lien ket da het han. Vui long nho phu huynh gui lai loi moi.",
+                    HttpStatus.GONE);
+        }
+
         return link;
+    }
+
+    private boolean isExpired(ParentStudentLink link) {
+        Instant invitedAt = link.getInvitedAt();
+        return invitedAt != null && invitedAt.plus(INVITATION_TTL).isBefore(Instant.now());
+    }
+
+    private void auditStatusChange(ParentStudentLink link, UUID actorId, String action,
+                                   ParentStudentLinkStatus oldStatus,
+                                   ParentStudentLinkStatus newStatus) {
+        auditLogRepository.save(ParentLinkAuditLog.create(
+                link,
+                actorId,
+                UserRole.STUDENT,
+                action,
+                oldStatus,
+                newStatus));
+    }
+
+    private void notifyParentAboutDecision(ParentStudentLink link, boolean accepted) {
+        Profile parent = link.getParent();
+        Profile student = link.getStudent();
+        String studentName = studentDisplayName(student);
+        String title = accepted
+                ? "Hoc sinh da chap nhan lien ket"
+                : "Hoc sinh da tu choi lien ket";
+        String body = accepted
+                ? "%s da chap nhan loi moi lien ket phu huynh.".formatted(studentName)
+                : "%s da tu choi loi moi lien ket phu huynh.".formatted(studentName);
+
+        notificationService.notify(
+                parent.getId(),
+                accepted ? "parent_link_accepted" : "parent_link_rejected",
+                title,
+                body,
+                "/parent/link");
     }
 
     private ParentStudentLink requireActiveLink(UUID studentId, UUID parentId) {
@@ -151,12 +209,20 @@ public class StudentParentLinkService {
                 displayName(parent),
                 parentEmail,
                 parent.getAvatarUrl(),
+                link.getRelationship(),
+                link.getNote(),
                 link.getStatus().toApiValue(),
                 link.getInvitedAt(),
+                expiresAt(link),
+                isExpired(link),
                 link.getRespondedAt(),
                 link.getUnlinkRequestedBy(),
                 resolveUnlinkRequestedByRole(link),
                 link.getUnlinkRequestedAt());
+    }
+
+    private Instant expiresAt(ParentStudentLink link) {
+        return link.getInvitedAt() == null ? null : link.getInvitedAt().plus(INVITATION_TTL);
     }
 
     private String resolveUnlinkRequestedByRole(ParentStudentLink link) {
@@ -171,6 +237,13 @@ public class StudentParentLinkService {
             return "student";
         }
         return null;
+    }
+
+    private String studentDisplayName(Profile profile) {
+        if (profile == null || profile.getFullName() == null || profile.getFullName().isBlank()) {
+            return "Hoc sinh";
+        }
+        return profile.getFullName();
     }
 
     private String displayName(Profile profile) {

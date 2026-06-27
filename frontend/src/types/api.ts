@@ -236,6 +236,8 @@ export type ParentLinkParticipantRole = 'parent' | 'student';
 
 export interface SendParentLinkInvitationPayload {
   studentEmail: string;
+  relationship: ParentLinkRelationship;
+  note?: string | null;
 }
 
 export interface ParentLinkInvitationResponse {
@@ -244,8 +246,12 @@ export interface ParentLinkInvitationResponse {
   studentEmail: string;
   avatarUrl: string | null;
   grade: string;
+  relationship: ParentLinkRelationship;
+  note: string | null;
   status: ParentLinkStatus;
   invitedAt: string;
+  expiresAt: string | null;
+  expired: boolean;
   respondedAt: string | null;
   unlinkRequestedById: string | null;
   unlinkRequestedByRole: ParentLinkParticipantRole | null;
@@ -257,13 +263,19 @@ export interface StudentParentLinkInvitationResponse {
   parentName: string;
   parentEmail: string;
   avatarUrl: string | null;
+  relationship: ParentLinkRelationship;
+  note: string | null;
   status: ParentLinkStatus;
   invitedAt: string;
+  expiresAt: string | null;
+  expired: boolean;
   respondedAt: string | null;
   unlinkRequestedById: string | null;
   unlinkRequestedByRole: ParentLinkParticipantRole | null;
   unlinkRequestedAt: string | null;
 }
+
+export type ParentLinkRelationship = 'father' | 'mother' | 'guardian';
 
 export interface ChildOverviewResponse {
   studentName: string;

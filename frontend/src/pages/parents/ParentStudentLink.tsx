@@ -19,6 +19,12 @@ import { notify } from '../../lib/toast';
 import * as parentService from '../../api/parentService';
 import type { ParentLinkInvitationResponse } from '../../types/api';
 
+const relationshipLabels = {
+  father: 'Cha',
+  mother: 'Me',
+  guardian: 'Nguoi giam ho',
+} as const;
+
 function fallbackAvatar(name: string): string {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=feb700&color=1a1b1e&bold=true&size=128`;
 }
@@ -48,10 +54,13 @@ export default function ParentStudentLink() {
   const { linkedStudents, unlinkStudent, fetchLinkedStudents } = useAuthStore();
 
   const [inviteEmail, setInviteEmail] = useState('');
+  const [relationship, setRelationship] = useState<ParentLinkInvitationResponse['relationship']>('guardian');
+  const [inviteNote, setInviteNote] = useState('');
   const [pendingInvitations, setPendingInvitations] = useState<ParentLinkInvitationResponse[]>([]);
   const [pageLoading, setPageLoading] = useState(false);
   const [sendingInvite, setSendingInvite] = useState(false);
   const [resendingEmail, setResendingEmail] = useState<string | null>(null);
+  const [cancellingInvitationId, setCancellingInvitationId] = useState<string | null>(null);
   const [confirmUnlinkId, setConfirmUnlinkId] = useState<string | null>(null);
   const [unlinking, setUnlinking] = useState(false);
 
@@ -93,13 +102,22 @@ export default function ParentStudentLink() {
     }
 
     try {
-      const invitation = await parentService.sendLinkInvitation(targetEmail);
+      const existingInvitation = emailOverride
+        ? pendingInvitations.find(item => item.studentEmail === targetEmail)
+        : null;
+      const invitation = await parentService.sendLinkInvitation({
+        studentEmail: targetEmail,
+        relationship: existingInvitation?.relationship ?? relationship,
+        note: existingInvitation?.note ?? (inviteNote.trim() || null),
+      });
       setPendingInvitations(current => [
         invitation,
         ...current.filter(item => item.studentId !== invitation.studentId),
       ]);
       if (!emailOverride) {
         setInviteEmail('');
+        setRelationship('guardian');
+        setInviteNote('');
       }
       notify.success(`Đã gửi lời mời liên kết tới ${targetEmail}.`);
     } catch (error) {
@@ -108,6 +126,20 @@ export default function ParentStudentLink() {
     } finally {
       setSendingInvite(false);
       setResendingEmail(null);
+    }
+  };
+
+  const handleCancelInvitation = async (invitation: ParentLinkInvitationResponse) => {
+    setCancellingInvitationId(invitation.studentId);
+    try {
+      await parentService.cancelLinkInvitation(invitation.studentId);
+      setPendingInvitations(current => current.filter(item => item.studentId !== invitation.studentId));
+      notify.success(`Da huy loi moi lien ket toi ${invitation.studentName}.`);
+    } catch (error) {
+      console.error('Loi khi huy loi moi lien ket:', error);
+      notify.error(error instanceof Error ? error.message : 'Khong the huy loi moi lien ket.');
+    } finally {
+      setCancellingInvitationId(null);
     }
   };
 
@@ -175,7 +207,7 @@ export default function ParentStudentLink() {
               </button>
             </div>
 
-            <div className="mt-6 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-3">
+            <div className="mt-6 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_220px_auto] gap-3">
               <label className="flex flex-col gap-1.5">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
                   Email tài khoản học sinh
@@ -192,6 +224,21 @@ export default function ParentStudentLink() {
                 </div>
               </label>
 
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                  Quan he
+                </span>
+                <select
+                  value={relationship}
+                  onChange={(event) => setRelationship(event.target.value as ParentLinkInvitationResponse['relationship'])}
+                  className="h-12 rounded-2xl border border-outline-variant/30 bg-surface px-4 outline-none text-sm font-semibold text-on-surface"
+                >
+                  <option value="father">Cha</option>
+                  <option value="mother">Me</option>
+                  <option value="guardian">Nguoi giam ho</option>
+                </select>
+              </label>
+
               <button
                 onClick={() => handleSendInvite()}
                 disabled={sendingInvite}
@@ -201,6 +248,19 @@ export default function ParentStudentLink() {
                 Gửi lời mời
               </button>
             </div>
+            <label className="mt-3 flex flex-col gap-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                Ghi chu tuy chon
+              </span>
+              <textarea
+                value={inviteNote}
+                onChange={(event) => setInviteNote(event.target.value.slice(0, 500))}
+                rows={3}
+                placeholder="Thong tin de hoc sinh xac nhan dung phu huynh."
+                className="rounded-2xl border border-outline-variant/30 bg-surface px-4 py-3 outline-none text-sm text-on-surface placeholder:text-on-surface-variant/60 resize-none"
+              />
+              <span className="text-[11px] text-on-surface-variant text-right">{inviteNote.length}/500</span>
+            </label>
           </motion.section>
 
           <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-8">
@@ -263,8 +323,15 @@ export default function ParentStudentLink() {
                             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-on-surface-variant">
                               <span>{invitation.studentEmail}</span>
                               <span>{invitation.grade || 'Chưa có lớp học'}</span>
+                              <span>{relationshipLabels[invitation.relationship]}</span>
                               <span>Gửi lúc: {formatDateTime(invitation.invitedAt)}</span>
+                              <span>Hết hạn: {formatDateTime(invitation.expiresAt)}</span>
                             </div>
+                            {invitation.note && (
+                              <p className="mt-2 text-xs text-on-surface-variant line-clamp-2">
+                                {invitation.note}
+                              </p>
+                            )}
                           </div>
                         </div>
 
@@ -283,6 +350,18 @@ export default function ParentStudentLink() {
                               <RefreshCw className="w-4 h-4" />
                             )}
                             Gửi lại
+                          </button>
+                          <button
+                            onClick={() => handleCancelInvitation(invitation)}
+                            disabled={cancellingInvitationId === invitation.studentId}
+                            className="h-10 px-4 rounded-xl border border-red-200/50 bg-red-50 text-xs font-bold text-red-600 hover:bg-red-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
+                          >
+                            {cancellingInvitationId === invitation.studentId ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                            Hủy lời mời
                           </button>
                         </div>
                       </div>

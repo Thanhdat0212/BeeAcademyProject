@@ -1,114 +1,169 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { 
-  BookOpen, ChevronDown, ChevronUp, CheckCircle, Clock, 
-  User, PlayCircle, FileText, CheckCircle2, Award, Calendar, AlertCircle
+import {
+  AlertCircle,
+  Award,
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Loader2,
+  RefreshCw,
+  TrendingUp,
+  User,
 } from 'lucide-react';
 import DashboardHeader from '../../components/DashboardHeader';
 import PageBanner from '../../components/PageBanner';
 import { useAuthStore } from '../../store/useAuthStore';
-import { MOCK_COURSES } from '../../data/mockCourses';
 import { notify } from '../../lib/toast';
+import * as parentService from '../../api/parentService';
+import type { ChildProgressReportResponse, ParentCourseProgressItem } from '../../types/api';
 
-// ---------------------------------------------------------------------------
-//  Cấu hình danh sách khóa học cụ thể của từng con (mock matching)
-// ---------------------------------------------------------------------------
-const MOCK_CHILDREN_COURSES: Record<string, Array<{ id: string; progress: number; enrollDate: string }>> = {
-  'BEE123': [
-    { id: 'c1', progress: 65, enrollDate: '12/03/2026' },
-    { id: 'c3', progress: 85, enrollDate: '20/03/2026' },
-    { id: 'c2', progress: 100, enrollDate: '01/02/2026' }
-  ],
-  'BEE456': [
-    { id: 'c2', progress: 45, enrollDate: '05/04/2026' }
-  ]
-};
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return 'Chưa cập nhật';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Chưa cập nhật';
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
+}
+
+function formatGrades(grades: number[], fallback: string): string {
+  if (grades.length === 0) return fallback || 'Chưa rõ lớp';
+  return `Lớp ${grades.join(', ')}`;
+}
+
+function formatScore(value: number | null): string {
+  if (value == null) return 'Chưa có';
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}/10`;
+}
+
+function courseStatusLabel(status: ParentCourseProgressItem['status']): string {
+  return status === 'completed' ? 'Đã hoàn thành' : 'Đang học';
+}
 
 export default function ParentCourses() {
   const { linkedStudents, fetchLinkedStudents } = useAuthStore();
-  
-  // Lấy học sinh tích cực từ localStorage hoặc mặc định
   const [selectedStudentId, setSelectedStudentId] = useState<string>(() => {
-    return localStorage.getItem('parent_active_student_id') || linkedStudents[0]?.id || '';
+    return localStorage.getItem('parent_active_student_id') || '';
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [expandedCourseId, setExpandedCourseId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [report, setReport] = useState<ChildProgressReportResponse | null>(null);
 
-  // Tải danh sách con cái từ API thật khi component mount
   useEffect(() => {
     fetchLinkedStudents();
   }, [fetchLinkedStudents]);
 
-  // Đồng bộ student ID khi danh sách linkedStudents thay đổi và đồng bộ an toàn nếu bị gỡ liên kết
   useEffect(() => {
-    if (linkedStudents.length > 0) {
-      const isValid = linkedStudents.some(s => s.id === selectedStudentId);
-      if (!isValid) {
-        setSelectedStudentId(linkedStudents[0].id);
-        localStorage.setItem('parent_active_student_id', linkedStudents[0].id);
-      }
-    } else {
+    if (linkedStudents.length === 0) {
       setSelectedStudentId('');
+      setReport(null);
+      return;
+    }
+
+    const savedStudentId = localStorage.getItem('parent_active_student_id');
+    const validSaved = savedStudentId && linkedStudents.some(student => student.id === savedStudentId);
+    const validCurrent = linkedStudents.some(student => student.id === selectedStudentId);
+
+    if (validSaved && savedStudentId !== selectedStudentId) {
+      setSelectedStudentId(savedStudentId);
+      return;
+    }
+
+    if (!validCurrent) {
+      setSelectedStudentId(linkedStudents[0].id);
+      localStorage.setItem('parent_active_student_id', linkedStudents[0].id);
     }
   }, [linkedStudents, selectedStudentId]);
 
-  // Tìm học sinh hiện tại
-  const activeStudent = linkedStudents.find(s => s.id === selectedStudentId);
+  useEffect(() => {
+    if (!selectedStudentId) {
+      setReport(null);
+      return;
+    }
 
-  // Cập nhật localStorage khi đổi học sinh
+    let active = true;
+    const loadReport = async () => {
+      setLoading(true);
+      setReport(null);
+      try {
+        const data = await parentService.getChildProgressReport(selectedStudentId);
+        if (active) setReport(data);
+      } catch (error) {
+        if (!active) return;
+        console.error('Lỗi khi tải danh sách khóa học của con:', error);
+        notify.error('Không thể tải danh sách khóa học của con.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    loadReport();
+    return () => {
+      active = false;
+    };
+  }, [selectedStudentId]);
+
+  const activeStudent = linkedStudents.find(student => student.id === selectedStudentId);
+  const gradeLabel = report?.gradeLabel || activeStudent?.grade || 'Chưa phân lớp';
+  const courses = report?.courses ?? [];
+  const completedCount = courses.filter(course => course.status === 'completed').length;
+  const averageProgress = courses.length > 0
+    ? courses.reduce((sum, course) => sum + course.progressPct, 0) / courses.length
+    : 0;
+
   const handleSelectStudent = (studentId: string) => {
     setSelectedStudentId(studentId);
     localStorage.setItem('parent_active_student_id', studentId);
-    setExpandedCourseId(null);
     setDropdownOpen(false);
-    notify.success(`Đã chuyển sang xem khóa học của ${linkedStudents.find(s => s.id === studentId)?.name}`);
+    notify.success(`Đã chuyển sang xem khóa học của ${linkedStudents.find(student => student.id === studentId)?.name}`);
+  };
+
+  const handleRefresh = async () => {
+    if (!selectedStudentId) return;
+    setLoading(true);
+    try {
+      const data = await parentService.getChildProgressReport(selectedStudentId);
+      setReport(data);
+      notify.success('Đã cập nhật danh sách khóa học mới nhất.');
+    } catch (error) {
+      console.error('Lỗi khi làm mới danh sách khóa học của con:', error);
+      notify.error('Không thể làm mới danh sách khóa học.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (linkedStudents.length === 0) {
     return (
       <div className="min-h-screen bg-surface flex flex-col font-sans">
         <DashboardHeader />
-        <PageBanner title="Khóa học của con" subtitle="Theo dõi tiến độ học tập chi tiết" />
+        <PageBanner title="Khóa học của con" subtitle="Theo dõi tiến độ từng khóa học bằng dữ liệu học tập thực tế" />
         <div className="flex-grow max-w-[1600px] mx-auto w-full px-4 md:px-10 py-12 text-center">
           <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-10 max-w-xl mx-auto shadow-sm">
             <AlertCircle className="w-12 h-12 text-primary mx-auto mb-4" />
             <h3 className="text-xl font-extrabold text-on-surface">Chưa liên kết tài khoản con</h3>
-            <p className="text-xs text-on-surface-variant mt-2 mb-6">Liên kết tài khoản con để xem danh sách khóa học.</p>
+            <p className="text-sm text-on-surface-variant mt-2">
+              Liên kết tài khoản con để xem danh sách khóa học và tiến độ học tập.
+            </p>
           </div>
         </div>
       </div>
     );
   }
 
-  // Lấy danh sách khóa học của học sinh hiện tại
-  const childCoursesMeta = activeStudent ? (MOCK_CHILDREN_COURSES[activeStudent.code] || []) : [];
-  
-  // Kết hợp thông tin tĩnh từ MOCK_COURSES và tiến độ động của học sinh đó
-  const activeStudentCourses = childCoursesMeta.map(meta => {
-    const courseStatic = MOCK_COURSES.find(c => c.id === meta.id);
-    return {
-      ...courseStatic,
-      progress: meta.progress,
-      enrollDate: meta.enrollDate,
-    };
-  }).filter(c => c.id) as Array<any>;
-
-  const handleToggleExpand = (courseId: string) => {
-    setExpandedCourseId(expandedCourseId === courseId ? null : courseId);
-  };
-
   return (
     <div className="min-h-screen bg-surface flex flex-col font-sans">
       <DashboardHeader />
-      
-      {/* Banner với Dropdown đổi con */}
+
       <div className="relative">
-        <PageBanner 
-          title="Khóa học của con" 
-          subtitle="Danh sách bài giảng và trạng thái hoàn thành các môn học của con" 
+        <PageBanner
+          title="Khóa học của con"
+          subtitle="Danh sách khóa học, tiến độ hoàn thành và kết quả đánh giá theo từng khóa"
         />
-        
-        {/* Child selector */}
+
         <div className="absolute bottom-4 right-4 md:right-10 z-10">
           <div className="relative">
             <button
@@ -119,7 +174,7 @@ export default function ParentCourses() {
               <span>Con: {activeStudent?.name}</span>
               <ChevronDown className="w-4 h-4 text-on-surface-variant" />
             </button>
-            
+
             {dropdownOpen && (
               <div className="absolute right-0 mt-2 w-64 bg-surface-container-lowest border border-outline-variant/30 rounded-2xl shadow-xl z-20 py-2">
                 {linkedStudents.map(student => (
@@ -130,14 +185,14 @@ export default function ParentCourses() {
                       student.id === selectedStudentId ? 'bg-primary/5 text-primary font-bold' : 'text-on-surface'
                     }`}
                   >
-                    <img 
-                      src={student.avatar} 
-                      alt={student.name} 
+                    <img
+                      src={student.avatar}
+                      alt={student.name}
                       className="w-7 h-7 rounded-full object-cover border border-outline-variant/20"
                     />
                     <div className="min-w-0">
                       <p className="truncate font-semibold text-xs leading-none">{student.name}</p>
-                      <p className="text-[10px] text-on-surface-variant mt-1">{student.grade}</p>
+                      <p className="text-[10px] text-on-surface-variant mt-1">{student.grade || 'Chưa phân lớp'}</p>
                     </div>
                   </button>
                 ))}
@@ -147,168 +202,149 @@ export default function ParentCourses() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="flex-grow max-w-[1600px] mx-auto w-full px-4 md:px-10 py-8">
         {activeStudent && (
-          <div className="space-y-6">
-            
-            {/* Header số lượng khóa học */}
-            <div className="flex justify-between items-center border-b border-outline-variant/20 pb-4">
-              <h2 className="text-lg font-extrabold text-on-surface flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-primary" />
-                Khóa học đã đăng ký ({activeStudentCourses.length})
-              </h2>
-              <span className="text-xs text-on-surface-variant font-medium">
-                Tài khoản: <span className="font-bold text-on-surface">{activeStudent.name}</span>
-              </span>
-            </div>
+          <div className="space-y-8">
+            <motion.section
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-6 shadow-sm"
+            >
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+                <div>
+                  <p className="text-xs font-extrabold uppercase tracking-wider text-primary">UC24 · Khóa học & tiến độ</p>
+                  <h2 className="text-2xl font-extrabold text-on-surface mt-1">{activeStudent.name}</h2>
+                  <p className="text-sm text-on-surface-variant mt-1">
+                    {gradeLabel} · Cập nhật lúc {formatDateTime(report?.generatedAt)}
+                  </p>
+                </div>
 
-            {/* Grid/List các khóa học */}
-            {activeStudentCourses.length === 0 ? (
-              <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-12 text-center">
-                <p className="text-sm text-on-surface-variant">Con chưa đăng ký khóa học nào trên hệ thống.</p>
+                <button
+                  onClick={handleRefresh}
+                  disabled={loading}
+                  className="h-11 px-4 rounded-xl border border-outline-variant/30 bg-surface text-on-surface-variant hover:bg-surface-container-low transition-colors flex items-center justify-center gap-2 font-bold text-xs disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  Làm mới
+                </button>
               </div>
-            ) : (
-              <div className="space-y-4">
-                {activeStudentCourses.map(course => {
-                  const isExpanded = expandedCourseId === course.id;
-                  
-                  // Đếm số bài học đã hoàn thành giả định dựa trên tiến độ học
-                  const totalLessonsCount = course.lessons?.length || 0;
-                  const completedCount = Math.round((course.progress / 100) * totalLessonsCount);
 
-                  return (
-                    <motion.div 
-                      key={course.id}
-                      layout
-                      className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                <div className="rounded-2xl bg-primary/5 border border-primary/10 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-primary">Tổng khóa học</p>
+                  <p className="text-3xl font-extrabold text-on-surface mt-1">{courses.length}</p>
+                </div>
+                <div className="rounded-2xl bg-green-500/5 border border-green-500/10 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-green-700">Đã hoàn thành</p>
+                  <p className="text-3xl font-extrabold text-on-surface mt-1">{completedCount}</p>
+                </div>
+                <div className="rounded-2xl bg-blue-500/5 border border-blue-500/10 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Tiến độ trung bình</p>
+                  <p className="text-3xl font-extrabold text-on-surface mt-1">{averageProgress.toFixed(1)}%</p>
+                </div>
+              </div>
+            </motion.section>
+
+            <div className="relative">
+              {loading && (
+                <div className="absolute inset-0 bg-surface/55 backdrop-blur-[2px] z-20 flex items-center justify-center rounded-3xl">
+                  <div className="bg-surface-container px-4 py-3 rounded-2xl border border-outline-variant/30 flex items-center gap-2 shadow-lg">
+                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                    <span className="text-xs font-bold text-on-surface">Đang tải danh sách khóa học...</span>
+                  </div>
+                </div>
+              )}
+
+              {courses.length === 0 ? (
+                <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-12 text-center">
+                  <BookOpen className="w-12 h-12 text-on-surface-variant/45 mx-auto mb-4" />
+                  <h3 className="text-xl font-extrabold text-on-surface">Con chưa có khóa học nào</h3>
+                  <p className="text-sm text-on-surface-variant mt-2">
+                    Khi con ghi danh khóa học, tiến độ và điểm số sẽ xuất hiện tại đây.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  {courses.map(course => (
+                    <motion.article
+                      key={course.courseId}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-6 shadow-sm hover:shadow-md transition-shadow"
                     >
-                      {/* Tiêu đề Khóa học */}
-                      <div 
-                        onClick={() => handleToggleExpand(course.id)}
-                        className="p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 cursor-pointer select-none hover:bg-surface-container-low/20 transition-colors"
-                      >
-                        <div className="flex items-center gap-4 min-w-0">
-                          {/* Ảnh đại diện khóa học */}
-                          <img 
-                            src={course.image} 
-                            alt={course.title} 
-                            className="w-16 h-16 rounded-2xl object-cover border border-outline-variant/20 flex-shrink-0"
-                          />
-                          <div className="min-w-0">
-                            <span className="inline-block px-2 py-0.5 bg-primary/10 text-primary text-[10px] font-extrabold rounded-md uppercase tracking-wider mb-1">
-                              {course.subject} - {course.grade}
-                            </span>
-                            <h3 className="font-extrabold text-on-surface text-sm md:text-base truncate leading-tight">
-                              {course.title}
-                            </h3>
-                            <p className="text-xs text-on-surface-variant mt-1">
-                              Giảng viên: <span className="font-semibold text-on-surface">{course.instructor}</span> | Đăng ký: {course.enrollDate}
-                            </p>
-                          </div>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <h3 className="text-lg font-extrabold text-on-surface leading-tight truncate" title={course.courseTitle}>
+                            {course.courseTitle}
+                          </h3>
+                          <p className="text-xs text-on-surface-variant mt-1">
+                            {course.teacherName || 'Chưa rõ giáo viên'} · {formatGrades(course.grades, gradeLabel)}
+                          </p>
+                          <p className="text-[11px] text-on-surface-variant mt-1">
+                            Ghi danh: {formatDateTime(course.enrolledAt)}
+                          </p>
                         </div>
 
-                        {/* Thanh Tiến độ & Action */}
-                        <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end flex-shrink-0">
-                          {/* Progress */}
-                          <div className="w-48 text-right">
-                            <div className="flex justify-between items-center text-xs mb-1.5 font-bold">
-                              <span className="text-on-surface-variant">Tiến độ:</span>
-                              <span className={course.progress === 100 ? 'text-green-600 font-extrabold' : 'text-primary'}>
-                                {course.progress}%
-                              </span>
-                            </div>
-                            <div className="w-full bg-surface-container rounded-full h-2">
-                              <div 
-                                className={`h-2 rounded-full transition-all duration-500 ${
-                                  course.progress === 100 ? 'bg-green-500' : 'bg-primary'
-                                }`}
-                                style={{ width: `${course.progress}%` }}
-                              />
-                            </div>
-                          </div>
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-extrabold whitespace-nowrap ${
+                          course.status === 'completed'
+                            ? 'bg-green-500/10 text-green-700'
+                            : 'bg-blue-500/10 text-blue-700'
+                        }`}>
+                          {course.status === 'completed' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+                          {courseStatusLabel(course.status)}
+                        </span>
+                      </div>
 
-                          {/* Expand Button */}
-                          <div className="p-2 bg-surface-container rounded-xl text-on-surface-variant hover:text-on-surface">
-                            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                          </div>
+                      <div className="mt-5 space-y-2">
+                        <div className="flex items-center justify-between text-xs font-bold text-on-surface-variant">
+                          <span>Tiến độ hiện tại</span>
+                          <span>{course.progressPct}%</span>
+                        </div>
+                        <div className="w-full h-2.5 rounded-full bg-surface-container-high">
+                          <div
+                            className={`h-2.5 rounded-full transition-all ${
+                              course.status === 'completed' ? 'bg-green-500' : 'bg-primary'
+                            }`}
+                            style={{ width: `${course.progressPct}%` }}
+                          />
                         </div>
                       </div>
 
-                      {/* Chi tiết danh sách bài giảng (Khi expand) */}
-                      {isExpanded && (
-                        <motion.div 
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          className="border-t border-outline-variant/20 bg-surface-container-low/30 px-6 py-5 space-y-4"
-                        >
-                          <div className="flex justify-between items-center border-b border-outline-variant/10 pb-2">
-                            <span className="text-xs font-bold text-on-surface">
-                              Danh sách bài giảng & bài kiểm tra
-                            </span>
-                            <span className="text-xs text-on-surface-variant font-medium">
-                              Đã học: <span className="font-bold text-on-surface">{completedCount}</span> / {totalLessonsCount} mục
-                            </span>
-                          </div>
-
-                          {/* Danh sách bài học */}
-                          <div className="space-y-2">
-                            {course.lessons && course.lessons.map((lesson: any, index: number) => {
-                              // Giả định bài học đã hoàn thành dựa trên chỉ mục của nó
-                              const isLessonCompleted = index < completedCount;
-
-                              return (
-                                <div 
-                                  key={lesson.id}
-                                  className="flex items-center justify-between p-3.5 bg-surface-container-lowest border border-outline-variant/10 rounded-2xl"
-                                >
-                                  <div className="flex items-center gap-3 min-w-0">
-                                    {/* Icon loại bài học */}
-                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                                      isLessonCompleted ? 'bg-green-500/10 text-green-600' : 'bg-surface-container text-on-surface-variant'
-                                    }`}>
-                                      {lesson.type === 'video' && <PlayCircle className="w-4 h-4" />}
-                                      {lesson.type === 'pdf' && <FileText className="w-4 h-4" />}
-                                      {lesson.type === 'quiz' && <Award className="w-4 h-4" />}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <p className={`text-xs md:text-sm font-semibold truncate ${
-                                        isLessonCompleted ? 'text-on-surface' : 'text-on-surface-variant'
-                                      }`}>
-                                        {lesson.title}
-                                      </p>
-                                      <p className="text-[10px] text-on-surface-variant mt-0.5">
-                                        Loại: {lesson.type === 'video' ? 'Video bài giảng' : lesson.type === 'pdf' ? 'Tài liệu lý thuyết' : 'Bài trắc nghiệm'} | Lượng: {lesson.duration}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  {/* Trạng thái hoàn thành */}
-                                  <div className="flex-shrink-0 ml-4">
-                                    {isLessonCompleted ? (
-                                      <span className="flex items-center gap-1.5 px-3 py-1 bg-green-500/10 text-green-600 text-[10px] font-extrabold rounded-full">
-                                        <CheckCircle2 className="w-3.5 h-3.5" />
-                                        Đã hoàn thành
-                                      </span>
-                                    ) : (
-                                      <span className="flex items-center gap-1.5 px-3 py-1 bg-surface-container text-on-surface-variant/60 text-[10px] font-bold rounded-full">
-                                        <Clock className="w-3.5 h-3.5" />
-                                        Chưa học
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </motion.div>
-                      )}
-                    </motion.div>
-                  );
-                })}
-              </div>
-            )}
-
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-5">
+                        <div className="rounded-2xl bg-surface-container-low border border-outline-variant/15 p-3">
+                          <BookOpen className="w-4 h-4 text-primary mb-2" />
+                          <p className="text-[11px] text-on-surface-variant font-bold uppercase">Quiz</p>
+                          <p className="text-sm font-extrabold text-on-surface mt-1">
+                            {course.quizCompletedCount}/{course.quizTotalCount}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl bg-surface-container-low border border-outline-variant/15 p-3">
+                          <TrendingUp className="w-4 h-4 text-blue-600 mb-2" />
+                          <p className="text-[11px] text-on-surface-variant font-bold uppercase">TB Quiz</p>
+                          <p className="text-sm font-extrabold text-on-surface mt-1">
+                            {formatScore(course.averageQuizScore)}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl bg-surface-container-low border border-outline-variant/15 p-3">
+                          <Award className="w-4 h-4 text-amber-600 mb-2" />
+                          <p className="text-[11px] text-on-surface-variant font-bold uppercase">Exam</p>
+                          <p className="text-sm font-extrabold text-on-surface mt-1">
+                            {formatScore(course.latestExamScore)}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl bg-surface-container-low border border-outline-variant/15 p-3">
+                          <Award className="w-4 h-4 text-teal-600 mb-2" />
+                          <p className="text-[11px] text-on-surface-variant font-bold uppercase">Bài tập</p>
+                          <p className="text-sm font-extrabold text-on-surface mt-1">
+                            {formatScore(course.latestAssignmentScore)}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.article>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

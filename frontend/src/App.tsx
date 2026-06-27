@@ -60,14 +60,14 @@ export default function App() {
 
         {/* ── Student (cần đăng nhập) ── */}
         <Route path="/quiz" element={<ProtectedRoute><QuizPage /></ProtectedRoute>} />
-        <Route path="/courses" element={<CoursesPage />} />
-        <Route path="/courses/:id" element={<CourseDetailPage />} />
+        <Route path="/courses" element={<ProtectedRoute role="student"><CoursesPage /></ProtectedRoute>} />
+        <Route path="/courses/:id" element={<ProtectedRoute role="student"><CourseDetailPage /></ProtectedRoute>} />
         <Route path="/courses/:courseId/chapters/:chapterId/quiz" element={<ProtectedRoute><StudentQuizPage /></ProtectedRoute>} />
         <Route path="/courses/:courseId/exams/:slotIndex" element={<ProtectedRoute><StudentExamPage /></ProtectedRoute>} />
-        <Route path="/checkout"      element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
-        <Route path="/payment-result" element={<ProtectedRoute><PaymentResultPage /></ProtectedRoute>} />
-        <Route path="/orders"        element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
-        <Route path="/favorites"     element={<ProtectedRoute><FavoritesPage /></ProtectedRoute>} />
+        <Route path="/checkout"      element={<ProtectedRoute role="student"><CheckoutPage /></ProtectedRoute>} />
+        <Route path="/payment-result" element={<ProtectedRoute role="student"><PaymentResultPage /></ProtectedRoute>} />
+        <Route path="/orders"        element={<ProtectedRoute role="student"><OrdersPage /></ProtectedRoute>} />
+        <Route path="/favorites"     element={<ProtectedRoute role="student"><FavoritesPage /></ProtectedRoute>} />
         <Route path="/messages"      element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
         <Route path="/profile"       element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         <Route path="/account/type"  element={<ProtectedRoute><ComingSoonPage title="Loại tài khoản" subtitle="Quản lý gói đăng ký của bạn" /></ProtectedRoute>} />

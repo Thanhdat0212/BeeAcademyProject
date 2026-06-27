@@ -18,6 +18,7 @@ import type {
   ParentLinkInvitationResponse,
   ParentPaymentHistoryResponse,
   ParentTeacherConversationResponse,
+  SendParentLinkInvitationPayload,
   UploadResponse
 } from '../types/api';
 
@@ -47,12 +48,21 @@ export async function getLinkInvitations(): Promise<ParentLinkInvitationResponse
  * POST /api/parent/link-invitations
  * Gửi lời mời liên kết tới email học sinh.
  */
-export async function sendLinkInvitation(studentEmail: string): Promise<ParentLinkInvitationResponse> {
+export async function sendLinkInvitation(
+  payload: SendParentLinkInvitationPayload | string,
+): Promise<ParentLinkInvitationResponse> {
+  const body = typeof payload === 'string'
+    ? { studentEmail: payload, relationship: 'guardian' as const, note: null }
+    : payload;
   const res = await apiClient.post<ApiResponse<ParentLinkInvitationResponse>>(
     '/api/parent/link-invitations',
-    { studentEmail }
+    body
   );
   return unwrap(res.data);
+}
+
+export async function cancelLinkInvitation(studentId: string): Promise<void> {
+  await apiClient.delete(`/api/parent/link-invitations/${encodeURIComponent(studentId)}`);
 }
 
 

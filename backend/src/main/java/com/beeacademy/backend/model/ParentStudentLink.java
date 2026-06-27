@@ -56,6 +56,13 @@ public class ParentStudentLink {
     @Column(name = "responded_at")
     private Instant respondedAt;
 
+    @Column(name = "relationship", nullable = false, length = 30)
+    @Builder.Default
+    private String relationship = "guardian";
+
+    @Column(name = "note", length = 500)
+    private String note;
+
     @Column(name = "unlink_requested_by")
     private UUID unlinkRequestedBy;
 
@@ -96,6 +103,14 @@ public class ParentStudentLink {
     }
 
     public static ParentStudentLink createPendingInvitation(Profile parent, Profile student) {
+        return createPendingInvitation(parent, student, "guardian", null);
+    }
+
+    public static ParentStudentLink createPendingInvitation(
+            Profile parent,
+            Profile student,
+            String relationship,
+            String note) {
         if (parent == null || student == null) {
             throw new IllegalArgumentException("Parent and student profile must not be null.");
         }
@@ -108,13 +123,21 @@ public class ParentStudentLink {
                 .status(ParentStudentLinkStatus.PENDING)
                 .invitedAt(now)
                 .respondedAt(null)
+                .relationship(normalizeRelationship(relationship))
+                .note(normalizeNote(note))
                 .build();
     }
 
     public void markPending() {
+        markPending(this.relationship, this.note);
+    }
+
+    public void markPending(String relationship, String note) {
         this.status = ParentStudentLinkStatus.PENDING;
         this.invitedAt = Instant.now();
         this.respondedAt = null;
+        this.relationship = normalizeRelationship(relationship);
+        this.note = normalizeNote(note);
         this.unlinkRequestedBy = null;
         this.unlinkRequestedAt = null;
     }
@@ -152,5 +175,20 @@ public class ParentStudentLink {
     public void revoke() {
         this.status = ParentStudentLinkStatus.REJECTED;
         this.respondedAt = Instant.now();
+    }
+
+    private static String normalizeRelationship(String relationship) {
+        if (relationship == null || relationship.isBlank()) {
+            return "guardian";
+        }
+        return relationship.trim().toLowerCase();
+    }
+
+    private static String normalizeNote(String note) {
+        if (note == null || note.isBlank()) {
+            return null;
+        }
+        String normalized = note.trim();
+        return normalized.length() <= 500 ? normalized : normalized.substring(0, 500);
     }
 }

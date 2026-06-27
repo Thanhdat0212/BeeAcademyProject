@@ -1,55 +1,61 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
-  BarChart2, BookOpen, Calendar, ChevronDown, FileDown, 
+  BarChart2, BookOpen, ChevronDown, FileDown, 
   Clock, User, MessageSquare, Star, Award, AlertCircle, ArrowRight, Loader2
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import DashboardHeader from '../../components/DashboardHeader';
 import PageBanner from '../../components/PageBanner';
-import { useAuthStore, LinkedStudent } from '../../store/useAuthStore';
+import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
 import * as parentService from '../../api/parentService';
 import { printParentProgressReport } from '../../lib/parentProgressReport';
-import type { ChildOverviewResponse } from '../../types/api';
+import type {
+  ChildOverviewResponse,
+  ChildProgressReportResponse,
+  ParentAssessmentRecord,
+} from '../../types/api';
 
-// ---------------------------------------------------------------------------
-//  Nhận xét mẫu từ giáo viên dựa theo mã học sinh
-// ---------------------------------------------------------------------------
-const MOCK_TEACHER_REMARKS: Record<string, Array<{ id: string; teacher: string; subject: string; content: string; date: string; avatar: string }>> = {
-  'Nguyễn Minh Anh': [
-    {
-      id: 'r1',
-      teacher: 'Cô Nguyễn Thị Mai',
-      subject: 'Toán học - Lớp 8',
-      content: 'Minh Anh làm bài tập tự luận chương 1 rất tốt, trình bày khoa học và đạt điểm tối đa. Cần phát huy tinh thần tự học này.',
-      date: 'Hôm nay, 08:30',
-      avatar: 'https://ui-avatars.com/api/?name=Nguyen+Mai&background=ad2c00&color=fff&bold=true'
-    },
-    {
-      id: 'r2',
-      teacher: 'Thầy Lê Cường',
-      subject: 'Vật lý - Lớp 8',
-      content: 'Cháu tham gia làm các bài kiểm tra thực hành ảo đầy đủ, tuy nhiên điểm phần Từ trường hơi thấp (6.5), cháu nên ôn tập lại phần lý thuyết chương này.',
-      date: 'Hôm qua, 15:40',
-      avatar: 'https://ui-avatars.com/api/?name=Le+Cuong&background=7c5800&color=fff&bold=true'
-    }
-  ],
-  'Nguyễn Quốc Bảo': [
-    {
-      id: 'r3',
-      teacher: 'Cô Trần Lan',
-      subject: 'Ngữ văn - Lớp 6',
-      content: 'Quốc Bảo có sự tiến bộ rõ rệt trong việc phân tích các bài ca dao. Cháu viết văn bay bổng và có nhiều ý tưởng sáng tạo.',
-      date: '25/05/2026',
-      avatar: 'https://ui-avatars.com/api/?name=Tran+Lan&background=008080&color=fff&bold=true'
-    }
-  ]
-};
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return 'Chưa cập nhật';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Chưa cập nhật';
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
+}
+
+function formatScore(value: number): string {
+  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
+}
+
+function scoreLabel(score: number): string {
+  if (score >= 8) return 'Tốt';
+  if (score >= 6.5) return 'Đạt';
+  if (score > 0) return 'Cần ôn thêm';
+  return 'Chưa có dữ liệu';
+}
+
+function assessmentTypeLabel(type: ParentAssessmentRecord['assessmentType']): string {
+  switch (type) {
+    case 'exam':
+      return 'Bài kiểm tra';
+    case 'assignment':
+      return 'Bài tập';
+    default:
+      return 'Quiz';
+  }
+}
+
+function fallbackAvatar(name: string): string {
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=feb700&color=1a1b1e&bold=true`;
+}
 
 export default function ParentDashboard() {
   const navigate = useNavigate();
-  const { user, linkedStudents, fetchLinkedStudents } = useAuthStore();
+  const { linkedStudents, fetchLinkedStudents } = useAuthStore();
   
   // State quản lý học sinh được chọn hiện tại
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -58,6 +64,7 @@ export default function ParentDashboard() {
 
   // State chứa thông tin báo cáo động từ backend
   const [overview, setOverview] = useState<ChildOverviewResponse | null>(null);
+  const [progressReport, setProgressReport] = useState<ChildProgressReportResponse | null>(null);
   const [loadingOverview, setLoadingOverview] = useState<boolean>(false);
 
   // Tải danh sách con cái khi mount
@@ -83,9 +90,15 @@ export default function ParentDashboard() {
     if (selectedStudentId) {
       const loadOverview = async () => {
         setLoadingOverview(true);
+        setOverview(null);
+        setProgressReport(null);
         try {
-          const data = await parentService.getChildOverview(selectedStudentId);
-          setOverview(data);
+          const [overviewData, reportData] = await Promise.all([
+            parentService.getChildOverview(selectedStudentId),
+            parentService.getChildProgressReport(selectedStudentId),
+          ]);
+          setOverview(overviewData);
+          setProgressReport(reportData);
         } catch (error) {
           console.error('Lỗi khi tải báo cáo học tập của con:', error);
           notify.error('Không thể tải báo cáo tiến độ học tập.');
@@ -96,6 +109,7 @@ export default function ParentDashboard() {
       loadOverview();
     } else {
       setOverview(null);
+      setProgressReport(null);
     }
   }, [selectedStudentId]);
 
@@ -110,7 +124,7 @@ export default function ParentDashboard() {
     return `Chào buổi tối, Phụ huynh! Dưới đây là tiến độ học tập hôm nay của ${name}.`;
   };
 
-  // Xuất báo cáo học tập chi tiết giả lập
+  // Xuất báo cáo học tập chi tiết từ dữ liệu backend.
   const handleExportReport = async () => {
     if (!activeStudent) return;
 
@@ -168,8 +182,15 @@ export default function ParentDashboard() {
     );
   }
 
-  // Lấy các nhận xét của học sinh hiện tại
-  const currentRemarks = activeStudent ? (MOCK_TEACHER_REMARKS[activeStudent.name] || []) : [];
+  // Lấy các cột điểm/nhận xét mới nhất từ báo cáo tiến độ thật.
+  const recentAssessments = (progressReport?.assessments ?? [])
+    .slice()
+    .sort((left, right) => {
+      const leftTime = left.submittedAt ? new Date(left.submittedAt).getTime() : 0;
+      const rightTime = right.submittedAt ? new Date(right.submittedAt).getTime() : 0;
+      return rightTime - leftTime;
+    })
+    .slice(0, 4);
 
   // Trích xuất các biến số liệu học tập từ overview hoặc dùng fallback mặc định
   const avgProgress = overview?.avgProgress ?? 0;
@@ -333,7 +354,7 @@ export default function ParentDashboard() {
                   <p className="text-3xl font-extrabold text-primary">{latestQuizScore}/10</p>
                   <p className="text-[11px] text-primary/70 mt-2 font-semibold flex items-center gap-1">
                     <Star className="w-3.5 h-3.5 fill-primary" />
-                    Học lực: Đạt yêu cầu cao
+                    Học lực: {scoreLabel(latestQuizScore)}
                   </p>
                 </div>
 
@@ -348,7 +369,7 @@ export default function ParentDashboard() {
                   <p className="text-3xl font-extrabold text-secondary">{latestExamScore}/10</p>
                   <p className="text-[11px] text-secondary mt-2 font-semibold flex items-center gap-1">
                     <Star className="w-3.5 h-3.5 fill-secondary text-secondary" />
-                    Học lực: Xuất sắc
+                    Học lực: {scoreLabel(latestExamScore)}
                   </p>
                 </div>
 
@@ -452,39 +473,42 @@ export default function ParentDashboard() {
               <div className="lg:col-span-2 bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-6 shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-6">
                   <div>
-                    <h3 className="font-extrabold text-on-surface text-base">Phản hồi gần đây từ Giáo viên</h3>
-                    <p className="text-xs text-on-surface-variant mt-0.5">Nhận xét chuyên môn của giáo viên bộ môn</p>
+                    <h3 className="font-extrabold text-on-surface text-base">Đánh giá gần đây</h3>
+                    <p className="text-xs text-on-surface-variant mt-0.5">Quiz, bài kiểm tra và bài tập mới nhất từ dữ liệu học tập của con</p>
                   </div>
                 </div>
 
                 <div className="flex-1 space-y-4 overflow-y-auto max-h-[250px] pr-1">
-                  {currentRemarks.length === 0 ? (
+                  {recentAssessments.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-center py-10">
                       <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center mb-3">
                         <MessageSquare className="w-5 h-5 text-on-surface-variant/40" />
                       </div>
-                      <p className="text-xs text-on-surface-variant">Không có nhận xét nào gần đây.</p>
+                      <p className="text-xs text-on-surface-variant">Chưa có cột điểm hoặc nhận xét nào gần đây.</p>
                     </div>
                   ) : (
-                    currentRemarks.map(remark => (
+                    recentAssessments.map(assessment => (
                       <div 
-                        key={remark.id}
+                        key={assessment.id}
                         className="p-4 bg-surface-container-low rounded-2xl border border-outline-variant/20 hover:border-outline-variant/40 transition-colors"
                       >
                         <div className="flex items-center gap-3 mb-2.5">
                           <img 
-                            src={remark.avatar} 
-                            alt={remark.teacher} 
+                            src={fallbackAvatar(assessment.courseTitle)} 
+                            alt={assessment.courseTitle} 
                             className="w-8 h-8 rounded-full border border-outline-variant/20 object-cover"
                           />
                           <div className="min-w-0">
-                            <p className="font-extrabold text-xs text-on-surface leading-tight">{remark.teacher}</p>
-                            <p className="text-[10px] text-primary font-bold mt-0.5">{remark.subject}</p>
+                            <p className="font-extrabold text-xs text-on-surface leading-tight truncate">{assessment.courseTitle}</p>
+                            <p className="text-[10px] text-primary font-bold mt-0.5">{assessmentTypeLabel(assessment.assessmentType)} · {assessment.assessmentName}</p>
                           </div>
-                          <span className="ml-auto text-[9px] text-on-surface-variant font-medium">{remark.date}</span>
+                          <span className="ml-auto text-[9px] text-on-surface-variant font-medium">{formatDateTime(assessment.submittedAt)}</span>
                         </div>
                         <p className="text-xs text-on-surface-variant leading-relaxed">
-                          "{remark.content}"
+                          {assessment.normalizedScore != null
+                            ? `Điểm ${formatScore(assessment.normalizedScore)}/10 · ${scoreLabel(assessment.normalizedScore)}`
+                            : 'Chưa có điểm'}
+                          {assessment.feedback ? ` · ${assessment.feedback}` : ''}
                         </p>
                       </div>
                     ))

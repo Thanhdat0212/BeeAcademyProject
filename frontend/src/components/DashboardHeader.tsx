@@ -441,6 +441,7 @@ export default function DashboardHeader() {
   const isDropdownOpen = showDropdown && searchQuery.trim().length >= 1;
   const totalNotificationItems =
     userNotifications.length + studentInvitationNotifications.length + studentUnlinkNotifications.length;
+  const canUseCart = user?.role === 'student';
 
   // Avatar URL: dùng user.avatar nếu có, fallback sang ui-avatars với tên user
   const avatarSrc = user?.avatar ??
@@ -652,22 +653,24 @@ export default function DashboardHeader() {
           </div>
 
           {/* Shopping Cart với badge số lượng */}
-          <Link to="/checkout" className="relative text-on-surface-variant hover:text-primary transition-colors">
-            <ShoppingCart className="w-6 h-6" />
-            <AnimatePresence>
-              {cartItems.length > 0 && (
-                <motion.span
-                  key={cartItems.length}
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  exit={{ scale: 0 }}
-                  className="absolute -top-1 -right-1 w-4.5 h-4.5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-surface"
-                >
-                  {cartItems.length}
-                </motion.span>
-              )}
-            </AnimatePresence>
-          </Link>
+          {canUseCart && (
+            <Link to="/checkout" className="relative text-on-surface-variant hover:text-primary transition-colors">
+              <ShoppingCart className="w-6 h-6" />
+              <AnimatePresence>
+                {cartItems.length > 0 && (
+                  <motion.span
+                    key={cartItems.length}
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0 }}
+                    className="absolute -top-1 -right-1 w-4.5 h-4.5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-surface"
+                  >
+                    {cartItems.length}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </Link>
+          )}
 
           {/* Nút Đăng xuất trực tiếp trên Header cho Phụ huynh */}
           {user?.role === 'parent' && (

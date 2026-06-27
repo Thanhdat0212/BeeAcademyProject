@@ -59,6 +59,13 @@ public class ParentController {
                 "Đã gửi lời mời liên kết cho học sinh.");
     }
 
+    @DeleteMapping("/link-invitations/{studentId}")
+    public ApiResponse<Void> cancelLinkInvitation(@PathVariable UUID studentId) {
+        AuthenticatedUser me = CurrentUser.required();
+        parentService.cancelLinkInvitation(me, studentId);
+        return ApiResponse.ok(null, "Da huy loi moi lien ket dang cho hoc sinh xac nhan.");
+    }
+
     @DeleteMapping("/children/{studentId}")
     public ApiResponse<LinkedStudentResponse> unlinkStudent(@PathVariable UUID studentId) {
         AuthenticatedUser me = CurrentUser.required();
