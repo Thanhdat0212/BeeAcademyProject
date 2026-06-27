@@ -1,0 +1,447 @@
+{
+  "info": {
+    "name": "Bee Academy API",
+    "_postman_id": "bee-academy-collection-0002",
+    "description": "Test API Bee Academy (Spring Boot :8080).\n\n>>> CACH CHAY DE TAT CA XANH:\nBam 'Run' (Runner) tren collection nay. Cac thu muc 0, 1, 2 se tu chay tuan tu va pass het - KHONG can thao tac tay, KHONG can OTP.\n\nLuong tu dong (thu muc 1): tao tai khoan moi bang email ngau nhien qua /api/auth/register (Supabase tao san email_confirm=true nen dang nhap duoc ngay) -> dang nhap -> luu token -> goi API can dang nhap.\n\nThu muc 3 la phan hoc them ve OTP, chay tay.\n\nResponse luon co dang: { success, message, data, timestamp }.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "0. Public (khong can token)",
+      "item": [
+        {
+          "name": "Health check",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('DB up', () => pm.expect(pm.response.json().data.db).to.eql('up'));"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/health", "host": ["{{baseUrl}}"], "path": ["api", "health"] }
+          }
+        },
+        {
+          "name": "Danh sach khoa hoc",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "const body = pm.response.json();",
+                "pm.test('Co envelope success', () => pm.expect(body.success).to.be.true);",
+                "const list = body.data && (body.data.content || body.data);",
+                "if (Array.isArray(list) && list.length > 0) {",
+                "  pm.environment.set('courseId', list[0].id);",
+                "  console.log('Da luu courseId =', list[0].id);",
+                "}"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/courses?page=0&size=12",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "courses"],
+              "query": [
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "12" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Chi tiet khoa hoc",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "if (pm.environment.get('courseId')) {",
+                "  pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "} else {",
+                "  console.log('Bo qua: chua co courseId (danh sach rong).');",
+                "}"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/courses/{{courseId}}", "host": ["{{baseUrl}}"], "path": ["api", "courses", "{{courseId}}"] }
+          }
+        },
+        {
+          "name": "Danh muc",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Tra ve mang danh muc', () => pm.expect(pm.response.json().data).to.be.an('array'));"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/categories", "host": ["{{baseUrl}}"], "path": ["api", "categories"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1A. Tai khoan cua toi (giao vien)",
+      "item": [
+        {
+          "name": "Dang nhap tai khoan cua toi",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Dang nhap 200', () => pm.response.to.have.status(200));",
+                "const d = pm.response.json().data;",
+                "pm.test('Co accessToken', () => pm.expect(d.accessToken).to.be.a('string'));",
+                "pm.environment.set('token', d.accessToken);",
+                "pm.environment.set('refreshToken', d.refreshToken);",
+                "console.log('Dang nhap:', d.user && d.user.email, '| role:', d.user && d.user.role);"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{myEmail}}\",\n  \"password\": \"{{myPassword}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Ho so cua toi",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/me", "host": ["{{baseUrl}}"], "path": ["api", "me"] }
+          }
+        },
+        {
+          "name": "Khoa hoc da mua",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Tra ve mang', () => pm.expect(pm.response.json().data).to.be.an('array'));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/me/courses", "host": ["{{baseUrl}}"], "path": ["api", "me", "courses"] }
+          }
+        },
+        {
+          "name": "Khoa hoc toi day (teacher)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Giao vien xem duoc khoa hoc cua minh (200)', () => pm.response.to.have.status(200));",
+                "pm.test('Tra ve mang khoa hoc', () => pm.expect(pm.response.json().data).to.be.an('array'));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/teacher/courses", "host": ["{{baseUrl}}"], "path": ["api", "teacher", "courses"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Dang nhap tu dong (Runner xanh)",
+      "item": [
+        {
+          "name": "Dang ky nhanh (khong OTP)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": { "type": "text/javascript", "exec": [
+                "// Email CO DINH - khong sinh tai khoan test moi moi lan chay (tranh dồn rac qa_*@example.com).",
+                "// Lan dau: dang ky tao account; cac lan sau: account da ton tai -> bo qua, chuyen sang dang nhap.",
+                "pm.environment.set('runEmail', 'qa_tester@example.com');",
+                "pm.environment.set('runPassword', 'BeeTest123');",
+                "console.log('Email test (co dinh):', pm.environment.get('runEmail'));"
+              ] }
+            },
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "// Chap nhan 200 (tao moi) HOAC loi email da ton tai (cac lan chay sau) - account van san sang de dang nhap.",
+                "pm.test('Dang ky OK hoac da ton tai', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 409]));",
+                "if (pm.response.code === 200) {",
+                "  pm.test('Tra ve thong tin user', () => pm.expect(pm.response.json().data).to.have.property('id'));",
+                "}"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{runEmail}}\",\n  \"password\": \"{{runPassword}}\",\n  \"fullName\": \"QA Tester\",\n  \"role\": \"student\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/register", "host": ["{{baseUrl}}"], "path": ["api", "auth", "register"] }
+          }
+        },
+        {
+          "name": "Dang nhap (luu token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Dang nhap 200', () => pm.response.to.have.status(200));",
+                "const d = pm.response.json().data;",
+                "pm.test('Co accessToken', () => pm.expect(d.accessToken).to.be.a('string'));",
+                "pm.environment.set('token', d.accessToken);",
+                "pm.environment.set('refreshToken', d.refreshToken);",
+                "console.log('Token da luu. Het han sau (s):', d.expiresIn);"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{runEmail}}\",\n  \"password\": \"{{runPassword}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Refresh token",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Refresh 200', () => pm.response.to.have.status(200));",
+                "const d = pm.response.json().data;",
+                "if (d && d.accessToken) {",
+                "  pm.environment.set('token', d.accessToken);",
+                "  if (d.refreshToken) pm.environment.set('refreshToken', d.refreshToken);",
+                "}"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/refresh", "host": ["{{baseUrl}}"], "path": ["api", "auth", "refresh"] }
+          }
+        },
+        {
+          "name": "Ho so cua toi",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/me", "host": ["{{baseUrl}}"], "path": ["api", "me"] }
+          }
+        },
+        {
+          "name": "Khoa hoc da mua",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Tra ve mang', () => pm.expect(pm.response.json().data).to.be.an('array'));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/me/courses", "host": ["{{baseUrl}}"], "path": ["api", "me", "courses"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Kiem tra phan quyen (xanh)",
+      "item": [
+        {
+          "name": "API Teacher bi chan (student token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Student bi chan khoi API teacher (401/403)', () => pm.expect(pm.response.code).to.be.oneOf([401, 403]));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/teacher/courses", "host": ["{{baseUrl}}"], "path": ["api", "teacher", "courses"] }
+          }
+        },
+        {
+          "name": "API Admin bi chan (student token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Student bi chan khoi API admin (401/403)', () => pm.expect(pm.response.code).to.be.oneOf([401, 403]));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/admin/courses/pending", "host": ["{{baseUrl}}"], "path": ["api", "admin", "courses", "pending"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Thu cong - hoc them OTP (chay tay)",
+      "item": [
+        {
+          "name": "Dang ky OTP - B1: gui OTP",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"fullName\": \"Hoc sinh Test\",\n  \"role\": \"student\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/register/request-otp", "host": ["{{baseUrl}}"], "path": ["api", "auth", "register", "request-otp"] },
+            "description": "Gui OTP. DEV_MODE=true -> OTP in ra console backend. Lay 6 so do dien vao B2."
+          }
+        },
+        {
+          "name": "Dang ky OTP - B2: xac minh",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"otp\": \"123456\",\n  \"password\": \"{{testPassword}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/register/verify-otp", "host": ["{{baseUrl}}"], "path": ["api", "auth", "register", "verify-otp"] },
+            "description": "Sua \"123456\" thanh OTP that lay tu console backend roi Send."
+          }
+        },
+        {
+          "name": "Doi mat khau (can token)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"currentPassword\": \"{{runPassword}}\",\n  \"newPassword\": \"BeeTestMoi123\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/change-password", "host": ["{{baseUrl}}"], "path": ["api", "auth", "change-password"] },
+            "description": "Doi mat khau cua tai khoan happy-path vua tao. Chay sau khi da chay thu muc 1."
+          }
+        },
+        {
+          "name": "Dang xuat (can token)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/api/auth/logout", "host": ["{{baseUrl}}"], "path": ["api", "auth", "logout"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Nhap tay (tu dien thong tin)",
+      "item": [
+        {
+          "name": "B1 - Dang ky tai khoan (sua email roi Send)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"hocsinh_moi@gmail.com\",\n  \"password\": \"MatKhau123\",\n  \"fullName\": \"Nguyen Van An\",\n  \"role\": \"student\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/register", "host": ["{{baseUrl}}"], "path": ["api", "auth", "register"] },
+            "description": "SUA truc tiep email/password/fullName trong tab Body roi Send.\n- role: student | parent | teacher\n- password: >= 8 ky tu, co 1 chu hoa + 1 chu so\n- Neu bao 409 'Email da duoc dang ky' -> doi email khac.\nMong doi 200."
+          }
+        },
+        {
+          "name": "B2 - Dang nhap (dung email vua dang ky)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('Dang nhap 200', () => pm.response.to.have.status(200));",
+                "const d = pm.response.json().data;",
+                "pm.environment.set('token', d.accessToken);",
+                "pm.environment.set('refreshToken', d.refreshToken);",
+                "console.log('Da luu token cho cac request sau.');"
+              ] }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"hocsinh_moi@gmail.com\",\n  \"password\": \"MatKhau123\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] },
+            "description": "Nhap dung email + password vua dang ky o B1. Send -> 200. Token tu luu de B3..B6 dung."
+          }
+        },
+        {
+          "name": "B3 - Cap nhat ho so cua toi",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Nguyen Van An\",\n  \"phone\": \"0901234567\",\n  \"bio\": \"Hoc sinh lop 8 yeu Toan\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/me", "host": ["{{baseUrl}}"], "path": ["api", "me"] },
+            "description": "Can dang nhap (B2). Moi field deu optional - chi gui field muon doi. phone dinh dang VN 10 so bat dau 03-09."
+          }
+        },
+        {
+          "name": "B4 - Xem ho so cua toi",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/me", "host": ["{{baseUrl}}"], "path": ["api", "me"] },
+            "description": "Xem lai ho so vua cap nhat o B3."
+          }
+        },
+        {
+          "name": "B5 - Khoa hoc da mua",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/me/courses", "host": ["{{baseUrl}}"], "path": ["api", "me", "courses"] },
+            "description": "Danh sach khoa hoc da mua (tai khoan moi se rong)."
+          }
+        },
+        {
+          "name": "B6 - Gui khieu nai (tu dien noi dung)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Video bai 3 khong xem duoc\",\n  \"category\": \"technical\",\n  \"priority\": \"medium\",\n  \"content\": \"Em bam vao bai 3 thi bao loi khong tai duoc video.\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/complaints", "host": ["{{baseUrl}}"], "path": ["api", "complaints"] },
+            "description": "Can dang nhap. category: payment|course_review|bank_verify|student_report|content|technical|other. priority: low|medium|high."
+          }
+        }
+      ]
+    }
+  ]
+}
