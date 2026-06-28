@@ -145,6 +145,17 @@ export async function submitForReview(courseId: string): Promise<TeacherCourseRe
   return unwrap(res.data);
 }
 
+// Đổi riêng ảnh bìa — cho phép kể cả khi khóa đã xuất bản (ảnh bìa là cosmetic).
+export async function updateCourseThumbnail(courseId: string, file: File):
+    Promise<TeacherCourseResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiClient.put<ApiResponse<TeacherCourseResponse>>(
+    `/api/teacher/courses/${courseId}/thumbnail`, form,
+    { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
+  return unwrap(res.data);
+}
+
 // ─── Chapter CRUD ─────────────────────────────────────────────────────────────
 
 export async function addChapter(courseId: string, req: CreateChapterRequest):
