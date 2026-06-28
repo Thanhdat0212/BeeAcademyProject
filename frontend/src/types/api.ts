@@ -228,6 +228,8 @@ export interface SearchCoursesParams {
   grade?: number;
   /** Từ khoá tìm trong title/description. */
   q?: string;
+  /** Chỉ lấy khoá nổi bật (is_featured=true) cho trang chủ. */
+  featured?: boolean;
   page?: number;
   size?: number;
   /** Cú pháp Spring: "field,asc" | "field,desc". */
