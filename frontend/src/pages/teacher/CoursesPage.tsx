@@ -10,7 +10,7 @@ import TeacherNotificationBell from '../../components/TeacherNotificationBell';
  *   draft, pending_review, approved, rejected, needs_revision, published
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { isApiError } from '../../api/client';
@@ -731,6 +731,11 @@ export default function TeacherCoursesPage() {
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  // Đổi ảnh bìa (dùng 1 input ẩn dùng chung; ref giữ courseId đang đổi)
+  const thumbnailInputRef = useRef<HTMLInputElement>(null);
+  const pendingThumbnailCourseId = useRef<string | null>(null);
+  const [thumbnailUploadingId, setThumbnailUploadingId] = useState<string | null>(null);
+
   // Form panel state
   const [formOpen,   setFormOpen]   = useState(false);
   const [editingCourse, setEditingCourse] = useState<TeacherCourseResponse | null>(null);
@@ -829,6 +834,41 @@ export default function TeacherCoursesPage() {
     }
   }
 
+  // ── Handler: Đổi ảnh bìa ───────────────────────────────────────
+  // Cho phép ở mọi trạng thái (kể cả đã xuất bản) vì ảnh bìa là cosmetic.
+  function openThumbnailPicker(courseId: string) {
+    pendingThumbnailCourseId.current = courseId;
+    thumbnailInputRef.current?.click();
+  }
+
+  async function handleThumbnailSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const courseId = pendingThumbnailCourseId.current;
+    pendingThumbnailCourseId.current = null;
+    if (!file || !courseId) return;
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      notify.error('Chỉ chấp nhận ảnh JPEG, PNG hoặc WEBP');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      notify.error('Ảnh bìa không được vượt quá 5MB');
+      return;
+    }
+
+    setThumbnailUploadingId(courseId);
+    try {
+      const updated = await teacherCourseService.updateCourseThumbnail(courseId, file);
+      setCourses(prev => prev.map(c => c.id === updated.id ? updated : c));
+      notify.success('Đã cập nhật ảnh bìa');
+    } catch (err: unknown) {
+      notify.error(isApiError(err) ? err.message : 'Không cập nhật được ảnh bìa');
+    } finally {
+      setThumbnailUploadingId(null);
+    }
+  }
+
   function handleLogout() {
     logout();
     navigate('/login');
@@ -839,6 +879,15 @@ export default function TeacherCoursesPage() {
   // ═════════════════════════════════════════════════════════════════
   return (
     <div className="min-h-screen bg-surface flex font-sans">
+
+      {/* Input ẩn dùng chung cho đổi ảnh bìa */}
+      <input
+        ref={thumbnailInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        hidden
+        onChange={handleThumbnailSelected}
+      />
 
       {/* Overlay che sidebar khi mở trên mobile */}
       {isSidebarOpen && (
@@ -1072,19 +1121,34 @@ export default function TeacherCoursesPage() {
                                 idx % 2 !== 0 ? 'bg-surface-container/15' : ''
                               }`}
                             >
-                              {/* Ảnh bìa */}
+                              {/* Ảnh bìa — click để đổi (kể cả khi đã xuất bản) */}
                               <td className="px-6 py-3">
-                                {course.thumbnailUrl ? (
-                                  <img
-                                    src={course.thumbnailUrl}
-                                    alt={course.title}
-                                    className="w-16 h-12 rounded-lg object-cover border border-outline-variant/30"
-                                  />
-                                ) : (
-                                  <div className="w-16 h-12 rounded-lg bg-surface-container border border-outline-variant/30 flex items-center justify-center">
-                                    <BookOpen className="w-6 h-6 text-on-surface-variant/40" />
-                                  </div>
-                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => openThumbnailPicker(course.id)}
+                                  disabled={thumbnailUploadingId === course.id}
+                                  title="Đổi ảnh bìa"
+                                  className="group relative w-16 h-12 rounded-lg overflow-hidden border border-outline-variant/30 block disabled:cursor-wait"
+                                >
+                                  {course.thumbnailUrl ? (
+                                    <img
+                                      src={course.thumbnailUrl}
+                                      alt={course.title}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full bg-surface-container flex items-center justify-center">
+                                      <BookOpen className="w-6 h-6 text-on-surface-variant/40" />
+                                    </div>
+                                  )}
+                                  <span className={`absolute inset-0 bg-black/50 flex items-center justify-center transition-opacity ${
+                                    thumbnailUploadingId === course.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                  }`}>
+                                    {thumbnailUploadingId === course.id
+                                      ? <Loader2 className="w-4 h-4 text-white animate-spin" />
+                                      : <ImageIcon className="w-4 h-4 text-white" />}
+                                  </span>
+                                </button>
                               </td>
 
                               {/* Tên */}

@@ -66,6 +66,11 @@ apiClient.interceptors.request.use(
     if (token) {
       config.headers.set('Authorization', `Bearer ${token}`);
     }
+    // FormData (upload file): bỏ Content-Type mặc định để browser tự gắn
+    // multipart/form-data kèm boundary đúng chuẩn.
+    if (config.data instanceof FormData) {
+      config.headers.delete('Content-Type');
+    }
     return config;
   },
   (error) => Promise.reject(error),

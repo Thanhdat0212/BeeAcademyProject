@@ -232,6 +232,24 @@ public class TeacherCourseService {
         return TeacherCourseResponse.fromEntity(saved, enrollmentRepository.countByCourseId(saved.getId()));
     }
 
+    /**
+     * Đổi ảnh bìa khóa học — cho phép ở MỌI trạng thái (kể cả PUBLISHED).
+     *
+     * <p>Khác {@link #updateCourse}: ảnh bìa chỉ là yếu tố trình bày (cosmetic),
+     * không phải nội dung học cần duyệt lại → KHÔNG gọi {@code assertCourseInfoEditable}.
+     * Upload file mới lên Storage rồi gán URL công khai vào khóa.
+     */
+    @Transactional
+    public TeacherCourseResponse updateThumbnail(UUID courseId, AuthenticatedUser me,
+                                                 org.springframework.web.multipart.MultipartFile file) {
+        Course course = loadAndVerifyOwner(courseId, me.userId());
+        var uploaded = contentUploadService.uploadCourseThumbnail(me.userId(), file);
+        course.setThumbnailUrl(uploaded.publicUrl());
+        Course saved = courseRepository.save(course);
+        log.info("GV {} đổi ảnh bìa khóa '{}' ({})", me.userId(), saved.getTitle(), saved.getId());
+        return TeacherCourseResponse.fromEntity(saved, enrollmentRepository.countByCourseId(saved.getId()));
+    }
+
     /** Xóa khóa học — chỉ khi DRAFT. */
     @Transactional
     public void deleteCourse(UUID courseId, AuthenticatedUser me) {
