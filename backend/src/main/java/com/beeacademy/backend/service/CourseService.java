@@ -85,17 +85,19 @@ public class CourseService {
     public PageResponse<CourseSummaryResponse> searchCourses(String subjectSlug,
                                                               Integer grade,
                                                               String keyword,
+                                                              Boolean featured,
                                                               Pageable pageable) {
         // Build spec composable. Specification.where() có thể nhận null spec -
         // trả về spec "always true" → khởi đầu sạch.
         Specification<Course> spec = Specification.where(CourseSpecifications.onlyPublished())
                 .and(CourseSpecifications.matchCategorySlug(subjectSlug))
                 .and(CourseSpecifications.matchGrade(grade))
-                .and(CourseSpecifications.matchKeyword(keyword));
+                .and(CourseSpecifications.matchKeyword(keyword))
+                .and(CourseSpecifications.onlyFeatured(featured));
 
         Page<Course> coursePage = courseRepository.findAll(spec, pageable);
-        log.debug("Search courses: subject={}, grade={}, q={}, found={}",
-                subjectSlug, grade, keyword, coursePage.getTotalElements());
+        log.debug("Search courses: subject={}, grade={}, q={}, featured={}, found={}",
+                subjectSlug, grade, keyword, featured, coursePage.getTotalElements());
 
         Set<UUID> previewCourseIds = findCoursesWithFreePreview(coursePage.getContent());
         Map<UUID, CourseReviewService.RatingSummary> ratingByCourseId = summarizeRatings(coursePage.getContent());

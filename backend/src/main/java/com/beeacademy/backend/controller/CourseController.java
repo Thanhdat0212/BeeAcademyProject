@@ -41,6 +41,7 @@ public class CourseController {
      *   <li>{@code subject}: slug danh mục (vd: "toan-hoc")</li>
      *   <li>{@code grade}: số lớp (6-9)</li>
      *   <li>{@code q}: từ khoá tìm kiếm trong title/description</li>
+     *   <li>{@code featured}: chỉ lấy khoá nổi bật (is_featured=true) cho trang chủ</li>
      *   <li>{@code page} (default 0), {@code size} (default 12), {@code sort}
      *       (default: "createdAt,desc") - Spring tự bind vào Pageable.</li>
      * </ul>
@@ -53,11 +54,12 @@ public class CourseController {
             @RequestParam(required = false) String subject,
             @RequestParam(required = false) Integer grade,
             @RequestParam(required = false) String q,
+            @RequestParam(required = false) Boolean featured,
             @PageableDefault(size = 12, sort = "createdAt", direction = Sort.Direction.DESC)
             Pageable pageable
     ) {
         PageResponse<CourseSummaryResponse> page =
-                courseService.searchCourses(subject, grade, q, pageable);
+                courseService.searchCourses(subject, grade, q, featured, pageable);
         return ApiResponse.ok(page);
     }
 

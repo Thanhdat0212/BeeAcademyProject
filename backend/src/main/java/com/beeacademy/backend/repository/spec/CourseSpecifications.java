@@ -153,7 +153,7 @@ public final class CourseSpecifications {
      */
     public static Specification<Course> onlyFeatured(Boolean featured) {
         if (featured == null || !featured) return null;
-        return (root, query, cb) -> cb.isTrue(root.get("is_featured"));
+        return (root, query, cb) -> cb.isTrue(root.get("isFeatured"));
     }
 
     private static List<String> tokenizeKeyword(String keyword) {
