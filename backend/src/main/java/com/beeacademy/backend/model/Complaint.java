@@ -101,19 +101,35 @@ public class Complaint {
         return Collections.unmodifiableList(messages);
     }
 
-    /** Người gửi bổ sung thông tin — không đổi trạng thái resolved/rejected. */
-    public void addSenderMessage(Profile sender, String content) {
-        this.messages.add(ComplaintMessage.create(this, sender, content));
+    /** Tin nhắn gốc (đầu tiên) của khiếu nại — để gắn file đính kèm khi tạo. */
+    public ComplaintMessage firstMessage() {
+        return messages.get(0);
+    }
+
+    /**
+     * Người gửi bổ sung thông tin. Nếu thread đã đóng (resolved/rejected) mà
+     * người gửi thấy chưa thỏa đáng → tự mở lại về đang xử lý ("chat tiếp").
+     */
+    public ComplaintMessage addSenderMessage(Profile sender, String content) {
+        ComplaintMessage message = ComplaintMessage.create(this, sender, content);
+        this.messages.add(message);
+        if (this.status.isClosed()) {
+            this.resolvedAt = null;
+        }
+        this.status = ComplaintStatus.IN_PROGRESS;
         this.lastActivityAt = Instant.now();
+        return message;
     }
 
     /** Admin phản hồi → chuyển sang đang xử lý (nếu thread chưa đóng). */
-    public void addAdminMessage(Profile admin, String content) {
-        this.messages.add(ComplaintMessage.create(this, admin, content));
+    public ComplaintMessage addAdminMessage(Profile admin, String content) {
+        ComplaintMessage message = ComplaintMessage.create(this, admin, content);
+        this.messages.add(message);
         if (!this.status.isClosed()) {
             this.status = ComplaintStatus.IN_PROGRESS;
         }
         this.lastActivityAt = Instant.now();
+        return message;
     }
 
     /** Admin đổi trạng thái xử lý (UC38). */

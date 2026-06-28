@@ -48,6 +48,7 @@ import {
   GraduationCap, CheckCircle2, Clock, AlertTriangle,
   XCircle, Megaphone, Database, MessageSquare, AlertCircle, UserCircle, Lock,
 } from 'lucide-react';
+import { AttachmentPicker, MessageAttachments } from '../../components/complaints/ComplaintAttachments';
 
 // ═══════════════════════════════════════════════════════════════════
 //  PHẦN 1 — TYPES (dùng từ complaintService — nguồn sự thật chung)
@@ -180,6 +181,7 @@ function MessageBubble({ message }: { message: ComplaintMessage }) {
             : 'bg-surface-container text-on-surface rounded-tl-sm'
         }`}>
           <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          <MessageAttachments attachments={message.attachments} />
         </div>
       </div>
     </div>
@@ -212,9 +214,11 @@ export default function TeacherComplaintsPage() {
   const [formCategory, setFormCategory] = useState<ComplaintCategory>('other');
   const [formPriority, setFormPriority] = useState<Priority>('medium');
   const [formContent, setFormContent] = useState<string>('');
+  const [formFiles, setFormFiles] = useState<File[]>([]);
 
   // Input reply trong thread detail
   const [replyInput, setReplyInput] = useState<string>('');
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
 
   // Sidebar mobile
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -282,6 +286,7 @@ export default function TeacherComplaintsPage() {
     setFormCategory('other');
     setFormPriority('medium');
     setFormContent('');
+    setFormFiles([]);
     setRightMode('create');
     setSelectedId(null);
   }
@@ -310,13 +315,14 @@ export default function TeacherComplaintsPage() {
         category: formCategory,
         priority: formPriority,
         content: formContent.trim(),
-      });
+      }, formFiles);
 
       setComplaints(prev => [newComplaint, ...prev.filter(c => c.id !== newComplaint.id)]);
       setSelectedId(newComplaint.id);
       setRightMode('view');
       setFormTitle('');
       setFormContent('');
+      setFormFiles([]);
       notify.success('Đã gửi khiếu nại đến Admin');
     } catch (error) {
       notify.error(error instanceof Error ? error.message : 'Không thể gửi khiếu nại');
@@ -330,6 +336,7 @@ export default function TeacherComplaintsPage() {
     setSelectedId(c.id);
     setRightMode('view');
     setReplyInput('');  // reset reply input khi đổi thread
+    setReplyFiles([]);
   }
 
   // ── Handler: GV gửi reply (follow up) ────────────────────────────
@@ -338,18 +345,19 @@ export default function TeacherComplaintsPage() {
   async function sendReply() {
     if (!selectedComplaint) return;
     const content = replyInput.trim();
-    if (!content) {
+    if (!content && replyFiles.length === 0) {
       notify.error('Vui lòng nhập nội dung trả lời');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const updatedComplaint = await addTeacherComplaintMessage(selectedComplaint.id, content);
+      const updatedComplaint = await addTeacherComplaintMessage(selectedComplaint.id, content, replyFiles);
       setComplaints(prev => prev.map(c =>
         c.id === updatedComplaint.id ? updatedComplaint : c
       ));
       setReplyInput('');
+      setReplyFiles([]);
       notify.success('Đã gửi tin nhắn');
     } catch (error) {
       notify.error(error instanceof Error ? error.message : 'Không thể gửi tin nhắn');
@@ -689,6 +697,9 @@ export default function TeacherComplaintsPage() {
                       />
                     </label>
 
+                    {/* File đính kèm (ảnh/PDF evidence) */}
+                    <AttachmentPicker files={formFiles} onChange={setFormFiles} disabled={isSubmitting} />
+
                     {/* Cảnh báo nhẹ về thời gian xử lý */}
                     <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-3 flex items-start gap-2">
                       <AlertCircle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
@@ -754,35 +765,36 @@ export default function TeacherComplaintsPage() {
                       ))}
                     </div>
 
-                    {/* Reply box hoặc thông báo đã đóng */}
-                    {isThreadClosed ? (
-                      <div className="px-5 py-4 border-t border-outline-variant/30 bg-surface-container/30">
-                        <p className="text-sm text-on-surface-variant text-center">
-                          Khiếu nại này đã được {selectedComplaint.status === 'resolved' ? 'giải quyết' : 'từ chối'}.
-                          Bạn không thể gửi tin nhắn mới.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="px-5 py-4 border-t border-outline-variant/30">
-                        <textarea
-                          value={replyInput}
-                          onChange={e => setReplyInput(e.target.value)}
-                          placeholder="Bổ sung thông tin, trả lời Admin..."
-                          rows={3}
-                          className="w-full px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant resize-none mb-3"
-                        />
-                        <div className="flex items-center justify-end">
-                          <button
-                            onClick={sendReply}
-                            disabled={isSubmitting}
-                            className="flex items-center gap-2 px-5 py-2 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors shadow-md shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
-                          >
-                            <Send className="w-4 h-4" />
-                            Gửi
-                          </button>
+                    {/* Reply box — thread đã đóng vẫn cho gửi (sẽ tự mở lại) */}
+                    <div className="px-5 py-4 border-t border-outline-variant/30">
+                      {isThreadClosed && (
+                        <div className="mb-3 flex items-start gap-2 bg-amber-500/5 border border-amber-500/20 rounded-xl p-3">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-on-surface-variant">
+                            Khiếu nại đã {selectedComplaint.status === 'resolved' ? 'được giải quyết' : 'bị từ chối'}.
+                            Nếu chưa thỏa đáng, bạn có thể gửi phản hồi để <span className="font-bold">mở lại</span> khiếu nại.
+                          </p>
                         </div>
+                      )}
+                      <textarea
+                        value={replyInput}
+                        onChange={e => setReplyInput(e.target.value)}
+                        placeholder={isThreadClosed ? 'Nêu lý do mở lại / bổ sung thông tin...' : 'Bổ sung thông tin, trả lời Admin...'}
+                        rows={3}
+                        className="w-full px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant resize-none mb-3"
+                      />
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <AttachmentPicker files={replyFiles} onChange={setReplyFiles} disabled={isSubmitting} />
+                        <button
+                          onClick={sendReply}
+                          disabled={isSubmitting}
+                          className="flex items-center gap-2 px-5 py-2 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors shadow-md shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          <Send className="w-4 h-4" />
+                          {isThreadClosed ? 'Gửi & mở lại' : 'Gửi'}
+                        </button>
                       </div>
-                    )}
+                    </div>
                   </motion.div>
                 </AnimatePresence>
               )}
