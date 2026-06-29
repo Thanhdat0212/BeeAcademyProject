@@ -23,6 +23,10 @@ interface CourseState {
   quizScores: Record<string, Record<string, number>>;
   saveQuizScore: (courseId: string, lessonId: string, score: number) => void;
 
+  // Trạng thái hoàn thành quiz: mapping từ courseId -> danh sách quiz/chapter đã làm xong
+  completedQuizzes: Record<string, string[]>;
+  markQuizCompleted: (courseId: string, quizId: string) => void;
+
   // Ghi chú bài học: mapping từ courseId -> lessonId -> nội dung ghi chú text
   lessonNotes: Record<string, Record<string, string>>;
   saveLessonNote: (courseId: string, lessonId: string, note: string) => void;
@@ -112,6 +116,20 @@ export const useCourseStore = create<CourseState>()(
               ...courseScores,
               [lessonId]: newScore
             }
+          }
+        };
+      }),
+
+      completedQuizzes: {},
+      markQuizCompleted: (courseId, quizId) => set((state) => {
+        const currentList = state.completedQuizzes[courseId] ?? [];
+        if (currentList.includes(quizId)) {
+          return state;
+        }
+        return {
+          completedQuizzes: {
+            ...state.completedQuizzes,
+            [courseId]: [...currentList, quizId]
           }
         };
       }),
