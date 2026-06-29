@@ -21,7 +21,7 @@
 //   - ScoreCircle:   vòng tròn SVG hiển thị điểm số
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { useState, useEffect, useMemo, type SyntheticEvent } from 'react';
+import { useState, useEffect, useMemo, useRef, type SyntheticEvent } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -1367,8 +1367,68 @@ function adaptLearningLesson(lesson: LessonDetail): Lesson {
   };
 }
 
-function canOpenLesson(course: Course, lesson: Lesson): boolean {
-  return course.isEnrolled || Boolean(lesson.isFree);
+function getOrderedVideoLessons(
+  sections: Array<{ lessons: Lesson[] }>,
+): Lesson[] {
+  return sections.flatMap((section) => section.lessons).filter((lesson) => lesson.type === 'video');
+}
+
+function getLessonUnlockState(
+  course: Course,
+  lesson: Lesson,
+  orderedVideoLessons: Lesson[],
+  completedLessonIds: string[],
+): {
+  canOpen: boolean;
+  reason: string | null;
+  lockedByPurchase: boolean;
+  lockedByPrerequisite: boolean;
+} {
+  const hasBaseAccess = course.isEnrolled || Boolean(lesson.isFree);
+  if (!hasBaseAccess) {
+    return {
+      canOpen: false,
+      reason: 'Bài học này cần mua khóa học để mở.',
+      lockedByPurchase: true,
+      lockedByPrerequisite: false,
+    };
+  }
+
+  if (lesson.type !== 'video') {
+    return {
+      canOpen: true,
+      reason: null,
+      lockedByPurchase: false,
+      lockedByPrerequisite: false,
+    };
+  }
+
+  const currentVideoIndex = orderedVideoLessons.findIndex((item) => item.id === lesson.id);
+  if (currentVideoIndex <= 0) {
+    return {
+      canOpen: true,
+      reason: null,
+      lockedByPurchase: false,
+      lockedByPrerequisite: false,
+    };
+  }
+
+  const previousVideoLesson = orderedVideoLessons[currentVideoIndex - 1];
+  if (completedLessonIds.includes(previousVideoLesson.id)) {
+    return {
+      canOpen: true,
+      reason: null,
+      lockedByPurchase: false,
+      lockedByPrerequisite: false,
+    };
+  }
+
+  return {
+    canOpen: false,
+    reason: `Hoàn thành video "${previousVideoLesson.title}" trước để mở bài này.`,
+    lockedByPurchase: false,
+    lockedByPrerequisite: true,
+  };
 }
 
 function getLessonDisplayDuration(
@@ -1466,6 +1526,11 @@ function MarketingSyllabusList({
   onStartPreview?: (lessonId?: string) => void;
   onOpenLearning?: (lessonId?: string) => void;
 }) {
+  const orderedVideoLessons = useMemo(
+    () => getOrderedVideoLessons(sections),
+    [sections],
+  );
+
   return (
     <div className="space-y-7">
       {sections.map((chapter, chapterIndex) => {
@@ -1509,7 +1574,11 @@ function MarketingSyllabusList({
                     {chapter.lessons.map((lesson, lessonIndex) => {
                       const isLessonCompleted = completedList.includes(lesson.id);
                       const canPreviewLesson = Boolean(lesson.isFree && onStartPreview);
-                      const canOpen = isOwnedCourse || canPreviewLesson;
+                      const unlockState = getLessonUnlockState(course, lesson, orderedVideoLessons, completedList);
+                      const canOpen = unlockState.canOpen && (isOwnedCourse || canPreviewLesson);
+                      const lockLabel = unlockState.lockedByPrerequisite
+                        ? 'Hoàn thành bài trước'
+                        : 'Cần mua khóa';
 
                       return (
                         <button
@@ -1541,6 +1610,8 @@ function MarketingSyllabusList({
                             }`}>
                               {isLessonCompleted
                                 ? <CheckCircle2 className="h-4 w-4" />
+                                : !canOpen
+                                ? <Lock className="h-4 w-4" />
                                 : lesson.type === 'video'
                                 ? <PlayCircle className="h-4 w-4" />
                                 : lesson.type === 'pdf'
@@ -1566,7 +1637,17 @@ function MarketingSyllabusList({
                                     Đã hoàn thành
                                   </span>
                                 )}
+                                {!canOpen && (
+                                  <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-extrabold text-on-surface-variant">
+                                    {lockLabel}
+                                  </span>
+                                )}
                               </div>
+                              {!canOpen && unlockState.reason && (
+                                <p className="mt-2 text-xs font-medium text-on-surface-variant">
+                                  {unlockState.reason}
+                                </p>
+                              )}
                             </div>
                           </div>
                         </button>
@@ -1612,19 +1693,6 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
   const isLoggedIn = useAuthStore(state => state.isLoggedIn);
   const navigate = useNavigate();
 
-  // BUG FIX: guard khi course không có lesson nào (tránh crash do undefined)
-  const requestedLesson = initialLessonId
-    ? course.lessons?.find(l => l.id === initialLessonId && l.type !== 'quiz' && canOpenLesson(course, l))
-    : null;
-  const firstLesson = requestedLesson
-    ?? course.lessons?.find(l => l.type !== 'quiz' && canOpenLesson(course, l))
-    ?? course.lessons?.find(l => canOpenLesson(course, l))
-    ?? null;
-
-  // Khởi tạo activeLesson = bài đầu tiên không phải quiz
-  const [activeLesson, setActiveLesson] = useState<Lesson | null>(firstLesson);
-  const [activeTab, setActiveTab] = useState<'overview' | 'qa' | 'notes'>('overview');
-
   // BUG FIX: state báo hiệu signed video URL đã hết hạn (sau 1 giờ)
   // — browser tự phát lỗi khi URL 403, <video onError> sẽ bắt và set flag này
   const [videoUrlExpired, setVideoUrlExpired] = useState(false);
@@ -1643,6 +1711,8 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
   const saveQuizScore = useCourseStore((state) => state.saveQuizScore);
   const lessonNotes = useCourseStore((state) => state.lessonNotes);
   const saveLessonNote = useCourseStore((state) => state.saveLessonNote);
+  const completedList = completedLessons[course.id] ?? [];
+  const completedQuizList = completedQuizzes[course.id] ?? [];
 
   // State cục bộ cho ghi chú
   const [noteText, setNoteText] = useState('');
@@ -1655,6 +1725,9 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
   const [postingQuestion, setPostingQuestion] = useState(false);
   const [postingReplyId, setPostingReplyId] = useState<string | null>(null);
   const [studentExams, setStudentExams] = useState<StudentExamSummaryResponse[]>([]);
+  const watchedUntilRef = useRef(0);
+  const isResettingSeekRef = useRef(false);
+  const lastSeekWarningAtRef = useRef(0);
 
   const chapterSections = useMemo(() => (
     rawChapters.length > 0
@@ -1675,10 +1748,32 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
           lessons: course.lessons ?? [],
         }]
   ), [rawChapters, course.lessons]);
+  const orderedVideoLessons = useMemo(
+    () => getOrderedVideoLessons(chapterSections),
+    [chapterSections],
+  );
+  const requestedLesson = initialLessonId
+    ? course.lessons?.find((lesson) => {
+        if (lesson.id !== initialLessonId || lesson.type === 'quiz') {
+          return false;
+        }
+        return getLessonUnlockState(course, lesson, orderedVideoLessons, completedList).canOpen;
+      })
+    : null;
+  const firstLesson = requestedLesson
+    ?? course.lessons?.find((lesson) =>
+      lesson.type !== 'quiz' && getLessonUnlockState(course, lesson, orderedVideoLessons, completedList).canOpen
+    )
+    ?? course.lessons?.find((lesson) =>
+      getLessonUnlockState(course, lesson, orderedVideoLessons, completedList).canOpen
+    )
+    ?? null;
 
   const [expandedChapterIds, setExpandedChapterIds] = useState<Set<string>>(
     () => new Set(chapterSections.slice(0, 1).map(chapter => chapter.id))
   );
+  const [activeLesson, setActiveLesson] = useState<Lesson | null>(firstLesson);
+  const [activeTab, setActiveTab] = useState<'overview' | 'qa' | 'notes'>('overview');
 
   useEffect(() => {
     setActiveLesson(firstLesson);
@@ -1687,6 +1782,12 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
     setVideoUrlExpired(false);
     setExpandedChapterIds(new Set(chapterSections.slice(0, 1).map(chapter => chapter.id)));
   }, [chapterSections, course.id, firstLesson]);
+
+  useEffect(() => {
+    watchedUntilRef.current = 0;
+    isResettingSeekRef.current = false;
+    lastSeekWarningAtRef.current = 0;
+  }, [activeLesson?.id]);
 
   // Cập nhật nội dung ghi chú khi chuyển bài học
   useEffect(() => {
@@ -1752,8 +1853,6 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
   }, [course.id]);
 
   // Tính toán tiến độ học tập thực tế dựa trên completedLessons
-  const completedList = completedLessons[course.id] ?? [];
-  const completedQuizList = completedQuizzes[course.id] ?? [];
   const progressStats = useMemo(
     () => getCourseProgressStats(chapterSections, completedList, completedQuizList),
     [chapterSections, completedList, completedQuizList],
@@ -1762,8 +1861,9 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
 
   // Router điều hướng click trong sidebar
   function handleLessonClick(lesson: Lesson) {
-    if (!canOpenLesson(course, lesson)) {
-      notify.error('Bài học này cần mua khóa học để mở khóa.');
+    const unlockState = getLessonUnlockState(course, lesson, orderedVideoLessons, completedList);
+    if (!unlockState.canOpen) {
+      notify.error(unlockState.reason ?? 'Bài học này hiện chưa thể mở.');
       return;
     }
     if (lesson.type === 'quiz') {
@@ -1802,6 +1902,41 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
       return;
     }
     saveLessonDuration(course.id, activeLesson.id, event.currentTarget.duration);
+  }
+
+  function handleVideoTimeUpdate(event: SyntheticEvent<HTMLVideoElement>) {
+    if (isResettingSeekRef.current) {
+      return;
+    }
+
+    watchedUntilRef.current = Math.max(
+      watchedUntilRef.current,
+      event.currentTarget.currentTime,
+    );
+  }
+
+  function handleVideoSeeking(event: SyntheticEvent<HTMLVideoElement>) {
+    const video = event.currentTarget;
+
+    if (isResettingSeekRef.current) {
+      return;
+    }
+
+    if (Math.abs(video.currentTime - watchedUntilRef.current) < 0.75) {
+      return;
+    }
+
+    isResettingSeekRef.current = true;
+    video.currentTime = watchedUntilRef.current;
+    window.setTimeout(() => {
+      isResettingSeekRef.current = false;
+    }, 0);
+
+    const now = Date.now();
+    if (now - lastSeekWarningAtRef.current > 1500) {
+      lastSeekWarningAtRef.current = now;
+      notify.error('Không thể tua video bài giảng.');
+    }
   }
 
   function toggleChapter(chapterId: string) {
@@ -1981,6 +2116,8 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
                   controlsList="nodownload"
                   playsInline
                   onLoadedMetadata={handleVideoMetadataLoaded}
+                  onTimeUpdate={handleVideoTimeUpdate}
+                  onSeeking={handleVideoSeeking}
                   onEnded={handleVideoEnded}
                   onError={() => setVideoUrlExpired(true)}
                 />
@@ -2326,7 +2463,11 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
                                 const isCompleted = lesson.type === 'quiz'
                                   ? completedQuizList.includes(lesson.id)
                                   : completedList.includes(lesson.id);
-                                const isLocked = !canOpenLesson(course, lesson);
+                                const unlockState = getLessonUnlockState(course, lesson, orderedVideoLessons, completedList);
+                                const isLocked = !unlockState.canOpen;
+                                const lockLabel = unlockState.lockedByPrerequisite
+                                  ? 'Hoàn thành bài trước'
+                                  : 'Cần mua khóa';
 
                                 return (
                                   <button
@@ -2365,10 +2506,15 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
                                         )}
                                         {isLocked && (
                                           <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-extrabold text-on-surface-variant">
-                                            Cần mua khóa
+                                            {lockLabel}
                                           </span>
                                         )}
                                       </div>
+                                      {isLocked && unlockState.reason && (
+                                        <p className="mt-1 text-xs text-on-surface-variant">
+                                          {unlockState.reason}
+                                        </p>
+                                      )}
                                     </div>
                                   </button>
                                 );
