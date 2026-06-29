@@ -198,6 +198,8 @@ export default function StudentQuizPage() {
   const { courseId, chapterId } = useParams<{ courseId: string; chapterId: string }>();
   const navigate = useNavigate();
   const completedLessons = useCourseStore((state) => state.completedLessons);
+  const markQuizCompleted = useCourseStore((state) => state.markQuizCompleted);
+  const saveQuizScore = useCourseStore((state) => state.saveQuizScore);
 
   const [phase, setPhase] = useState<PagePhase>('loading');
   const [errorMsg, setErrorMsg] = useState('');
@@ -267,6 +269,10 @@ export default function StudentQuizPage() {
     setPhase('submitting');
     try {
       const res = await quizSvc.submitQuiz(attempt.attemptId, answers);
+      if (courseId && chapterId) {
+        markQuizCompleted(courseId, chapterId);
+        saveQuizScore(courseId, chapterId, res.score);
+      }
       setResult(res);
       setPhase('results');
     } catch (err: unknown) {
@@ -274,7 +280,7 @@ export default function StudentQuizPage() {
       notify.error(msg);
       setPhase('quiz');
     }
-  }, [attempt, answers]);
+  }, [attempt, answers, chapterId, courseId, markQuizCompleted, saveQuizScore]);
 
   // Hết giờ → tự động nộp
   const handleTimeExpire = useCallback(() => {

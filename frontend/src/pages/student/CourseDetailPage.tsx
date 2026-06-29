@@ -556,6 +556,7 @@ function MarketingView({
   const purchasedIds = useCourseStore(state => state.purchasedIds);
   const enrollCourses = useCourseStore(state => state.enrollCourses);
   const completedLessons = useCourseStore(state => state.completedLessons);
+  const completedQuizzes = useCourseStore(state => state.completedQuizzes);
   const lessonDurations = useCourseStore(state => state.lessonDurations);
   const navigate = useNavigate();
   const [activating, setActivating] = useState(false);
@@ -591,10 +592,12 @@ function MarketingView({
     [course.lessons],
   );
   const completedList = completedLessons[course.id] ?? [];
-  const totalLessons = course.lessons?.length ?? 0;
-  const progressPercent = totalLessons > 0
-    ? Math.round((completedList.length / totalLessons) * 100)
-    : 0;
+  const completedQuizList = completedQuizzes[course.id] ?? [];
+  const progressStats = useMemo(
+    () => getCourseProgressStats(syllabusSections, completedList, completedQuizList),
+    [syllabusSections, completedList, completedQuizList],
+  );
+  const progressPercent = progressStats.progressPercent;
   const isOwnedCourse = course.isEnrolled || purchasedIds.includes(course.id);
   const canSubmitReview = isOwnedCourse && user?.role === 'student';
   const primaryPreviewLesson = previewLessons.find(lesson => lesson.type === 'video') ?? previewLessons[0] ?? null;
@@ -1131,7 +1134,7 @@ function MarketingView({
                         <p className="text-sm font-extrabold text-on-surface">Bạn đã sở hữu khóa học này</p>
                         <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
                           {progressPercent > 0
-                            ? `Bạn đã hoàn thành ${completedList.length}/${totalLessons} bài học.`
+                            ? `Bạn đã hoàn thành ${progressStats.completedItems}/${progressStats.totalItems} nội dung học.`
                             : 'Khóa học đã sẵn sàng để bạn bắt đầu học ngay.'}
                         </p>
                       </div>
@@ -1402,6 +1405,46 @@ function preloadLessonDuration(
   return cleanup;
 }
 
+function getCourseProgressStats(
+  chapters: Array<{ id: string; hasQuizConfig: boolean; lessons: Lesson[] }>,
+  completedLessonIds: string[],
+  completedQuizIds: string[],
+) {
+  const videoIds = new Set<string>();
+  const quizIds = new Set<string>();
+  const completedLessonSet = new Set(completedLessonIds);
+  const completedQuizSet = new Set(completedQuizIds);
+
+  chapters.forEach((chapter) => {
+    let hasInlineQuizLesson = false;
+
+    chapter.lessons.forEach((lesson) => {
+      if (lesson.type === 'video') {
+        videoIds.add(lesson.id);
+      }
+      if (lesson.type === 'quiz') {
+        quizIds.add(lesson.id);
+        hasInlineQuizLesson = true;
+      }
+    });
+
+    if (chapter.hasQuizConfig && chapter.id !== 'flat-lessons' && !hasInlineQuizLesson) {
+      quizIds.add(chapter.id);
+    }
+  });
+
+  const completedVideoCount = [...videoIds].filter((id) => completedLessonSet.has(id)).length;
+  const completedQuizCount = [...quizIds].filter((id) => completedQuizSet.has(id)).length;
+  const totalItems = videoIds.size + quizIds.size;
+  const completedItems = completedVideoCount + completedQuizCount;
+
+  return {
+    totalItems,
+    completedItems,
+    progressPercent: totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0,
+  };
+}
+
 function MarketingSyllabusList({
   course,
   sections,
@@ -1592,7 +1635,8 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
   // Lấy dữ liệu và actions từ Zustand store
   const completedLessons = useCourseStore((state) => state.completedLessons);
   const markLessonCompleted = useCourseStore((state) => state.markLessonCompleted);
-  const toggleLessonCompleted = useCourseStore((state) => state.toggleLessonCompleted);
+  const completedQuizzes = useCourseStore((state) => state.completedQuizzes);
+  const markQuizCompleted = useCourseStore((state) => state.markQuizCompleted);
   const lessonDurations = useCourseStore((state) => state.lessonDurations);
   const saveLessonDuration = useCourseStore((state) => state.saveLessonDuration);
   const quizScores = useCourseStore((state) => state.quizScores);
@@ -1709,10 +1753,12 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
 
   // Tính toán tiến độ học tập thực tế dựa trên completedLessons
   const completedList = completedLessons[course.id] ?? [];
-  const totalLessons = course.lessons?.length ?? 0;
-  const progressPercent = totalLessons > 0 ? Math.round((completedList.length / totalLessons) * 100) : 0;
-
-  const isCurrentLessonCompleted = completedList.includes(activeLesson?.id);
+  const completedQuizList = completedQuizzes[course.id] ?? [];
+  const progressStats = useMemo(
+    () => getCourseProgressStats(chapterSections, completedList, completedQuizList),
+    [chapterSections, completedList, completedQuizList],
+  );
+  const progressPercent = progressStats.progressPercent;
 
   // Router điều hướng click trong sidebar
   function handleLessonClick(lesson: Lesson) {
@@ -1748,7 +1794,7 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
       return;
     }
     markLessonCompleted(course.id, activeLesson.id);
-    notify.success('Đã đánh dấu hoàn thành bài học!');
+    notify.success('Đã hoàn thành video bài học!');
   }
 
   function handleVideoMetadataLoaded(event: SyntheticEvent<HTMLVideoElement>) {
@@ -1772,6 +1818,7 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
 
   function handleQuizComplete(lessonId: string, score: number) {
     saveQuizScore(course.id, lessonId, score);
+    markQuizCompleted(course.id, lessonId);
   }
 
   const handleSaveNote = () => {
@@ -1993,24 +2040,6 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
                   <span className="text-primary">{activeLesson?.type === 'video' ? 'Video giảng' : 'Tài liệu lý thuyết'}</span>
                 </div>
               </div>
-              {/* Nút đánh dấu hoàn thành bài học kết nối Zustand */}
-              <button
-                onClick={() => {
-                  toggleLessonCompleted(course.id, activeLesson.id);
-                  if (!isCurrentLessonCompleted) {
-                    notify.success('Đã đánh dấu hoàn thành bài học!');
-                  } else {
-                    notify.success('Đã hủy hoàn thành bài học!');
-                  }
-                }}
-                className={`px-6 py-3 border rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap ${
-                  isCurrentLessonCompleted
-                    ? 'bg-green-600 text-white border-green-600 hover:bg-green-700 shadow-md shadow-green-600/25'
-                    : 'bg-surface-container border-outline-variant hover:border-primary hover:text-primary'
-                }`}
-              >
-                <CheckCircle2 className="w-5 h-5" /> {isCurrentLessonCompleted ? 'Đã hoàn thành' : 'Đánh dấu xong'}
-              </button>
             </div>
 
             {/* Tab navigation với animated underline indicator (layoutId) */}
@@ -2258,6 +2287,7 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
                   ).length;
                   const isChapterVideoCompleted = videoLessonsInChapter.length === 0 ||
                     completedVideoCount === videoLessonsInChapter.length;
+                  const isChapterQuizCompleted = completedQuizList.includes(chapter.id);
 
                   return (
                     <div key={chapter.id} className="space-y-2">
@@ -2293,7 +2323,9 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
                             <div className="space-y-1 pl-3 pt-1">
                               {chapter.lessons.map((lesson, lessonIndex) => {
                                 const isActive = activeLesson?.id === lesson.id;
-                                const isCompleted = completedList.includes(lesson.id);
+                                const isCompleted = lesson.type === 'quiz'
+                                  ? completedQuizList.includes(lesson.id)
+                                  : completedList.includes(lesson.id);
                                 const isLocked = !canOpenLesson(course, lesson);
 
                                 return (
@@ -2348,12 +2380,21 @@ function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPr
                                     to={`/courses/${courseId}/chapters/${chapter.id}/quiz`}
                                     className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 flex items-center gap-3 bg-surface hover:bg-amber-500/5 hover:border-amber-500/20 transition-all group"
                                   >
-                                    <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-500 group-hover:bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-                                      <ClipboardList className="w-4 h-4" />
+                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                      isChapterQuizCompleted
+                                        ? 'bg-green-500/10 text-green-600'
+                                        : 'bg-amber-500/10 text-amber-500 group-hover:bg-amber-500/20'
+                                    }`}>
+                                      {isChapterQuizCompleted
+                                        ? <CheckCircle2 className="w-4 h-4" />
+                                        : <ClipboardList className="w-4 h-4" />
+                                      }
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <p className="text-sm font-semibold text-on-surface line-clamp-1">Quiz chương {chapterIndex + 1}</p>
-                                      <p className="text-xs text-amber-600 font-medium">Làm quiz ngay</p>
+                                      <p className={`text-xs font-medium ${isChapterQuizCompleted ? 'text-green-600' : 'text-amber-600'}`}>
+                                        {isChapterQuizCompleted ? 'Đã hoàn thành quiz' : 'Làm quiz ngay'}
+                                      </p>
                                     </div>
                                   </Link>
                                 ) : (
