@@ -60,8 +60,11 @@ export default function App() {
 
         {/* ── Student (cần đăng nhập) ── */}
         <Route path="/quiz" element={<ProtectedRoute><QuizPage /></ProtectedRoute>} />
-        <Route path="/courses" element={<ProtectedRoute role="student"><CoursesPage /></ProtectedRoute>} />
-        <Route path="/courses/:id" element={<ProtectedRoute role="student"><CourseDetailPage /></ProtectedRoute>} />
+        {/* Giữ public (không ProtectedRoute): khách vãng lai duyệt danh sách + chi tiết
+            + học thử khóa miễn phí khi chưa đăng nhập. Không gắn role="student" như team3
+            để không chặn luồng học thử/SEO trang khóa học. */}
+        <Route path="/courses" element={<CoursesPage />} />
+        <Route path="/courses/:id" element={<CourseDetailPage />} />
         <Route path="/courses/:courseId/chapters/:chapterId/quiz" element={<ProtectedRoute><StudentQuizPage /></ProtectedRoute>} />
         <Route path="/courses/:courseId/exams/:slotIndex" element={<ProtectedRoute><StudentExamPage /></ProtectedRoute>} />
         <Route path="/checkout"      element={<ProtectedRoute role="student"><CheckoutPage /></ProtectedRoute>} />

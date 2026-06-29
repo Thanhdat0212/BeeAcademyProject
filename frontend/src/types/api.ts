@@ -114,6 +114,8 @@ export interface CourseSummary {
   hasFreePreview: boolean;
   averageRating: number;
   reviewCount: number;
+  // studentCount: số học viên đã ghi danh — feature riêng của local, giữ khi gộp team3.
+  studentCount: number;
   totalChapters: number;
   totalLessons: number;
   totalDurationSec: number;
@@ -226,6 +228,8 @@ export interface SearchCoursesParams {
   grade?: number;
   /** Từ khoá tìm trong title/description. */
   q?: string;
+  /** Chỉ lấy khoá nổi bật (is_featured=true) cho trang chủ. */
+  featured?: boolean;
   page?: number;
   size?: number;
   /** Cú pháp Spring: "field,asc" | "field,desc". */

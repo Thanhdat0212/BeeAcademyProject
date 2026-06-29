@@ -172,6 +172,7 @@ export default function DashboardHeader() {
   const cartItems = useCartStore(state => state.items);
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
+  const isLoggedIn = useAuthStore(state => state.isLoggedIn);
 
   // ── State: Search ────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState('');
@@ -507,6 +508,25 @@ export default function DashboardHeader() {
         {/* Actions */}
         <div className="flex items-center gap-4 sm:gap-5 flex-shrink-0">
 
+          {!isLoggedIn ? (
+            // Guest (chưa đăng nhập): chỉ hiện nút Đăng nhập / Đăng ký,
+            // không render chuông thông báo, giỏ hàng hay menu tài khoản.
+            <div className="flex items-center gap-3">
+              <Link
+                to="/login"
+                className="hidden sm:block font-medium text-on-surface hover:text-primary transition-colors"
+              >
+                Đăng nhập
+              </Link>
+              <Link
+                to="/register"
+                className="bg-primary text-on-primary px-5 py-2.5 rounded-full font-semibold shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:-translate-y-0.5 transition-all"
+              >
+                Đăng ký
+              </Link>
+            </div>
+          ) : (
+          <>
           {/* Notification Bell */}
           <div ref={notificationRef} className="relative">
             <button
@@ -730,6 +750,8 @@ export default function DashboardHeader() {
               )}
             </AnimatePresence>
           </div>
+          </>
+          )}
 
         </div>
       </div>

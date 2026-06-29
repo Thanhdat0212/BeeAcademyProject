@@ -1,36 +1,12 @@
+import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowRight, BookOpen, Users, Award, Star, CheckCircle } from 'lucide-react';
+import { ArrowRight, BookOpen, Users, Award, Star, CheckCircle, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { searchCourses } from '../../api/courseService';
+import { adaptCourseSummary } from '../../api/adapter';
+import type { Course as UiCourse } from '../../data/mockCourses';
 
-const MOCK_COURSES = [
-  {
-    id: 1,
-    title: "Toán Học Nâng Cao Lớp 8",
-    description: "Nắm vững đại số, hình học và kỹ năng giải quyết vấn đề với các bài học tương tác.",
-    image: "https://images.unsplash.com/photo-1632516643720-e7f5d7d6eca9?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80",
-    rating: 4.8,
-    students: "1.2k",
-    level: "Trung bình"
-  },
-  {
-    id: 2,
-    title: "Nhập Môn Vật Lý",
-    description: "Hiểu các định luật cơ bản của tự nhiên thông qua lý thuyết và thực hành.",
-    image: "https://images.unsplash.com/photo-1636466497217-26a8cbeaf0aa?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80",
-    rating: 4.9,
-    students: "850",
-    level: "Cơ bản"
-  },
-  {
-    id: 3,
-    title: "Khoa Học Máy Tính 101",
-    description: "Học những kiến thức cơ bản về lập trình, thuật toán và cấu trúc dữ liệu.",
-    image: "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80",
-    rating: 4.7,
-    students: "2.1k",
-    level: "Mọi cấp độ"
-  }
-];
+const FEATURED_LIMIT = 3;
 
 const FEATURES = [
   {
@@ -51,6 +27,26 @@ const FEATURES = [
 ];
 
 export default function LandingPage() {
+  const [featuredCourses, setFeaturedCourses] = useState<UiCourse[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    searchCourses({ featured: true, size: FEATURED_LIMIT, sort: 'createdAt,desc' })
+      .then((page) => {
+        if (active) setFeaturedCourses(page.items.map((item) => adaptCourseSummary(item)));
+      })
+      .catch(() => {
+        if (active) setFeaturedCourses([]);
+      })
+      .finally(() => {
+        if (active) setCoursesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-surface text-on-surface flex flex-col font-sans overflow-hidden">
       {/* Navigation */}
@@ -170,54 +166,94 @@ export default function LandingPage() {
                 <h2 className="text-3xl md:text-4xl font-bold mb-4">Khóa Học Nổi Bật</h2>
                 <p className="text-on-surface-variant">Khám phá các chương trình được yêu thích nhất của chúng tôi.</p>
               </div>
-              <button className="hidden md:flex items-center gap-2 font-semibold text-primary hover:text-primary/80 transition-colors">
-                Xem tất cả <ArrowRight className="w-4 h-4" />
-              </button>
+              {featuredCourses.length > 0 && (
+                <Link
+                  to="/courses"
+                  className="hidden md:flex items-center gap-2 font-semibold text-primary hover:text-primary/80 transition-colors"
+                >
+                  Xem tất cả <ArrowRight className="w-4 h-4" />
+                </Link>
+              )}
             </div>
 
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {MOCK_COURSES.map((course, idx) => (
-                <motion.div 
-                  key={course.id}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  whileInView={{ opacity: 1, scale: 1 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: idx * 0.1, duration: 0.5 }}
-                  whileHover={{ y: -10 }}
-                  className="bg-surface rounded-3xl overflow-hidden shadow-md border border-outline-variant/40 group"
-                >
-                  <div className="relative h-48 overflow-hidden">
-                    <img 
-                      src={course.image} 
-                      alt={course.title} 
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                    />
-                    <div className="absolute top-4 left-4 bg-surface/90 backdrop-blur text-xs font-bold px-3 py-1 rounded-full">
-                      {course.level}
-                    </div>
-                  </div>
-                  <div className="p-6">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-1 text-sm font-semibold text-amber-500">
-                        <Star className="w-4 h-4 fill-amber-500" /> {course.rating}
+            {coursesLoading ? (
+              <div className="w-full py-20 flex flex-col items-center justify-center">
+                <Loader2 className="w-10 h-10 text-primary animate-spin mb-4" />
+                <p className="text-on-surface-variant">Đang tải khóa học...</p>
+              </div>
+            ) : featuredCourses.length === 0 ? (
+              <div className="w-full py-20 flex flex-col items-center justify-center text-center">
+                <div className="w-16 h-16 bg-surface-container rounded-full flex items-center justify-center mb-4 text-on-surface-variant">
+                  <BookOpen className="w-8 h-8 opacity-50" />
+                </div>
+                <p className="text-on-surface-variant">Chưa có khóa học nổi bật. Vui lòng quay lại sau.</p>
+              </div>
+            ) : (
+              <>
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                  {featuredCourses.map((course, idx) => (
+                    <motion.div
+                      key={course.id}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      whileInView={{ opacity: 1, scale: 1 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: idx * 0.1, duration: 0.5 }}
+                      whileHover={{ y: -10 }}
+                      className="bg-surface rounded-3xl overflow-hidden shadow-md border border-outline-variant/40 group flex flex-col"
+                    >
+                      <Link to={`/courses/${course.id}`} className="relative h-48 overflow-hidden block">
+                        {course.image ? (
+                          <img
+                            src={course.image}
+                            alt={course.title}
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-surface-container-high flex items-center justify-center">
+                            <BookOpen className="w-12 h-12 text-primary/60" />
+                          </div>
+                        )}
+                        <div className="absolute top-4 left-4 bg-surface/90 backdrop-blur text-xs font-bold px-3 py-1 rounded-full">
+                          {course.grade}
+                        </div>
+                      </Link>
+                      <div className="p-6 flex flex-col flex-grow">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-1 text-sm font-semibold text-amber-500">
+                            <Star className="w-4 h-4 fill-amber-500" /> {course.rating.toFixed(1)}
+                          </div>
+                          <div className="flex items-center gap-1 text-sm text-on-surface-variant">
+                            <Users className="w-4 h-4" /> {course.students.toLocaleString('vi-VN')}
+                          </div>
+                        </div>
+                        <Link to={`/courses/${course.id}`}>
+                          <h3 className="text-xl font-bold mb-2 line-clamp-1 hover:text-primary transition-colors">
+                            {course.title}
+                          </h3>
+                        </Link>
+                        <p className="text-on-surface-variant text-sm mb-6 line-clamp-2">
+                          {course.description}
+                        </p>
+                        <Link to={`/courses/${course.id}`} className="mt-auto">
+                          <button className="w-full py-3 rounded-xl font-bold text-primary bg-primary/10 hover:bg-primary hover:text-on-primary transition-colors">
+                            {course.hasFreePreview ? 'Xem thử miễn phí' : 'Xem chi tiết'}
+                          </button>
+                        </Link>
                       </div>
-                      <div className="flex items-center gap-1 text-sm text-on-surface-variant">
-                        <Users className="w-4 h-4" /> {course.students}
-                      </div>
-                    </div>
-                    <h3 className="text-xl font-bold mb-2 line-clamp-1">{course.title}</h3>
-                    <p className="text-on-surface-variant text-sm mb-6 line-clamp-2">
-                      {course.description}
-                    </p>
-                    <Link to="/quiz">
-                      <button className="w-full py-3 rounded-xl font-bold text-primary bg-primary/10 hover:bg-primary hover:text-on-primary transition-colors">
-                        Đăng Ký Ngay
-                      </button>
-                    </Link>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+                    </motion.div>
+                  ))}
+                </div>
+
+                <div className="mt-10 flex justify-center md:hidden">
+                  <Link
+                    to="/courses"
+                    className="inline-flex items-center gap-2 font-semibold text-primary hover:text-primary/80 transition-colors"
+                  >
+                    Xem tất cả <ArrowRight className="w-4 h-4" />
+                  </Link>
+                </div>
+              </>
+            )}
           </div>
         </section>
 

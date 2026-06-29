@@ -142,7 +142,7 @@ export function adaptCourseSummary(summary: ApiCourseSummary, isEnrolled = false
     image: summary.thumbnailUrl ?? '',
     introVideoUrl: summary.introVideoUrl ?? undefined,
     rating: summary.averageRating,
-    students: 1000,
+    students: summary.studentCount,
     instructor: summary.teacherName ?? 'Bee Academy',
     isEnrolled,
     hasFreePreview: summary.hasFreePreview,
@@ -171,7 +171,7 @@ export function adaptCourseDetail(detail: ApiCourseDetail): UiCourse {
     image: detail.thumbnailUrl ?? '',
     introVideoUrl: detail.introVideoUrl ?? undefined,
     rating: detail.averageRating,
-    students: 1000,
+    students: detail.studentCount,
     instructor: detail.teacherName ?? 'Bee Academy',
     isEnrolled: detail.enrolled,  // ✅ từ backend: true nếu đã mua / GV sở hữu / Admin
     hasFreePreview: detail.hasFreePreview,
