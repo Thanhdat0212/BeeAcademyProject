@@ -23,6 +23,7 @@ import {
   type ComplaintPriority, type ComplaintMessage,
 } from '../../api/complaintService';
 import { formatDateTime, formatRelativeTime } from './format';
+import { AttachmentPicker, MessageAttachments } from '../complaints/ComplaintAttachments';
 
 export default function ComplaintsInbox({ onStatsChange }: { onStatsChange?: () => void }) {
   const [list, setList] = useState<ComplaintSummary[]>([]);
@@ -78,9 +79,9 @@ export default function ComplaintsInbox({ onStatsChange }: { onStatsChange?: () 
     onStatsChange?.();
   }
 
-  async function handleReply(content: string) {
+  async function handleReply(content: string, files: File[]) {
     if (!detail) return;
-    const updated = await adminReplyComplaint(detail.id, content);
+    const updated = await adminReplyComplaint(detail.id, content, files);
     setDetail(updated);
     syncListRow(updated);
   }
@@ -204,23 +205,25 @@ function EmptyDetail() {
 
 function ComplaintThread({ detail, onReply, onChangeStatus }: {
   detail: ComplaintDetail;
-  onReply: (content: string) => Promise<void>;
+  onReply: (content: string, files: File[]) => Promise<void>;
   onChangeStatus: (status: Exclude<ComplaintStatus, 'pending'>) => Promise<void>;
 }) {
   const [reply, setReply] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const isClosed = detail.status === 'resolved' || detail.status === 'rejected';
 
   async function submitReply() {
     const content = reply.trim();
-    if (!content) {
+    if (!content && files.length === 0) {
       notify.error('Vui lòng nhập nội dung phản hồi');
       return;
     }
     setSending(true);
     try {
-      await onReply(content);
+      await onReply(content, files);
       setReply('');
+      setFiles([]);
       notify.success('Đã gửi phản hồi');
     } catch {
       notify.error('Không gửi được phản hồi');
@@ -298,7 +301,8 @@ function ComplaintThread({ detail, onReply, onChangeStatus }: {
               rows={3}
               className="w-full px-3 py-2 text-sm bg-surface-container border border-outline-variant/30 rounded-xl focus:outline-none focus:border-primary resize-none mb-3"
             />
-            <div className="flex justify-end">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <AttachmentPicker files={files} onChange={setFiles} disabled={sending} />
               <button
                 onClick={submitReply}
                 disabled={sending}
@@ -335,6 +339,7 @@ function MessageBubble({ message }: { message: ComplaintMessage }) {
             : 'bg-surface-container text-on-surface rounded-tl-sm'
         }`}>
           <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          <MessageAttachments attachments={message.attachments} />
         </div>
       </div>
     </div>
