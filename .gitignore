@@ -72,3 +72,8 @@ frontend/.env
 frontend/.env.local
 frontend/.env.*
 frontend/.evn.local
+
+# ── Clone team3 cục bộ + script tạm ở root ──────────────
+team3-develop/
+gen_sheet.py
+*.xlsx
