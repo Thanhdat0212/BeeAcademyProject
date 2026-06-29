@@ -1,5 +1,5 @@
 import { Fragment } from 'react';
-import { BlockMath, InlineMath } from 'react-katex';
+import { InlineMath } from 'react-katex';
 
 interface LatexTextProps {
   content: string | null | undefined;
@@ -7,7 +7,6 @@ interface LatexTextProps {
 }
 
 const LATEX_TOKEN_REGEX = /(\$\$[\s\S]+?\$\$|\$[^$\r\n]+\$)/g;
-const BLOCK_LATEX_REGEX = /^\$\$([\s\S]+)\$\$$/;
 
 function renderInlineToken(token: string, index: number) {
   if (token.startsWith('$$') && token.endsWith('$$')) {
@@ -25,17 +24,6 @@ function renderInlineToken(token: string, index: number) {
 
 export default function LatexText({ content, className }: LatexTextProps) {
   if (!content) return null;
-
-  const trimmed = content.trim();
-  const blockMatch = trimmed.match(BLOCK_LATEX_REGEX);
-  if (blockMatch) {
-    const expression = blockMatch[1].trim();
-    return (
-      <div className={className}>
-        <BlockMath>{expression}</BlockMath>
-      </div>
-    );
-  }
 
   const parts = content.split(LATEX_TOKEN_REGEX).filter(Boolean);
   return (
