@@ -1,7 +1,10 @@
 package com.beeacademy.backend.repository;
 
 import com.beeacademy.backend.model.ParentStudentLink;
+import com.beeacademy.backend.model.ParentStudentLinkStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -20,7 +23,29 @@ public interface ParentStudentLinkRepository extends JpaRepository<ParentStudent
      * @param parentId UUID của phụ huynh
      * @return Danh sách các đối tượng ParentStudentLink
      */
-    List<ParentStudentLink> findByIdParentId(UUID parentId);
+    List<ParentStudentLink> findByIdParentIdOrderByInvitedAtDesc(UUID parentId);
+
+    @Query(value = """
+            SELECT *
+            FROM parent_student_links
+            WHERE parent_id = :parentId
+              AND CAST(status AS text) = :status
+            ORDER BY invited_at DESC
+            """, nativeQuery = true)
+    List<ParentStudentLink> findByIdParentIdAndStatusOrderByInvitedAtDesc(
+            @Param("parentId") UUID parentId,
+            @Param("status") String status);
+
+    @Query(value = """
+            SELECT *
+            FROM parent_student_links
+            WHERE student_id = :studentId
+              AND CAST(status AS text) = :status
+            ORDER BY invited_at DESC
+            """, nativeQuery = true)
+    List<ParentStudentLink> findByIdStudentIdAndStatusOrderByInvitedAtDesc(
+            @Param("studentId") UUID studentId,
+            @Param("status") String status);
 
     /**
      * Tìm một liên kết cụ thể giữa một phụ huynh và một học sinh.
@@ -39,4 +64,18 @@ public interface ParentStudentLinkRepository extends JpaRepository<ParentStudent
      * @return true nếu liên kết đã tồn tại, ngược lại false
      */
     boolean existsByIdParentIdAndIdStudentId(UUID parentId, UUID studentId);
+
+    @Query(value = """
+            SELECT EXISTS(
+                SELECT 1
+                FROM parent_student_links
+                WHERE parent_id = :parentId
+                  AND student_id = :studentId
+                  AND CAST(status AS text) = :status
+            )
+            """, nativeQuery = true)
+    boolean existsByIdParentIdAndIdStudentIdAndStatus(
+            @Param("parentId") UUID parentId,
+            @Param("studentId") UUID studentId,
+            @Param("status") String status);
 }

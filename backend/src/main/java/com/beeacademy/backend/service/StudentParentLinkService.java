@@ -1,0 +1,255 @@
+package com.beeacademy.backend.service;
+
+import com.beeacademy.backend.dto.response.StudentParentLinkInvitationResponse;
+import com.beeacademy.backend.exception.BusinessException;
+import com.beeacademy.backend.model.ParentLinkAuditLog;
+import com.beeacademy.backend.model.ParentStudentLink;
+import com.beeacademy.backend.model.ParentStudentLinkStatus;
+import com.beeacademy.backend.model.Profile;
+import com.beeacademy.backend.model.UserRole;
+import com.beeacademy.backend.repository.ParentLinkAuditLogRepository;
+import com.beeacademy.backend.repository.ParentStudentLinkRepository;
+import com.beeacademy.backend.repository.ProfileRepository;
+import com.beeacademy.backend.security.AuthenticatedUser;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class StudentParentLinkService {
+
+    private static final Duration INVITATION_TTL = Duration.ofDays(7);
+
+    private final ParentStudentLinkRepository linkRepository;
+    private final ProfileRepository profileRepository;
+    private final ParentLinkAuditLogRepository auditLogRepository;
+    private final UserNotificationService notificationService;
+
+    @Transactional(readOnly = true)
+    public List<StudentParentLinkInvitationResponse> listPendingInvitations(AuthenticatedUser me) {
+        log.info("Student {} requested pending parent link invitations", me.userId());
+
+        return linkRepository.findByIdStudentIdAndStatusOrderByInvitedAtDesc(
+                        me.userId(),
+                        ParentStudentLinkStatus.PENDING.toDbValue())
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<StudentParentLinkInvitationResponse> listLinkedParents(AuthenticatedUser me) {
+        log.info("Student {} requested active parent links", me.userId());
+
+        return linkRepository.findByIdStudentIdAndStatusOrderByInvitedAtDesc(
+                        me.userId(),
+                        ParentStudentLinkStatus.ACCEPTED.toDbValue())
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional
+    public StudentParentLinkInvitationResponse acceptInvitation(AuthenticatedUser me, UUID parentId) {
+        ParentStudentLink link = requirePendingInvitation(me.userId(), parentId);
+        ParentStudentLinkStatus oldStatus = link.getStatus();
+        link.accept();
+        ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        auditStatusChange(savedLink, me.userId(), "accept_invitation", oldStatus, savedLink.getStatus());
+        notifyParentAboutDecision(savedLink, true);
+        log.info("Student {} accepted parent link invitation from {}", me.userId(), parentId);
+        return toResponse(savedLink);
+    }
+
+    @Transactional
+    public StudentParentLinkInvitationResponse rejectInvitation(AuthenticatedUser me, UUID parentId) {
+        ParentStudentLink link = requirePendingInvitation(me.userId(), parentId);
+        ParentStudentLinkStatus oldStatus = link.getStatus();
+        link.reject();
+        ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        auditStatusChange(savedLink, me.userId(), "reject_invitation", oldStatus, savedLink.getStatus());
+        notifyParentAboutDecision(savedLink, false);
+        log.info("Student {} rejected parent link invitation from {}", me.userId(), parentId);
+        return toResponse(savedLink);
+    }
+
+    @Transactional
+    public StudentParentLinkInvitationResponse requestUnlink(AuthenticatedUser me, UUID parentId) {
+        ParentStudentLink link = requireActiveLink(me.userId(), parentId);
+        if (link.hasPendingUnlinkRequest()) {
+            if (link.isUnlinkRequestedBy(me.userId())) {
+                return toResponse(link);
+            }
+
+            link.revoke();
+            ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+            log.info("Student {} confirmed unlink requested by parent {}", me.userId(), parentId);
+            return toResponse(savedLink);
+        }
+
+        link.requestUnlink(me.userId());
+        ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        log.info("Student {} sent unlink request to parent {}", me.userId(), parentId);
+        return toResponse(savedLink);
+    }
+
+    @Transactional
+    public StudentParentLinkInvitationResponse confirmUnlink(AuthenticatedUser me, UUID parentId) {
+        ParentStudentLink link = requireActiveLink(me.userId(), parentId);
+        if (!link.hasPendingUnlinkRequest()) {
+            throw new BusinessException(
+                    "UNLINK_REQUEST_NOT_FOUND",
+                    "Chưa có yêu cầu hủy liên kết nào cần xác nhận.",
+                    HttpStatus.CONFLICT);
+        }
+        if (link.isUnlinkRequestedBy(me.userId())) {
+            throw new BusinessException(
+                    "UNLINK_REQUEST_OWNED_BY_STUDENT",
+                    "Bạn đã gửi yêu cầu hủy. Cần phụ huynh đồng ý để hoàn tất.",
+                    HttpStatus.CONFLICT);
+        }
+
+        link.revoke();
+        ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        log.info("Student {} completed unlink for parent {}", me.userId(), parentId);
+        return toResponse(savedLink);
+    }
+
+    private ParentStudentLink requirePendingInvitation(UUID studentId, UUID parentId) {
+        ParentStudentLink link = linkRepository.findByIdParentIdAndIdStudentId(parentId, studentId)
+                .orElseThrow(() -> new BusinessException(
+                        "PARENT_LINK_INVITATION_NOT_FOUND",
+                        "Không tìm thấy lời mời liên kết từ phụ huynh này.",
+                        HttpStatus.NOT_FOUND));
+
+        if (link.getStatus() != ParentStudentLinkStatus.PENDING) {
+            throw new BusinessException(
+                    "PARENT_LINK_INVITATION_NOT_PENDING",
+                    "Lời mời liên kết này đã được xử lý.",
+                    HttpStatus.CONFLICT);
+        }
+
+        if (isExpired(link)) {
+            throw new BusinessException(
+                    "PARENT_LINK_INVITATION_EXPIRED",
+                    "Yeu cau lien ket da het han. Vui long nho phu huynh gui lai loi moi.",
+                    HttpStatus.GONE);
+        }
+
+        return link;
+    }
+
+    private boolean isExpired(ParentStudentLink link) {
+        Instant invitedAt = link.getInvitedAt();
+        return invitedAt != null && invitedAt.plus(INVITATION_TTL).isBefore(Instant.now());
+    }
+
+    private void auditStatusChange(ParentStudentLink link, UUID actorId, String action,
+                                   ParentStudentLinkStatus oldStatus,
+                                   ParentStudentLinkStatus newStatus) {
+        auditLogRepository.save(ParentLinkAuditLog.create(
+                link,
+                actorId,
+                UserRole.STUDENT,
+                action,
+                oldStatus,
+                newStatus));
+    }
+
+    private void notifyParentAboutDecision(ParentStudentLink link, boolean accepted) {
+        Profile parent = link.getParent();
+        Profile student = link.getStudent();
+        String studentName = studentDisplayName(student);
+        String title = accepted
+                ? "Hoc sinh da chap nhan lien ket"
+                : "Hoc sinh da tu choi lien ket";
+        String body = accepted
+                ? "%s da chap nhan loi moi lien ket phu huynh.".formatted(studentName)
+                : "%s da tu choi loi moi lien ket phu huynh.".formatted(studentName);
+
+        notificationService.notify(
+                parent.getId(),
+                accepted ? "parent_link_accepted" : "parent_link_rejected",
+                title,
+                body,
+                "/parent/link");
+    }
+
+    private ParentStudentLink requireActiveLink(UUID studentId, UUID parentId) {
+        ParentStudentLink link = linkRepository.findByIdParentIdAndIdStudentId(parentId, studentId)
+                .orElseThrow(() -> new BusinessException(
+                        "PARENT_LINK_NOT_FOUND",
+                        "Không tìm thấy liên kết phụ huynh này.",
+                        HttpStatus.NOT_FOUND));
+
+        if (link.getStatus() != ParentStudentLinkStatus.ACCEPTED) {
+            throw new BusinessException(
+                    "PARENT_LINK_NOT_ACTIVE",
+                    "Liên kết phụ huynh này không còn hoạt động.",
+                    HttpStatus.CONFLICT);
+        }
+
+        return link;
+    }
+
+    private StudentParentLinkInvitationResponse toResponse(ParentStudentLink link) {
+        Profile parent = link.getParent();
+        String parentEmail = profileRepository.findEmailByUserId(parent.getId()).orElse("");
+        return new StudentParentLinkInvitationResponse(
+                parent.getId(),
+                displayName(parent),
+                parentEmail,
+                parent.getAvatarUrl(),
+                link.getRelationship(),
+                link.getNote(),
+                link.getStatus().toApiValue(),
+                link.getInvitedAt(),
+                expiresAt(link),
+                isExpired(link),
+                link.getRespondedAt(),
+                link.getUnlinkRequestedBy(),
+                resolveUnlinkRequestedByRole(link),
+                link.getUnlinkRequestedAt());
+    }
+
+    private Instant expiresAt(ParentStudentLink link) {
+        return link.getInvitedAt() == null ? null : link.getInvitedAt().plus(INVITATION_TTL);
+    }
+
+    private String resolveUnlinkRequestedByRole(ParentStudentLink link) {
+        UUID requestedBy = link.getUnlinkRequestedBy();
+        if (requestedBy == null) {
+            return null;
+        }
+        if (requestedBy.equals(link.getParent().getId())) {
+            return "parent";
+        }
+        if (requestedBy.equals(link.getStudent().getId())) {
+            return "student";
+        }
+        return null;
+    }
+
+    private String studentDisplayName(Profile profile) {
+        if (profile == null || profile.getFullName() == null || profile.getFullName().isBlank()) {
+            return "Hoc sinh";
+        }
+        return profile.getFullName();
+    }
+
+    private String displayName(Profile profile) {
+        if (profile == null || profile.getFullName() == null || profile.getFullName().isBlank()) {
+            return "Phụ huynh";
+        }
+        return profile.getFullName();
+    }
+}
