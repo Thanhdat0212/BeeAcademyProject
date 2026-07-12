@@ -5,6 +5,7 @@ import com.beeacademy.backend.security.AuthenticatedUser;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.EnrollmentService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -39,6 +40,7 @@ public class EnrollmentController {
      * @param courseId UUID khóa học cần ghi danh
      */
     @PostMapping("/{courseId}/enroll")
+    @PreAuthorize("hasRole('student')")
     public ApiResponse<Void> enroll(@PathVariable UUID courseId) {
         AuthenticatedUser me = CurrentUser.required();
         enrollmentService.enroll(me.userId(), courseId);

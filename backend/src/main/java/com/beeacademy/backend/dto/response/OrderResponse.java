@@ -13,6 +13,9 @@ import java.util.UUID;
 public record OrderResponse(
     UUID id,
     Long orderCode,
+    Integer subtotalAmount,
+    Integer rewardDiscountAmount,
+    UUID rewardVoucherId,
     Integer totalAmount,
     OrderStatus status,
     String paymentRef,
@@ -54,6 +57,9 @@ public record OrderResponse(
         return new OrderResponse(
             order.getId(),
             order.getOrderCode(),
+            order.getSubtotalAmount(),
+            order.getRewardDiscountAmount(),
+            order.getRewardVoucherId(),
             order.getTotalAmount(),
             order.isExpired() ? OrderStatus.EXPIRED : order.getStatus(),
             order.getPaymentRef(),

@@ -1,5 +1,6 @@
 package com.beeacademy.backend.dto.response;
 
+import com.beeacademy.backend.model.BankVerifyStatus;
 import com.beeacademy.backend.model.PayoutStatus;
 
 import java.time.Instant;
@@ -20,6 +21,7 @@ public record AdminPayoutRowResponse(
         String bankName,
         String accountNumber,
         String accountHolder,
+        BankVerifyStatus bankVerifyStatus,
         long totalGross,
         long platformFee,
         long teacherAmount,

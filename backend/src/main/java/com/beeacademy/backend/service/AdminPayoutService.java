@@ -5,6 +5,7 @@ import com.beeacademy.backend.dto.response.AdminPayoutRowResponse;
 import com.beeacademy.backend.dto.response.AdminPayoutStatsResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
+import com.beeacademy.backend.model.BankVerifyStatus;
 import com.beeacademy.backend.model.PayoutPeriod;
 import com.beeacademy.backend.model.PayoutStatus;
 import com.beeacademy.backend.model.Profile;
@@ -85,16 +86,24 @@ public class AdminPayoutService {
         if (period.isPaid()) {
             throw new BusinessException("ALREADY_PAID", "Kỳ này đã được xác nhận chuyển khoản.");
         }
+        // REQ-ADM-006 AC6: hold chi trả khi TK ngân hàng chưa được Admin duyệt.
+        TeacherBankAccount bankAccount = bankRepository.findByTeacherId(period.getTeacherId())
+                .orElseThrow(() -> new BusinessException("HOLD_BANK_INFO",
+                        "Giáo viên chưa nhập TK ngân hàng — không thể xác nhận chuyển khoản."));
+        if (bankAccount.getVerifyStatus() != BankVerifyStatus.VERIFIED) {
+            throw new BusinessException("HOLD_BANK_INFO",
+                    "TK ngân hàng của giáo viên đang chờ duyệt hoặc bị từ chối. "
+                            + "Duyệt TK trước khi xác nhận chuyển khoản.");
+        }
         period.markPaid(adminId, req.transferRef(), req.transferContent());
         periodRepository.save(period);
 
         String currentMonth = ZonedDateTime.now(ZoneOffset.UTC).format(MONTH_FMT);
         String teacherName = profileRepository.findById(period.getTeacherId())
                 .map(Profile::getFullName).orElse("Giáo viên");
-        TeacherBankAccount bank = bankRepository.findByTeacherId(period.getTeacherId()).orElse(null);
         return toRow(period, currentMonth,
                 Map.of(period.getTeacherId(), teacherName != null ? teacherName : "Giáo viên"),
-                bank != null ? Map.of(period.getTeacherId(), bank) : Map.of());
+                Map.of(period.getTeacherId(), bankAccount));
     }
 
     /** Map 1 kỳ → DTO, gộp tổng tiền + thông tin GV/bank đã batch-load. */
@@ -115,6 +124,7 @@ public class AdminPayoutService {
                 bank != null ? bank.getBankName()      : null,
                 bank != null ? bank.getAccountNumber() : null,
                 bank != null ? bank.getAccountHolder() : null,
+                bank != null ? bank.getVerifyStatus()  : null,
                 gross,
                 gross - teacher,
                 teacher,

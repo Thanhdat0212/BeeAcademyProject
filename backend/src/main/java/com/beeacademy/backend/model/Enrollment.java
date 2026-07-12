@@ -76,4 +76,9 @@ public class Enrollment {
         e.progressPct = 0;
         return e;
     }
+
+    public void updateProgress(Integer progressPct) {
+        int normalized = progressPct != null ? progressPct : 0;
+        this.progressPct = Math.max(0, Math.min(100, normalized));
+    }
 }

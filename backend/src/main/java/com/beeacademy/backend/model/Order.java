@@ -28,6 +28,15 @@ public class Order {
     @Column(name = "total_amount", nullable = false)
     private Integer totalAmount;
 
+    @Column(name = "subtotal_amount", nullable = false)
+    private Integer subtotalAmount;
+
+    @Column(name = "reward_discount_amount", nullable = false)
+    private Integer rewardDiscountAmount;
+
+    @Column(name = "reward_voucher_id")
+    private UUID rewardVoucherId;
+
     @Convert(converter = OrderStatusConverter.class)
     @ColumnTransformer(read = "status::text", write = "?::order_status")
     @Column(name = "status", nullable = false)
@@ -59,10 +68,17 @@ public class Order {
     private List<OrderItem> items = new ArrayList<>();
 
     public static Order create(UUID userId, Integer totalAmount) {
+        return create(userId, totalAmount, 0, null);
+    }
+
+    public static Order create(UUID userId, Integer subtotalAmount, Integer rewardDiscountAmount, UUID rewardVoucherId) {
         Order o = new Order();
         o.id = UUID.randomUUID();
         o.userId = userId;
-        o.totalAmount = totalAmount;
+        o.subtotalAmount = Math.max(0, subtotalAmount != null ? subtotalAmount : 0);
+        o.rewardDiscountAmount = Math.max(0, rewardDiscountAmount != null ? rewardDiscountAmount : 0);
+        o.totalAmount = Math.max(0, o.subtotalAmount - o.rewardDiscountAmount);
+        o.rewardVoucherId = rewardVoucherId;
         o.status = OrderStatus.PENDING;
         o.paymentRef = "BEE" + o.id.toString().replace("-", "").substring(0, 8).toUpperCase();
         // orderCode: epoch giây * 1000 + 3 chữ số cuối UUID → 13 chữ số, gần như không trùng
@@ -76,6 +92,12 @@ public class Order {
         this.paymentLinkId = paymentLinkId;
     }
 
+    public void applyRewardVoucher(UUID rewardVoucherId, Integer rewardDiscountAmount) {
+        this.rewardVoucherId = rewardVoucherId;
+        this.rewardDiscountAmount = Math.max(0, rewardDiscountAmount != null ? rewardDiscountAmount : 0);
+        this.totalAmount = Math.max(0, this.subtotalAmount - this.rewardDiscountAmount);
+    }
+
     public void markPaid() {
         this.status = OrderStatus.PAID;
         this.paidAt = Instant.now();
@@ -83,6 +105,10 @@ public class Order {
 
     public void markCancelled() {
         this.status = OrderStatus.CANCELLED;
+    }
+
+    public void markExpired() {
+        this.status = OrderStatus.EXPIRED;
     }
 
     public boolean isExpired() {

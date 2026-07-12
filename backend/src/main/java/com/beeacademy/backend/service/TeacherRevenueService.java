@@ -85,7 +85,7 @@ public class TeacherRevenueService {
         UUID courseId = course.getId();
 
         OrderItem paidItem = orderItemRepo
-                .findPaidItemsByStudentAndCourse(studentId, courseId, OrderStatus.PAID)
+                .findPaidItemsByStudentAndCourse(studentId, courseId, OrderStatus.PAID.toDbValue())
                 .stream()
                 .findFirst()
                 .orElse(null);

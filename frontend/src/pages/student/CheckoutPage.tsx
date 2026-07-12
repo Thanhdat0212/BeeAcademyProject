@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Trash2, ShieldCheck, CreditCard, Loader2 } from 'lucide-react';
+import { ArrowLeft, Trash2, ShieldCheck, CreditCard, Loader2, Coins, Ticket, CheckCircle2 } from 'lucide-react';
 import DashboardHeader from '../../components/DashboardHeader';
 import { useCartStore } from '../../store/useCartStore';
 import { notify } from '../../lib/toast';
 import { createOrder } from '../../api/orderService';
+import { getRewardWallet, redeemRewardVoucher, type RewardWallet } from '../../api/rewardService';
 import { getCourseDetail } from '../../api/courseService';
 import { isApiError } from '../../api/client';
 
@@ -13,6 +14,9 @@ export default function CheckoutPage() {
   const { items, removeFromCart } = useCartStore();
   const navigate = useNavigate();
   const [isCreating, setIsCreating] = useState(false);
+  const [isRedeeming, setIsRedeeming] = useState<string | null>(null);
+  const [wallet, setWallet] = useState<RewardWallet | null>(null);
+  const [selectedVoucherId, setSelectedVoucherId] = useState<string | null>(null);
   // freshPrices: map courseId → giá thật từ DB (tránh stale localStorage)
   const [freshPrices, setFreshPrices] = useState<Record<string, number>>({});
 
@@ -31,8 +35,31 @@ export default function CheckoutPage() {
     });
   }, []);
 
+  useEffect(() => {
+    getRewardWallet()
+      .then(setWallet)
+      .catch(() => setWallet(null));
+  }, []);
+
   const getItemPrice = (item: typeof items[0]) => freshPrices[item.id] ?? item.priceVnd;
   const totalAmount = items.reduce((sum, item) => sum + getItemPrice(item), 0);
+  const availableVouchers = wallet?.vouchers.filter(v => v.status === 'AVAILABLE') ?? [];
+  const selectedVoucher = availableVouchers.find(v => v.id === selectedVoucherId) ?? null;
+  const rewardDiscount = selectedVoucher ? Math.min(selectedVoucher.discountAmount, totalAmount) : 0;
+  const payableAmount = Math.max(0, totalAmount - rewardDiscount);
+
+  const handleRedeemVoucher = async (voucherId: string) => {
+    setIsRedeeming(voucherId);
+    try {
+      const nextWallet = await redeemRewardVoucher(voucherId);
+      setWallet(nextWallet);
+      notify.success('Đã đổi voucher thành công.');
+    } catch (err: unknown) {
+      notify.error(isApiError(err) ? err.message : 'Không thể đổi voucher. Vui lòng thử lại.');
+    } finally {
+      setIsRedeeming(null);
+    }
+  };
 
   const handleCheckout = async () => {
     if (items.length === 0) { notify.error('Giỏ hàng của bạn đang trống!'); return; }
@@ -40,15 +67,21 @@ export default function CheckoutPage() {
     setIsCreating(true);
     try {
       const courseIds = items.map(i => i.id);
-      const order = await createOrder(courseIds);
+      const order = await createOrder(courseIds, selectedVoucherId);
 
       if (!order.checkoutUrl) {
+        if (order.status === 'PAID') {
+          localStorage.setItem('pendingOrderId', order.id);
+          navigate(`/payment-result?status=success&orderId=${order.id}`);
+          return;
+        }
         notify.error('Không nhận được link thanh toán. Vui lòng thử lại.');
         return;
       }
 
-      // Lưu orderId vào sessionStorage để PaymentResultPage lấy khi PayOS redirect về
-      sessionStorage.setItem('pendingOrderId', order.id);
+      // Lưu orderId vào localStorage (không dùng sessionStorage — mất khi user
+      // đóng tab trong lúc thanh toán trên PayOS) để PaymentResultPage lấy khi redirect về
+      localStorage.setItem('pendingOrderId', order.id);
 
       // Redirect sang trang thanh toán PayOS
       window.location.href = order.checkoutUrl;
@@ -124,11 +157,79 @@ export default function CheckoutPage() {
                   <span>Tạm tính ({items.length} khóa học):</span>
                   <span className="font-semibold text-on-surface">{totalAmount.toLocaleString('vi-VN')}đ</span>
                 </div>
+                {rewardDiscount > 0 && (
+                  <div className="flex justify-between items-center mb-4 text-green-600">
+                    <span>Voucher:</span>
+                    <span className="font-bold">-{rewardDiscount.toLocaleString('vi-VN')}đ</span>
+                  </div>
+                )}
                 <hr className="border-outline-variant/30 my-4" />
                 <div className="flex justify-between items-center mb-8">
                   <span className="font-bold text-on-surface">Tổng cộng:</span>
-                  <span className="text-3xl font-extrabold text-primary">{totalAmount.toLocaleString('vi-VN')}đ</span>
+                  <span className="text-3xl font-extrabold text-primary">{payableAmount.toLocaleString('vi-VN')}đ</span>
                 </div>
+
+                {wallet && (
+                  <div className="mb-6 space-y-4">
+                    <div className="flex items-center justify-between rounded-xl border border-outline-variant/40 bg-surface-container p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center">
+                          <Coins className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="text-xs text-on-surface-variant">Điểm thưởng</div>
+                          <div className="font-extrabold text-on-surface">{wallet.availablePoints.toLocaleString('vi-VN')} điểm</div>
+                        </div>
+                      </div>
+                      <span className="text-xs font-semibold text-on-surface-variant">Tích lũy {wallet.lifetimePoints.toLocaleString('vi-VN')}</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {availableVouchers.map(voucher => (
+                        <button
+                          key={voucher.id}
+                          type="button"
+                          onClick={() => setSelectedVoucherId(selectedVoucherId === voucher.id ? null : voucher.id)}
+                          className={`w-full flex items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors ${
+                            selectedVoucherId === voucher.id
+                              ? 'border-primary bg-primary/10'
+                              : 'border-outline-variant/40 bg-surface-container hover:border-primary/60'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Ticket className="w-5 h-5 text-primary shrink-0" />
+                            <div className="min-w-0">
+                              <div className="font-bold text-on-surface truncate">{voucher.displayName}</div>
+                              <div className="text-xs text-on-surface-variant">Giảm {voucher.discountAmount.toLocaleString('vi-VN')}đ</div>
+                            </div>
+                          </div>
+                          {selectedVoucherId === voucher.id && <CheckCircle2 className="w-5 h-5 text-primary shrink-0" />}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="grid gap-2">
+                      {wallet.catalog.map(voucher => {
+                        const canRedeem = wallet.availablePoints >= voucher.requiredPoints;
+                        return (
+                          <button
+                            key={voucher.id}
+                            type="button"
+                            onClick={() => handleRedeemVoucher(voucher.id)}
+                            disabled={!canRedeem || isRedeeming !== null}
+                            className="w-full flex items-center justify-between gap-3 rounded-xl border border-outline-variant/30 bg-surface-container-low px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:border-primary/50 transition-colors"
+                          >
+                            <span className="font-semibold text-on-surface">{voucher.code}</span>
+                            <span className="text-on-surface-variant">{voucher.requiredPoints} điểm</span>
+                            <span className="font-bold text-primary">
+                              {isRedeeming === voucher.id ? '...' : `-${voucher.discountAmount.toLocaleString('vi-VN')}đ`}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* PayOS badge */}
                 <div className="flex items-center gap-3 p-4 rounded-xl border border-outline-variant/40 bg-surface-container mb-8">

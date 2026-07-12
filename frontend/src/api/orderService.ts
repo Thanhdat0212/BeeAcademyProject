@@ -15,6 +15,9 @@ export interface OrderItemResponse {
 export interface OrderResponse {
   id: string;
   orderCode: number;
+  subtotalAmount: number;
+  rewardDiscountAmount: number;
+  rewardVoucherId: string | null;
   totalAmount: number;
   status: OrderStatus;
   paymentRef: string;
@@ -25,8 +28,8 @@ export interface OrderResponse {
   items: OrderItemResponse[];
 }
 
-export async function createOrder(courseIds: string[]): Promise<OrderResponse> {
-  const res = await apiClient.post('/api/orders', { courseIds });
+export async function createOrder(courseIds: string[], rewardVoucherId?: string | null): Promise<OrderResponse> {
+  const res = await apiClient.post('/api/orders', { courseIds, rewardVoucherId: rewardVoucherId ?? null });
   return res.data.data;
 }
 
@@ -42,5 +45,18 @@ export async function listOrders(): Promise<OrderResponse[]> {
 
 export async function verifyPayment(orderId: string): Promise<OrderResponse> {
   const res = await apiClient.post(`/api/orders/${orderId}/verify`);
+  return res.data.data;
+}
+
+export async function cancelOrder(orderId: string): Promise<OrderResponse> {
+  const res = await apiClient.post(`/api/orders/${orderId}/cancel`);
+  return res.data.data;
+}
+
+// Đối soát tất cả đơn PENDING với PayOS — fix bug thanh toán xong nhưng đóng
+// tab/reload trước khi về payment-result nên enrollment chưa được tạo.
+// Trả về danh sách đơn có thay đổi trạng thái (PAID/CANCELLED/EXPIRED).
+export async function reconcileOrders(): Promise<OrderResponse[]> {
+  const res = await apiClient.post('/api/orders/reconcile');
   return res.data.data;
 }
