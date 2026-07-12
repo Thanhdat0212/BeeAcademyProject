@@ -23,7 +23,24 @@ public interface QuizConfigRepository extends JpaRepository<QuizConfig, UUID> {
 
     List<QuizConfig> findByChapterIdIn(Collection<UUID> chapterIds);
 
+    @Query("""
+           SELECT q
+           FROM QuizConfig q
+           JOIN FETCH q.chapter chapter
+           JOIN FETCH chapter.course course
+           WHERE course.id IN :courseIds
+           """)
+    List<QuizConfig> findByCourseIds(@Param("courseIds") Collection<UUID> courseIds);
+
     boolean existsByChapterId(UUID chapterId);
+
+    @Query("""
+           SELECT COUNT(q.id) > 0
+           FROM QuizConfig q
+           WHERE q.chapter.id = :chapterId
+             AND q.chapter.course.id = :courseId
+           """)
+    boolean existsByChapterIdAndCourseId(@Param("chapterId") UUID chapterId, @Param("courseId") UUID courseId);
 
     /**
      * Trả về tập chapterId đã có quiz config trong danh sách đầu vào.

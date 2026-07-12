@@ -1,5 +1,6 @@
 package com.beeacademy.backend.dto.request;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.DecimalMax;
@@ -11,11 +12,22 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
+import java.util.UUID;
 
 public record ExamConfigRequest(
         @NotBlank
         @Size(max = 255)
         String name,
+
+        @NotNull
+        UUID scopeStartChapterId,
+
+        @NotNull
+        UUID placementChapterId,
+
+        @NotNull
+        @Pattern(regexp = "quiz|chapter_test|final_exam")
+        String examType,
 
         @Size(max = 2000)
         String description,
@@ -32,6 +44,9 @@ public record ExamConfigRequest(
         boolean shuffleQuestions,
         boolean shuffleOptions,
         boolean showAnswerAfterSubmit,
+        boolean requireFullscreen,
+        boolean blockCopyPaste,
+        boolean confirmUnderTenQuestions,
 
         @NotNull @Size(min = 1, max = 200)
         @Valid
@@ -45,14 +60,17 @@ public record ExamConfigRequest(
             String text,
 
             @NotNull
-            @Pattern(regexp = "single|multiple")
+            @Pattern(
+                    regexp = "multiple_choice|true_false|fill_in_blank|matching|essay|essay_short|essay_long|image_question|formula_question|audio_question|file_upload")
             String type,
 
-            @NotNull @Size(min = 2, max = 6)
+            @Size(max = 6)
             List<@NotBlank String> options,
 
-            @NotNull @Size(min = 1, max = 6)
+            @Size(max = 6)
             List<@Min(0) Integer> correctIndices,
+
+            JsonNode metadata,
 
             @Size(max = 2000)
             String explanation,

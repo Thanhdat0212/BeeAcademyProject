@@ -8,7 +8,16 @@ public record QuestionStatsResponse(
         int easyCount,
         int mediumCount,
         int hardCount,
-        int totalActive
+        int totalActive,
+        int multipleChoiceCount,
+        int trueFalseCount,
+        int fillInBlankCount,
+        int essayCount,
+        int totalExamSupported
 ) {
+    public QuestionStatsResponse(int easyCount, int mediumCount, int hardCount, int totalActive) {
+        this(easyCount, mediumCount, hardCount, totalActive, 0, 0, 0, 0, 0);
+    }
+
     public int total() { return easyCount + mediumCount + hardCount; }
 }

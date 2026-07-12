@@ -1,8 +1,10 @@
 import { apiClient, unwrap } from './client';
 import type { ApiResponse } from '../types/api';
+import type { QuestionMetadata, QuestionType } from './questionService';
 
-export type ExamQuestionType = 'single' | 'multiple';
+export type ExamQuestionType = QuestionType;
 export type ExamDifficulty = 'easy' | 'medium' | 'hard';
+export type ExamType = 'quiz' | 'chapter_test' | 'final_exam';
 
 export interface ExamQuestionPayload {
   id: string;
@@ -10,6 +12,7 @@ export interface ExamQuestionPayload {
   type: ExamQuestionType;
   options: string[];
   correctIndices: number[];
+  metadata?: QuestionMetadata | null;
   explanation?: string | null;
   points: number;
   difficulty: ExamDifficulty;
@@ -17,6 +20,9 @@ export interface ExamQuestionPayload {
 
 export interface ExamConfigRequest {
   name: string;
+  scopeStartChapterId: string;
+  placementChapterId: string;
+  examType: ExamType;
   description?: string | null;
   durationMinutes: number;
   passScorePercent: number;
@@ -24,6 +30,9 @@ export interface ExamConfigRequest {
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
   showAnswerAfterSubmit: boolean;
+  requireFullscreen: boolean;
+  blockCopyPaste: boolean;
+  confirmUnderTenQuestions?: boolean;
   questions: ExamQuestionPayload[];
 }
 
@@ -31,6 +40,8 @@ export interface ExamConfigResponse extends ExamConfigRequest {
   id: string;
   courseId: string;
   slotIndex: number;
+  scopeStartChapterTitle?: string | null;
+  placementChapterTitle?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -47,78 +58,92 @@ export interface ExamQuestionRandomRequest {
   mediumCount: number;
   hardCount: number;
   pointsPerQuestion: number;
+  objectivePoints?: number;
+  essayPoints?: number;
   chapterConfigs?: Array<{
     chapterId: string;
     totalCount: number;
+    objectiveCount?: number;
+    essayCount?: number;
+    multipleChoiceCount?: number;
+    trueFalseCount?: number;
+    fillInBlankCount?: number;
   }>;
 }
 
-export interface StudentExamRequiredChapter {
-  chapterId: string;
-  title: string;
-  hasQuiz: boolean;
-  quizPassed: boolean;
+export interface ExamAiDraftRequest {
+  chapterId?: string;
+  prompt: string;
+  material?: string;
+  questionCount: number;
+  questionType: 'multiple_choice' | 'true_false' | 'fill_in_blank' | 'essay';
+  difficulty: ExamDifficulty;
 }
 
-export interface StudentExamSummaryResponse {
-  examId: string | null;
-  slotIndex: number;
-  name: string;
-  description: string | null;
-  durationMinutes: number | null;
-  passScorePercent: number | null;
-  maxAttempts: number | null;
-  configured: boolean;
-  unlocked: boolean;
-  passed: boolean;
-  latestScorePercent: number | null;
-  attemptsUsed: number;
-  requiredQuizCount: number;
-  passedQuizCount: number;
-  lockedReason: string | null;
-  requiredChapters: StudentExamRequiredChapter[];
+export interface ExamAiDraftQuestion {
+  status: 'draft' | 'approved' | 'rejected';
+  text: string;
+  type: ExamQuestionType;
+  options: string[];
+  correctIndices: number[];
+  metadata?: QuestionMetadata | null;
+  explanation?: string | null;
+  difficulty: ExamDifficulty;
+  sourceRefs: string[];
+  rejectionReason?: string | null;
 }
 
-export interface StudentExamQuestion {
+export interface ExamAiDraftResponse {
+  promptId: string;
+  questions: ExamAiDraftQuestion[];
+  createdAt: string;
+}
+
+export interface ExamAiReviewRequest {
+  promptId: string;
+  action: 'APPROVED_AI_QUESTION' | 'REJECTED_AI_QUESTION';
+  questionText: string;
+  sourceRefs?: string[];
+}
+
+export interface TeacherExamQuestionReview {
   id: string;
   text: string;
   type: ExamQuestionType;
   options: string[];
-  points: number;
-}
-
-export interface StudentExamStartResponse {
-  attemptId: string;
-  examId: string;
-  slotIndex: number;
-  name: string;
-  description: string | null;
-  durationMinutes: number;
-  totalQuestions: number;
-  attemptNumber: number;
-  questions: StudentExamQuestion[];
-}
-
-export interface StudentExamResultDetail {
-  questionId: string;
-  text: string;
+  metadata?: QuestionMetadata | null;
   studentAnswers: number[];
+  textAnswer: string | null;
+  imageUrls: string[];
+  answerData?: Record<string, unknown> | null;
   correctAnswers: number[];
-  isCorrect: boolean;
-  explanation: string | null;
+  correct: boolean | null;
   points: number;
+  earnedPoints: number;
+  explanation: string | null;
 }
 
-export interface StudentExamResultResponse {
-  attemptId: string;
+export interface TeacherExamAttemptResponse {
+  id: string;
+  studentId: string;
+  studentName: string | null;
+  courseId: string;
+  courseTitle: string;
   examId: string;
+  examName: string;
   slotIndex: number;
-  scorePercent: number;
-  passed: boolean;
-  earnedPoints: number;
-  totalPoints: number;
   attemptNumber: number;
-  details: StudentExamResultDetail[];
+  startedAt: string;
+  submittedAt: string;
+  autoScorePercent: number | null;
+  manualScorePercent: number | null;
+  effectiveScorePercent: number | null;
+  passScorePercent: number;
+  passed: boolean | null;
+  feedback: string | null;
+  gradedAt: string | null;
+  status: 'pending' | 'graded';
+  questions: TeacherExamQuestionReview[];
 }
 
 export async function listCourseExams(courseId: string): Promise<ExamConfigResponse[]> {
@@ -156,6 +181,27 @@ export async function randomizeCourseExamQuestions(
   return unwrap(res.data);
 }
 
+export async function generateCourseExamAiDraft(
+    courseId: string,
+    req: ExamAiDraftRequest,
+): Promise<ExamAiDraftResponse> {
+  const res = await apiClient.post<ApiResponse<ExamAiDraftResponse>>(
+    `/api/teacher/courses/${courseId}/exams/ai-draft`,
+    req,
+  );
+  return unwrap(res.data);
+}
+
+export async function recordCourseExamAiReview(
+    courseId: string,
+    req: ExamAiReviewRequest,
+): Promise<void> {
+  await apiClient.post<ApiResponse<void>>(
+    `/api/teacher/courses/${courseId}/exams/ai-review`,
+    req,
+  );
+}
+
 export async function saveCourseExam(
     courseId: string,
     slotIndex: number,
@@ -172,30 +218,61 @@ export async function deleteCourseExam(courseId: string, slotIndex: number): Pro
   await apiClient.delete(`/api/teacher/courses/${courseId}/exams/${slotIndex}`);
 }
 
-export async function listStudentCourseExams(courseId: string): Promise<StudentExamSummaryResponse[]> {
-  const res = await apiClient.get<ApiResponse<StudentExamSummaryResponse[]>>(
-    `/api/student/courses/${courseId}/exams`,
+export async function listTeacherExamAttempts(): Promise<TeacherExamAttemptResponse[]> {
+  const res = await apiClient.get<ApiResponse<TeacherExamAttemptResponse[]>>(
+    '/api/teacher/exam-attempts',
   );
   return unwrap(res.data);
 }
 
-export async function startStudentExam(
-    courseId: string,
-    slotIndex: number,
-): Promise<StudentExamStartResponse> {
-  const res = await apiClient.post<ApiResponse<StudentExamStartResponse>>(
-    `/api/student/courses/${courseId}/exams/${slotIndex}/start`,
+export async function gradeTeacherExamAttempt(
+  attemptId: string,
+  scorePercent: number,
+  feedback: string,
+): Promise<TeacherExamAttemptResponse> {
+  const res = await apiClient.put<ApiResponse<TeacherExamAttemptResponse>>(
+    `/api/teacher/exam-attempts/${attemptId}/grade`,
+    { scorePercent, feedback },
   );
   return unwrap(res.data);
 }
 
-export async function submitStudentExam(
-    attemptId: string,
-    answers: Record<string, number[]>,
-): Promise<StudentExamResultResponse> {
-  const res = await apiClient.post<ApiResponse<StudentExamResultResponse>>(
-    `/api/student/exam-attempts/${attemptId}/submit`,
-    { answers },
+export interface TeacherRetakeRequest {
+  id: string;
+  examConfigId: string;
+  courseId: string;
+  courseTitle: string;
+  slotIndex: number;
+  examName: string;
+  studentId: string;
+  studentName: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  requestedReason: string;
+  extraAttempts: number | null;
+  decidedReason: string | null;
+  retakeExpireAt: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+  attemptsUsed: number;
+  maxAttempts: number;
+}
+
+export async function listRetakeRequests(): Promise<TeacherRetakeRequest[]> {
+  const res = await apiClient.get<ApiResponse<TeacherRetakeRequest[]>>(
+    '/api/teacher/retake-requests',
+  );
+  return unwrap(res.data) ?? [];
+}
+
+export async function decideRetakeRequest(
+  requestId: string,
+  approve: boolean,
+  reason: string,
+  extraAttempts?: number,
+): Promise<TeacherRetakeRequest> {
+  const res = await apiClient.patch<ApiResponse<TeacherRetakeRequest>>(
+    `/api/teacher/retake-requests/${requestId}/decide`,
+    { approve, reason, extraAttempts },
   );
   return unwrap(res.data);
 }

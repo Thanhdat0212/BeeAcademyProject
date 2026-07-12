@@ -1,49 +1,97 @@
 package com.beeacademy.backend.controller;
 
-import com.beeacademy.backend.dto.request.SubmitExamRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
-import com.beeacademy.backend.dto.response.StudentExamResultResponse;
-import com.beeacademy.backend.dto.response.StudentExamStartResponse;
-import com.beeacademy.backend.dto.response.StudentExamSummaryResponse;
+import com.beeacademy.backend.dto.response.ExamRetakeRequestResponse;
+import com.beeacademy.backend.dto.response.StudentExamResponse;
+import com.beeacademy.backend.dto.request.ExamRetakeRequestCreate;
+import com.beeacademy.backend.dto.request.SaveExamDraftRequest;
+import com.beeacademy.backend.dto.request.SubmitExamRequest;
+import com.beeacademy.backend.dto.response.StudentExamSubmissionResponse;
+import com.beeacademy.backend.dto.response.UploadResponse;
 import com.beeacademy.backend.security.CurrentUser;
+import com.beeacademy.backend.service.ExamRetakeService;
 import com.beeacademy.backend.service.ExamService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
 
 @RestController
+@RequestMapping("/api/student/courses/{courseId}/exams")
 @RequiredArgsConstructor
-@PreAuthorize("isAuthenticated()")
+@PreAuthorize("hasRole('student')")
 public class StudentExamController {
 
     private final ExamService examService;
+    private final ExamRetakeService examRetakeService;
 
-    @GetMapping("/api/student/courses/{courseId}/exams")
-    public ApiResponse<List<StudentExamSummaryResponse>> listExams(@PathVariable UUID courseId) {
+    @GetMapping
+    public ApiResponse<List<StudentExamResponse>> listCourseExams(@PathVariable UUID courseId) {
         return ApiResponse.ok(examService.listStudentExams(courseId, CurrentUser.required()));
     }
 
-    @PostMapping("/api/student/courses/{courseId}/exams/{slotIndex}/start")
-    public ApiResponse<StudentExamStartResponse> startExam(@PathVariable UUID courseId,
-                                                           @PathVariable Integer slotIndex) {
-        return ApiResponse.ok(
-                examService.startStudentExam(courseId, slotIndex, CurrentUser.required()),
-                "Started exam");
+    @GetMapping("/{slotIndex}")
+    public ApiResponse<StudentExamResponse> getCourseExam(
+            @PathVariable UUID courseId,
+            @PathVariable Integer slotIndex) {
+        return ApiResponse.ok(examService.getStudentExam(courseId, slotIndex, CurrentUser.required()));
     }
 
-    @PostMapping("/api/student/exam-attempts/{attemptId}/submit")
-    public ApiResponse<StudentExamResultResponse> submitExam(@PathVariable UUID attemptId,
-                                                             @Valid @RequestBody SubmitExamRequest req) {
+    @PostMapping(value = "/answer-images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<UploadResponse> uploadAnswerImage(
+            @PathVariable UUID courseId,
+            @RequestPart("file") MultipartFile file) {
         return ApiResponse.ok(
-                examService.submitStudentExam(attemptId, CurrentUser.required(), req),
-                "Submitted exam");
+                examService.uploadStudentExamAnswerImage(courseId, CurrentUser.required(), file),
+                "Tai anh dap an thanh cong");
+    }
+
+    @PostMapping("/{slotIndex}/submit")
+    public ApiResponse<StudentExamSubmissionResponse> submitCourseExam(
+            @PathVariable UUID courseId,
+            @PathVariable Integer slotIndex,
+            @Valid @RequestBody SubmitExamRequest request) {
+        return ApiResponse.ok(
+                examService.submitStudentExam(courseId, slotIndex, CurrentUser.required(), request),
+                "Nop bai kiem tra thanh cong");
+    }
+
+    @PostMapping("/{slotIndex}/draft")
+    public ApiResponse<Void> saveCourseExamDraft(
+            @PathVariable UUID courseId,
+            @PathVariable Integer slotIndex,
+            @Valid @RequestBody SaveExamDraftRequest request) {
+        examService.saveStudentExamDraft(courseId, slotIndex, CurrentUser.required(), request);
+        return ApiResponse.ok(null, "Da luu nhap bai kiem tra");
+    }
+
+    @PostMapping("/{slotIndex}/retake-requests")
+    public ApiResponse<ExamRetakeRequestResponse> requestRetake(
+            @PathVariable UUID courseId,
+            @PathVariable Integer slotIndex,
+            @Valid @RequestBody ExamRetakeRequestCreate request) {
+        return ApiResponse.ok(
+                examRetakeService.requestRetake(courseId, slotIndex, CurrentUser.required(), request),
+                "Da gui yeu cau mo them luot lam bai");
+    }
+
+    @GetMapping("/{slotIndex}/retake-requests/latest")
+    public ApiResponse<ExamRetakeRequestResponse> latestRetakeRequest(
+            @PathVariable UUID courseId,
+            @PathVariable Integer slotIndex) {
+        return ApiResponse.ok(
+                examRetakeService.getLatestRequest(courseId, slotIndex, CurrentUser.required())
+                        .orElse(null));
     }
 }

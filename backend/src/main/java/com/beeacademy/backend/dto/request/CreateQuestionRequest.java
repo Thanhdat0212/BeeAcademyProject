@@ -1,5 +1,6 @@
 package com.beeacademy.backend.dto.request;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -9,18 +10,20 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.UUID;
 
-/** Tạo câu hỏi mới vào ngân hàng câu hỏi. */
+/** Tao cau hoi moi vao ngan hang cau hoi. */
 public record CreateQuestionRequest(
 
-        @NotNull(message = "Vui lòng chọn môn học")
+        @NotNull(message = "Vui long chon mon hoc")
         UUID categoryId,
 
-        @NotNull(message = "Vui lòng chọn lớp")
+        @NotNull(message = "Vui long chon lop")
         Integer grade,
 
-        UUID chapterId,   // null = câu hỏi cấp môn học
+        UUID questionBankId,
 
-        @NotBlank(message = "Nội dung câu hỏi không được trống")
+        UUID chapterId,
+
+        @NotBlank(message = "Noi dung cau hoi khong duoc trong")
         @Size(max = 5000)
         String content,
 
@@ -28,19 +31,21 @@ public record CreateQuestionRequest(
         String explanation,
 
         @NotNull
-        @Pattern(regexp = "easy|medium|hard", message = "Độ khó phải là: easy, medium, hard")
+        @Pattern(regexp = "easy|medium|hard", message = "Do kho phai la: easy, medium, hard")
         String difficulty,
 
         @NotNull
-        @Pattern(regexp = "multiple_choice|true_false", message = "Loại phải là: multiple_choice, true_false")
+        @Pattern(
+                regexp = "multiple_choice|true_false|fill_in_blank|matching|essay|essay_short|essay_long|image_question|formula_question|audio_question|file_upload",
+                message = "Loai cau hoi khong hop le")
         String type,
 
-        @NotNull
-        @Size(min = 2, max = 4, message = "Câu hỏi phải có 2-4 đáp án")
+        @Size(max = 6, message = "Cau hoi trac nghiem co toi da 6 dap an")
         @Valid
-        List<ChoiceRequest> choices
+        List<ChoiceRequest> choices,
+
+        JsonNode metadata
 ) {
-    /** Một đáp án lựa chọn. */
     public record ChoiceRequest(
             @NotBlank String content,
             boolean isCorrect

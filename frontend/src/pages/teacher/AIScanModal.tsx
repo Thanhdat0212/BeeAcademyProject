@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { notify } from '../../lib/toast';
 import * as questionService from '../../api/questionService';
 import type { CreateQuestionRequest } from '../../api/questionService';
+import type { QuestionBankResponse } from '../../api/questionBankService';
 import { isApiError, apiClient, unwrap } from '../../api/client';
 import { listCategories } from '../../api/courseService';
 import { listMyCourses, getCourseDetail } from '../../api/teacherCourseService';
@@ -81,20 +82,15 @@ function parseGeminiResponse(raw: string): ParsedQuestion[] {
         choices = choices.slice(0, 4);
       }
 
-      // Đảm bảo đúng 1 đáp án đúng
+      // Đảm bảo có ít nhất 1 đáp án đúng
       let correctCount = choices.filter(c => c.isCorrect).length;
       if (correctCount === 0 && choices.length > 0) choices[0].isCorrect = true;
-      if (correctCount > 1) {
-        // Giữ lại đáp án đúng đầu tiên
-        let found = false;
-        choices.forEach(c => { if (c.isCorrect && found) c.isCorrect = false; else if (c.isCorrect) found = true; });
-      }
       correctCount = choices.filter(c => c.isCorrect).length;
 
       if (!item.content?.trim())        error = 'Thiếu nội dung câu hỏi';
       else if (choices.length < 2)      error = 'Cần ít nhất 2 đáp án';
       else if (choices.some(c => !c.content)) error = 'Đáp án trống';
-      else if (correctCount !== 1)      error = 'Cần đúng 1 đáp án đúng';
+      else if (correctCount < 1)        error = 'Cần ít nhất 1 đáp án đúng';
 
       const difficulty: Difficulty =
         item.difficulty === 'easy' ? 'easy' : item.difficulty === 'hard' ? 'hard' : 'medium';
@@ -139,11 +135,17 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onImported: () => void;
+  selectedQuestionBank?: QuestionBankResponse | null;
 }
 
 type Step = 'setup' | 'scanning' | 'preview' | 'done';
 
-export default function AIScanModal({ open, onClose, onImported }: Props) {
+export default function AIScanModal({
+  open,
+  onClose,
+  onImported,
+  selectedQuestionBank = null,
+}: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Context
@@ -174,6 +176,12 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
       .catch(() => {})
       .finally(() => setLoadingMeta(false));
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !selectedQuestionBank) return;
+    setCategoryId(selectedQuestionBank.categoryId);
+    setGrade(String(selectedQuestionBank.grade));
+  }, [open, selectedQuestionBank]);
 
   // Load chapters + lock category khi chọn course
   useEffect(() => {
@@ -260,6 +268,7 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
     const requests: CreateQuestionRequest[] = validQ.map(q => ({
       categoryId,
       grade: Number(grade),
+      questionBankId: selectedQuestionBank?.id || undefined,
       chapterId:   chapterId   || undefined,
       content:     q.content,
       explanation: q.explanation ?? undefined,
@@ -337,8 +346,15 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
                     <p className="text-sm font-bold text-on-surface mb-2">
                       Bước 1 — Gắn nhãn cho câu hỏi sẽ nhập
                     </p>
+                    {selectedQuestionBank && (
+                      <div className="mb-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+                        Đang nhập vào question bank <span className="font-bold">{selectedQuestionBank.title}</span>.
+                        Môn học và lớp sẽ được khóa theo bank này.
+                      </div>
+                    )}
                     {(() => {
-                      const isCategoryLocked = Boolean(courseId);
+                      const isCategoryLocked = Boolean(courseId || selectedQuestionBank);
+                      const isGradeLocked = Boolean(courseId || selectedQuestionBank);
                       return (
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                           {/* Khóa học — chọn trước để auto-fill môn */}
@@ -347,7 +363,24 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
                             <div className="relative">
                               <select
                                 value={courseId}
-                                onChange={e => { setCourseId(e.target.value); setChapterId(''); }}
+                                onChange={e => {
+                                  const nextCourseId = e.target.value;
+                                  const selectedCourse = courses.find(course => course.id === nextCourseId);
+                                  if (selectedCourse && selectedQuestionBank) {
+                                    const matchesBank = selectedCourse.categoryId === selectedQuestionBank.categoryId
+                                      && (selectedCourse.grades?.includes(selectedQuestionBank.grade) ?? false);
+                                    if (!matchesBank) {
+                                      notify.error('Khóa học phải cùng môn học và lớp với ngân hàng câu hỏi đang chọn');
+                                      return;
+                                    }
+                                  }
+                                  setCourseId(nextCourseId);
+                                  setChapterId('');
+                                  if (!nextCourseId && selectedQuestionBank) {
+                                    setCategoryId(selectedQuestionBank.categoryId);
+                                    setGrade(String(selectedQuestionBank.grade));
+                                  }
+                                }}
                                 disabled={loadingMeta || step === 'scanning'}
                                 className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary disabled:opacity-50"
                               >
@@ -391,13 +424,16 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
                               <select
                                 value={grade}
                                 onChange={e => setGrade(e.target.value)}
-                                disabled={step === 'scanning'}
+                                disabled={step === 'scanning' || isGradeLocked}
                                 className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary disabled:opacity-50"
                               >
                                 <option value="">-- Chọn lớp --</option>
                                 {[6, 7, 8, 9].map(g => <option key={g} value={g}>Lớp {g}</option>)}
                               </select>
-                              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+                              {isGradeLocked
+                                ? <Lock className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-primary/60" />
+                                : <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+                              }
                             </div>
                           </div>
 
@@ -537,7 +573,10 @@ export default function AIScanModal({ open, onClose, onImported }: Props) {
                                   </td>
                                   <td className="px-3 py-2"><DiffBadge d={q.difficulty} /></td>
                                   <td className="px-3 py-2 text-on-surface">
-                                    {q.choices.find(c => c.isCorrect)?.content.slice(0, 35) ?? '—'}
+                                    {q.choices
+                                      .filter(c => c.isCorrect)
+                                      .map(c => c.content.slice(0, 35))
+                                      .join(', ') || '—'}
                                   </td>
                                   <td className="px-3 py-2">
                                     {q.error ? (

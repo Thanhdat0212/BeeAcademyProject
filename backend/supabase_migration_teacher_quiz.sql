@@ -16,6 +16,8 @@ DO $$ BEGIN
     CREATE TYPE question_type AS ENUM ('multiple_choice', 'true_false');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+ALTER TYPE question_type ADD VALUE IF NOT EXISTS 'essay';
+
 DO $$ BEGIN
     CREATE TYPE question_status AS ENUM ('active', 'inactive');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;

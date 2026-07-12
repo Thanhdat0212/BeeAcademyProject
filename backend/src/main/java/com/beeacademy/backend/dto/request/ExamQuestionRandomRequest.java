@@ -23,6 +23,12 @@ public record ExamQuestionRandomRequest(
         @NotNull @DecimalMin("0.01") @DecimalMax("100")
         Double pointsPerQuestion,
 
+        @DecimalMin("0.01") @DecimalMax("10")
+        Double objectivePoints,
+
+        @DecimalMin("0.01") @DecimalMax("10")
+        Double essayPoints,
+
         List<@Valid ChapterQuestionRandomRequest> chapterConfigs
 ) {
     public record ChapterQuestionRandomRequest(
@@ -31,6 +37,21 @@ public record ExamQuestionRandomRequest(
 
             @NotNull @Min(0) @Max(200)
             Integer totalCount,
+
+            @Min(0) @Max(200)
+            Integer objectiveCount,
+
+            @Min(0) @Max(200)
+            Integer essayCount,
+
+            @Min(0) @Max(200)
+            Integer multipleChoiceCount,
+
+            @Min(0) @Max(200)
+            Integer trueFalseCount,
+
+            @Min(0) @Max(200)
+            Integer fillInBlankCount,
 
             @Min(0) @Max(200)
             Integer easyCount,

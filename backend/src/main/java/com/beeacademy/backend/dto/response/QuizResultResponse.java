@@ -19,8 +19,10 @@ public record QuizResultResponse(
     public record QuestionResult(
             UUID questionId,
             String content,
-            UUID studentAnswer,      // choiceId học sinh chọn (null = bỏ trống)
-            UUID correctAnswer,      // choiceId đúng
+            List<UUID> studentAnswers,
+            String studentAnswerText,
+            List<UUID> correctAnswers,
+            String correctAnswerText,
             Boolean isCorrect,
             String explanation
     ) {}

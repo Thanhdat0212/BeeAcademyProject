@@ -3,13 +3,53 @@
  * Gọi các endpoint /api/teacher/questions của backend.
  */
 import { apiClient, unwrap } from './client';
-import type { ApiResponse, PageResponse } from '../types/api';
+import type { ApiResponse, PageResponse, UploadResponse } from '../types/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
-export type QuestionType = 'multiple_choice' | 'true_false';
+export type QuestionType =
+  | 'multiple_choice'
+  | 'true_false'
+  | 'fill_in_blank'
+  | 'matching'
+  | 'essay'
+  | 'essay_short'
+  | 'essay_long'
+  | 'image_question'
+  | 'formula_question'
+  | 'audio_question'
+  | 'file_upload';
 export type QuestionStatus = 'active' | 'inactive';
+
+export interface MatchingPair {
+  left: string;
+  right: string;
+}
+
+export interface QuestionMetadata {
+  acceptedAnswers?: string[];
+  matchingPairs?: MatchingPair[];
+  sampleAnswer?: string;
+  wordLimit?: number | null;
+  gradingRubric?: string;
+  promptAssetUrl?: string;
+  transcript?: string;
+  formulaLatex?: string;
+  allowedUploadTypes?: string[];
+  maxFiles?: number | null;
+  readingSetId?: string;
+  sharedPromptTitle?: string;
+  sharedPrompt?: string;
+  questionOrderInSet?: number | null;
+  aiPromptId?: string;
+  aiStatus?: 'draft' | 'approved' | 'rejected';
+  sourceRefs?: string[];
+  rejectionReason?: string;
+  optionIndexMap?: number[];
+  sourceType?: 'direct_exam' | 'question_bank' | 'ai';
+  createdInExam?: boolean;
+}
 
 export interface ChoiceResponse {
   id: string;
@@ -22,10 +62,13 @@ export interface QuestionResponse {
   id: string;
   content: string;
   explanation: string | null;
+  metadata: QuestionMetadata | null;
   difficulty: Difficulty;
   type: QuestionType;
   status: QuestionStatus;
   usageCount: number;
+  questionBankId: string | null;
+  questionBankTitle: string | null;
   categoryId: string | null;
   categoryName: string | null;
   grade: number | null;
@@ -40,17 +83,32 @@ export interface QuestionStatsResponse {
   mediumCount: number;
   hardCount: number;
   totalActive: number;
+  multipleChoiceCount?: number;
+  trueFalseCount?: number;
+  fillInBlankCount?: number;
+  essayCount?: number;
+  totalExamSupported?: number;
+}
+
+export interface ExamSupportedQuestionStats {
+  totalActive: number;
+  multipleChoiceCount: number;
+  trueFalseCount: number;
+  fillInBlankCount: number;
+  essayCount: number;
 }
 
 export interface CreateQuestionRequest {
   categoryId: string;
   grade: number;
+  questionBankId?: string;
   chapterId?: string;
   content: string;
   explanation?: string;
   difficulty: Difficulty;
   type: QuestionType;
   choices: Array<{ content: string; isCorrect: boolean }>;
+  metadata?: QuestionMetadata | null;
 }
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
@@ -64,6 +122,7 @@ export async function createQuestion(req: CreateQuestionRequest): Promise<Questi
 export interface ListQuestionsParams {
   categoryId?: string;
   grade?: number;
+  questionBankId?: string;
   chapterId?: string;
   difficulty?: Difficulty;
   status?: QuestionStatus;
@@ -103,6 +162,59 @@ export async function getQuestionStats(chapterId: string): Promise<QuestionStats
   return unwrap(res.data);
 }
 
+export async function getExamSupportedQuestionStats(
+  chapterId: string,
+): Promise<ExamSupportedQuestionStats> {
+  const items: QuestionResponse[] = [];
+  let page = 0;
+
+  while (true) {
+    const response = await listQuestions({
+      chapterId,
+      status: 'active',
+      page,
+      size: 200,
+    });
+    items.push(...response.items);
+    if (!response.hasNext) break;
+    page += 1;
+  }
+
+  let multipleChoiceCount = 0;
+  let trueFalseCount = 0;
+  let fillInBlankCount = 0;
+  let essayCount = 0;
+
+  items.forEach(question => {
+    switch (question.type) {
+      case 'multiple_choice':
+        multipleChoiceCount += 1;
+        break;
+      case 'true_false':
+        trueFalseCount += 1;
+        break;
+      case 'fill_in_blank':
+        fillInBlankCount += 1;
+        break;
+      case 'essay':
+      case 'essay_short':
+      case 'essay_long':
+        essayCount += 1;
+        break;
+      default:
+        break;
+    }
+  });
+
+  return {
+    totalActive: multipleChoiceCount + trueFalseCount + fillInBlankCount + essayCount,
+    multipleChoiceCount,
+    trueFalseCount,
+    fillInBlankCount,
+    essayCount,
+  };
+}
+
 export async function countActiveQuestionsByChapter(chapterId: string): Promise<number> {
   const page = await listQuestions({
     chapterId,
@@ -126,6 +238,28 @@ export async function bulkCreateQuestions(
     '/api/teacher/questions/bulk',
     requests,
     { timeout: 120000 },
+  );
+  return unwrap(res.data);
+}
+
+export async function uploadQuestionImage(file: File): Promise<UploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiClient.post<ApiResponse<UploadResponse>>(
+    '/api/upload/question-image',
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 },
+  );
+  return unwrap(res.data);
+}
+
+export async function uploadQuestionAudio(file: File): Promise<UploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiClient.post<ApiResponse<UploadResponse>>(
+    '/api/upload/question-audio',
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 },
   );
   return unwrap(res.data);
 }

@@ -47,6 +47,15 @@ public class ExamAttempt {
     @Column(name = "score_percent", precision = 5, scale = 1)
     private BigDecimal scorePercent;
 
+    @Column(name = "manual_score_percent", precision = 5, scale = 1)
+    private BigDecimal manualScorePercent;
+
+    @Column(name = "teacher_feedback")
+    private String teacherFeedback;
+
+    @Column(name = "graded_at")
+    private Instant gradedAt;
+
     @Column(name = "passed")
     private Boolean passed;
 
@@ -71,11 +80,32 @@ public class ExamAttempt {
         return attempt;
     }
 
-    public void submit(String answersJson, double scorePercent, boolean passed) {
+    public void submit(String answersJson, double scorePercent, Boolean passed) {
         this.answers = answersJson;
         this.scorePercent = BigDecimal.valueOf(scorePercent)
                 .setScale(1, java.math.RoundingMode.HALF_UP);
         this.passed = passed;
         this.submittedAt = Instant.now();
+    }
+
+    public void saveDraft(String answersJson) {
+        if (this.submittedAt != null) {
+            return;
+        }
+        this.answers = answersJson;
+    }
+
+    public void grade(double scorePercent, String feedback) {
+        this.manualScorePercent = BigDecimal.valueOf(scorePercent)
+                .setScale(1, java.math.RoundingMode.HALF_UP);
+        this.teacherFeedback = feedback == null || feedback.isBlank()
+                ? null
+                : feedback.trim();
+        this.passed = scorePercent >= examConfig.getPassScorePercent();
+        this.gradedAt = Instant.now();
+    }
+
+    public BigDecimal getEffectiveScorePercent() {
+        return manualScorePercent != null ? manualScorePercent : scorePercent;
     }
 }

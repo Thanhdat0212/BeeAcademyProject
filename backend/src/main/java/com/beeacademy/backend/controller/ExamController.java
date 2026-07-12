@@ -1,8 +1,11 @@
 package com.beeacademy.backend.controller;
 
+import com.beeacademy.backend.dto.request.ExamAiDraftRequest;
+import com.beeacademy.backend.dto.request.ExamAiReviewRequest;
 import com.beeacademy.backend.dto.request.ExamConfigRequest;
 import com.beeacademy.backend.dto.request.ExamQuestionRandomRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
+import com.beeacademy.backend.dto.response.ExamAiDraftResponse;
 import com.beeacademy.backend.dto.response.ExamConfigResponse;
 import com.beeacademy.backend.dto.response.QuestionStatsResponse;
 import com.beeacademy.backend.security.CurrentUser;
@@ -47,6 +50,23 @@ public class ExamController {
         return ApiResponse.ok(
                 examService.randomQuestions(courseId, CurrentUser.required(), req),
                 "Random questions");
+    }
+
+    @PostMapping("/ai-draft")
+    public ApiResponse<ExamAiDraftResponse> generateAiDraft(
+            @PathVariable UUID courseId,
+            @Valid @RequestBody ExamAiDraftRequest req) {
+        return ApiResponse.ok(
+                examService.generateAiDraft(courseId, CurrentUser.required(), req),
+                "Generated AI draft questions");
+    }
+
+    @PostMapping("/ai-review")
+    public ApiResponse<Void> recordAiReview(
+            @PathVariable UUID courseId,
+            @Valid @RequestBody ExamAiReviewRequest req) {
+        examService.recordAiReview(courseId, CurrentUser.required(), req);
+        return ApiResponse.ok(null, "Recorded AI review action");
     }
 
     @GetMapping("/{slotIndex}")

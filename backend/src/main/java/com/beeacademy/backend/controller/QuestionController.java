@@ -57,13 +57,14 @@ public class QuestionController {
     public ApiResponse<PageResponse<QuestionResponse>> listQuestions(
             @RequestParam(required = false) UUID categoryId,
             @RequestParam(required = false) Integer grade,
+            @RequestParam(required = false) UUID questionBankId,
             @RequestParam(required = false) UUID chapterId,
             @RequestParam(required = false) String difficulty,
             @RequestParam(required = false) String status,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
             Pageable pageable) {
         return ApiResponse.ok(questionService.listQuestions(
-                CurrentUser.required(), categoryId, grade, chapterId, difficulty, status, pageable));
+                CurrentUser.required(), categoryId, grade, questionBankId, chapterId, difficulty, status, pageable));
     }
 
     /** Chi tiết một câu hỏi. */

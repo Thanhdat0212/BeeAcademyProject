@@ -56,6 +56,10 @@ public class Question {
     @JoinColumn(name = "teacher_id", nullable = false)
     private Profile teacher;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "question_bank_id")
+    private QuestionBank questionBank;
+
     /** Môn học — bắt buộc. */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
@@ -80,6 +84,9 @@ public class Question {
     /** Giải thích đáp án — hiển thị cho học sinh sau khi nộp bài. */
     @Column(name = "explanation")
     private String explanation;
+
+    @Column(name = "metadata_json")
+    private String metadataJson;
 
     /**
      * Độ khó: easy | medium | hard — ánh xạ Postgres enum question_difficulty.
@@ -136,17 +143,20 @@ public class Question {
     // Factory + business methods
     // ========================================================================
 
-    public static Question create(Profile teacher, Category category, Integer grade, Chapter chapter,
-                                   String content, String explanation,
+    public static Question create(Profile teacher, QuestionBank questionBank,
+                                  Category category, Integer grade, Chapter chapter,
+                                   String content, String explanation, String metadataJson,
                                    String difficulty, String type) {
         Question q     = new Question();
         q.id           = UUID.randomUUID();
         q.teacher      = teacher;
+        q.questionBank = questionBank;
         q.category     = category;
         q.grade        = grade;
         q.chapter      = chapter;
         q.content      = content;
         q.explanation  = explanation;
+        q.metadataJson = metadataJson;
         q.difficulty   = difficulty;   // "easy" | "medium" | "hard"
         q.type         = type;         // "multiple_choice" | "true_false"
         q.status       = "active";
@@ -154,14 +164,18 @@ public class Question {
         return q;
     }
 
-    public void update(Category category, Integer grade, Chapter chapter,
-                       String content, String explanation, String difficulty) {
+    public void update(QuestionBank questionBank, Category category, Integer grade, Chapter chapter,
+                       String content, String explanation, String metadataJson,
+                       String difficulty, String type) {
+        this.questionBank = questionBank;
         if (category != null) this.category = category;
         if (grade != null) this.grade = grade;
         this.chapter = chapter;
         if (content != null && !content.isBlank()) this.content = content;
         if (explanation != null) this.explanation = explanation;
+        this.metadataJson = metadataJson;
         if (difficulty != null) this.difficulty = difficulty;
+        if (type != null) this.type = type;
     }
 
     /** Soft-delete: chỉ đặt status = inactive, không xóa khỏi DB. */

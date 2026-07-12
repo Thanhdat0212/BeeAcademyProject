@@ -120,7 +120,8 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
      */
     @Query("SELECT q FROM Question q WHERE q.category.id = :categoryId " +
            "AND q.grade IN :grades " +
-           "AND q.difficulty = :difficulty AND q.status = 'active'")
+           "AND q.difficulty = :difficulty AND q.status = 'active' " +
+           "AND q.type IN ('multiple_choice', 'true_false')")
     List<Question> findActiveByCategoryAndGradesAndDifficulty(
             @Param("categoryId") UUID categoryId,
             @Param("grades") List<Integer> grades,
@@ -129,7 +130,8 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
     @Query("SELECT DISTINCT q FROM Question q LEFT JOIN FETCH q.choices " +
            "WHERE q.teacher.id = :teacherId AND q.category.id = :categoryId " +
            "AND q.grade IN :grades " +
-           "AND q.difficulty = :difficulty AND q.status = 'active'")
+           "AND q.difficulty = :difficulty AND q.status = 'active' " +
+           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'essay', 'essay_short', 'essay_long')")
     List<Question> findActiveByTeacherAndCategoryAndGradesAndDifficulty(
             @Param("teacherId") UUID teacherId,
             @Param("categoryId") UUID categoryId,
@@ -138,7 +140,8 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
 
     @Query("SELECT DISTINCT q FROM Question q LEFT JOIN FETCH q.choices " +
            "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
-           "AND q.difficulty = :difficulty AND q.status = 'active'")
+           "AND q.difficulty = :difficulty AND q.status = 'active' " +
+           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'essay', 'essay_short', 'essay_long')")
     List<Question> findActiveByTeacherAndChapterAndDifficulty(
             @Param("teacherId") UUID teacherId,
             @Param("chapterId") UUID chapterId,
@@ -146,10 +149,19 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
 
     @Query("SELECT DISTINCT q FROM Question q LEFT JOIN FETCH q.choices " +
            "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
-           "AND q.status = 'active'")
+           "AND q.status = 'active' " +
+           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'essay', 'essay_short', 'essay_long')")
     List<Question> findActiveByTeacherAndChapter(
             @Param("teacherId") UUID teacherId,
             @Param("chapterId") UUID chapterId);
+
+    @Query("SELECT DISTINCT q FROM Question q LEFT JOIN FETCH q.choices " +
+           "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
+           "AND q.type IN :types AND q.status = 'active'")
+    List<Question> findActiveByTeacherAndChapterAndTypes(
+            @Param("teacherId") UUID teacherId,
+            @Param("chapterId") UUID chapterId,
+            @Param("types") List<String> types);
 
     // ─── Stats ───────────────────────────────────────────────────────────────
 
@@ -177,6 +189,15 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
            "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
            "AND q.status = 'active' GROUP BY q.difficulty")
     List<Object[]> countActiveByDifficultyForTeacherAndChapter(
+            @Param("teacherId") UUID teacherId,
+            @Param("chapterId") UUID chapterId);
+
+    @Query("SELECT q.type, COUNT(q) FROM Question q " +
+           "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
+           "AND q.status = 'active' " +
+           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'essay', 'essay_short', 'essay_long') " +
+           "GROUP BY q.type")
+    List<Object[]> countActiveByTypeForTeacherAndChapter(
             @Param("teacherId") UUID teacherId,
             @Param("chapterId") UUID chapterId);
 

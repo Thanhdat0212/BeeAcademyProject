@@ -7,10 +7,10 @@ import java.util.UUID;
 
 /**
  * Học sinh nộp bài quiz.
- * answers: {questionId → choiceId} — null value = câu bỏ trống.
+ * answers: {questionId → [choiceId]}.
  */
 public record SubmitQuizRequest(
 
         @NotNull(message = "Thiếu danh sách câu trả lời")
-        Map<UUID, UUID> answers   // nullable value cho phép bỏ trống câu
+        Map<UUID, java.util.List<UUID>> answers
 ) {}
