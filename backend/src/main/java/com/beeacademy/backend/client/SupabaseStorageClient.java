@@ -3,12 +3,16 @@ package com.beeacademy.backend.client;
 import com.beeacademy.backend.config.SupabaseProperties;
 import com.beeacademy.backend.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Client gọi Supabase Storage REST API để upload/xoá file binary.
@@ -66,6 +70,38 @@ public class SupabaseStorageClient {
      * @return public URL có thể truy cập trực tiếp từ trình duyệt
      */
     public String upload(String bucket, String objectPath, String contentType, byte[] bytes) {
+        return uploadBody(bucket, objectPath, contentType, bytes, bytes.length);
+    }
+
+    public String upload(String bucket, String objectPath, String contentType,
+                         Resource resource, long contentLength) {
+        return uploadBody(bucket, objectPath, contentType, resource, contentLength);
+    }
+
+    /** Đọc binary object để backend watermark PDF trước khi cấp quyền tải. */
+    public byte[] download(String bucket, String objectPath) {
+        String uri = STORAGE_OBJECT_PATH + "/" + bucket + "/" + objectPath;
+        try {
+            byte[] body = restClient.get()
+                    .uri(uri)
+                    .header("apikey", serviceRoleKey)
+                    .header("Authorization", "Bearer " + serviceRoleKey)
+                    .retrieve()
+                    .body(byte[].class);
+            if (body == null) {
+                throw new BusinessException("DOCUMENT_UNAVAILABLE", "Tệp tạm thời không khả dụng.");
+            }
+            return body;
+        } catch (HttpClientErrorException ex) {
+            throw mapClientError(ex, "download " + objectPath);
+        } catch (RestClientException ex) {
+            throw new BusinessException("DOCUMENT_UNAVAILABLE",
+                    "Tệp tạm thời không khả dụng.", HttpStatus.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    private String uploadBody(String bucket, String objectPath, String contentType,
+                              Object body, long contentLength) {
         // Path đầy đủ trong API: /storage/v1/object/{bucket}/{path}
         String uri = STORAGE_OBJECT_PATH + "/" + bucket + "/" + objectPath;
 
@@ -77,12 +113,13 @@ public class SupabaseStorageClient {
                     // Header này yêu cầu Supabase cho phép upsert (ghi đè nếu đã có)
                     .header("x-upsert", "true")
                     .contentType(MediaType.parseMediaType(contentType))
-                    .body(bytes)
+                    .contentLength(contentLength)
+                    .body(body)
                     .retrieve()
                     .toBodilessEntity();
 
             String publicUrl = buildPublicUrl(bucket, objectPath);
-            log.info("Đã upload file lên {} ({} bytes) -> {}", uri, bytes.length, publicUrl);
+            log.info("Đã upload file lên {} ({} bytes) -> {}", uri, contentLength, publicUrl);
             return publicUrl;
 
         } catch (HttpClientErrorException ex) {
@@ -173,6 +210,16 @@ public class SupabaseStorageClient {
             throw new BusinessException("SIGNED_URL_FAILED",
                     "Không thể tạo đường dẫn xem video. Vui lòng thử lại.");
         }
+    }
+
+    /** Signed URL tai file kem Content-Disposition download va ten file theo nghiep vu. */
+    public String generateSignedDownloadUrl(String bucket, String objectPath,
+                                            int expiresInSeconds, String filename) {
+        String signedUrl = generateSignedUrl(bucket, objectPath, expiresInSeconds);
+        if (filename == null || filename.isBlank()) return signedUrl;
+        String separator = signedUrl.contains("?") ? "&" : "?";
+        return signedUrl + separator + "download="
+                + URLEncoder.encode(filename, StandardCharsets.UTF_8);
     }
 
     /** DTO nội bộ để parse response signed URL từ Supabase. */

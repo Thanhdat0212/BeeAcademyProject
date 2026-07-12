@@ -52,7 +52,6 @@ import java.util.concurrent.atomic.AtomicReference;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "Bearer ";
-    // [Đồng bộ team3/develop · search-course] Nới clock skew JWT 10s -> 60s (chống reject token mới do lệch đồng hồ)
     /**
      * Supabase issue token bằng đồng hồ phía server của họ, còn backend local
      * verify theo đồng hồ máy đang chạy Spring Boot. Trong môi trường dev lệch

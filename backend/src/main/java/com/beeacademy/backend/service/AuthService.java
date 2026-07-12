@@ -94,6 +94,9 @@ public class AuthService {
 
         // Bước 2: tạo profile cùng UUID
         Profile profile = Profile.createNew(providerUser.id(), role, request.fullName());
+        if (role == UserRole.TEACHER) {
+            profile.markTeacherPendingApproval();
+        }
         profileRepository.save(profile);
         log.info("Đã tạo profile {} cho user {}", profile.getId(), providerUser.email());
 
@@ -152,6 +155,9 @@ public class AuthService {
 
         // Bước 3: tạo profile trong DB
         Profile profile = Profile.createNew(providerUser.id(), role, entry.fullName());
+        if (role == UserRole.TEACHER) {
+            profile.markTeacherPendingApproval();
+        }
         profileRepository.save(profile);
 
         // Bước 4: OTP đã dùng xong, xóa khỏi store (single-use)

@@ -43,11 +43,14 @@ public class SecurityConfig {
      * @param corsSource  config CORS từ {@link CorsConfig}
      */
     private final JwtAuthenticationFilter jwtFilter;
+    private final MaintenanceModeFilter maintenanceModeFilter;
     private final UrlBasedCorsConfigurationSource corsSource;
 
     public SecurityConfig(JwtAuthenticationFilter jwtFilter,
+                          MaintenanceModeFilter maintenanceModeFilter,
                           UrlBasedCorsConfigurationSource corsSource) {
         this.jwtFilter = jwtFilter;
+        this.maintenanceModeFilter = maintenanceModeFilter;
         this.corsSource = corsSource;
     }
 
@@ -89,8 +92,15 @@ public class SecurityConfig {
                         // ----- Public endpoints -----
                         .requestMatchers("/api/health").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/system/status").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/courses/**").permitAll()
+                        // UC08: Guest mở bài isFree=true vẫn phải ghi nhận lượt học thử.
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/courses/*/lessons/*/preview-views").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/certificates/verify/**").permitAll()
+                        // UC15: token ngẫu nhiên được hash trong DB và chỉ consume một lần.
+                        .requestMatchers(HttpMethod.GET, "/api/document-downloads/*").permitAll()
 
                         // PayOS gọi vào không có JWT — xác thực bằng HMAC signature trong controller
                         .requestMatchers(HttpMethod.POST, "/api/webhooks/payos").permitAll()
@@ -137,7 +147,10 @@ public class SecurityConfig {
                 )
 
                 // Chèn filter verify JWT TRƯỚC filter username/password mặc định
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+
+                // Chặn bảo trì chạy SAU jwtFilter — role (nếu có) đã resolve xong
+                .addFilterAfter(maintenanceModeFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }

@@ -68,4 +68,12 @@ public class TeacherBankAccount {
         this.branch = branch;
         this.verifyStatus = BankVerifyStatus.PENDING;
     }
+
+    public void approveVerification() {
+        this.verifyStatus = BankVerifyStatus.VERIFIED;
+    }
+
+    public void rejectVerification() {
+        this.verifyStatus = BankVerifyStatus.REJECTED;
+    }
 }
