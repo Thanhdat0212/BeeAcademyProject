@@ -10,7 +10,18 @@ export interface QaMessage {
   authorName: string;
   authorRole: QaAuthorRole;
   content: string;
+  attachmentUrl: string | null;
+  attachmentName: string | null;
+  attachmentType: string | null;
+  attachmentSizeBytes: number | null;
   sentAt: string;
+}
+
+export interface QaAttachment {
+  attachmentUrl: string;
+  attachmentName: string;
+  attachmentType: string;
+  attachmentSizeBytes: number;
 }
 
 export interface QaThread {
@@ -31,6 +42,7 @@ export interface CreateQaThreadPayload {
   courseId: string;
   lessonId?: string | null;
   content: string;
+  attachment?: QaAttachment;
 }
 
 export async function listStudentQaThreads(): Promise<QaThread[]> {
@@ -39,14 +51,20 @@ export async function listStudentQaThreads(): Promise<QaThread[]> {
 }
 
 export async function createStudentQaThread(payload: CreateQaThreadPayload): Promise<QaThread> {
-  const res = await apiClient.post<ApiResponse<QaThread>>('/api/student/qa', payload);
+  const res = await apiClient.post<ApiResponse<QaThread>>('/api/student/qa', {
+    courseId: payload.courseId,
+    lessonId: payload.lessonId,
+    content: payload.content,
+    ...payload.attachment,
+  });
   return unwrap(res.data);
 }
 
-export async function addStudentQaMessage(threadId: string, content: string): Promise<QaThread> {
+export async function addStudentQaMessage(threadId: string, content: string,
+                                           attachment?: QaAttachment): Promise<QaThread> {
   const res = await apiClient.post<ApiResponse<QaThread>>(
     `/api/student/qa/${encodeURIComponent(threadId)}/messages`,
-    { content },
+    { content, ...attachment },
   );
   return unwrap(res.data);
 }
@@ -56,12 +74,32 @@ export async function listTeacherQaThreads(): Promise<QaThread[]> {
   return unwrap(res.data);
 }
 
-export async function addTeacherQaMessage(threadId: string, content: string): Promise<QaThread> {
+export async function addTeacherQaMessage(threadId: string, content: string,
+                                           attachment?: QaAttachment): Promise<QaThread> {
   const res = await apiClient.post<ApiResponse<QaThread>>(
     `/api/teacher/qa/${encodeURIComponent(threadId)}/messages`,
-    { content },
+    { content, ...attachment },
   );
   return unwrap(res.data);
+}
+
+export async function uploadQaImage(file: File): Promise<QaAttachment> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiClient.post<ApiResponse<{
+    publicUrl: string;
+    fileType: string;
+    fileSizeBytes: number;
+  }>>('/api/qa/attachments', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  const uploaded = unwrap(res.data);
+  return {
+    attachmentUrl: uploaded.publicUrl,
+    attachmentName: file.name,
+    attachmentType: uploaded.fileType,
+    attachmentSizeBytes: uploaded.fileSizeBytes,
+  };
 }
 
 export async function updateTeacherQaStatus(threadId: string, resolved: boolean): Promise<QaThread> {

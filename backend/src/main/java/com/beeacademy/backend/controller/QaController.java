@@ -5,18 +5,22 @@ import com.beeacademy.backend.dto.request.CreateQaThreadRequest;
 import com.beeacademy.backend.dto.request.UpdateQaThreadStatusRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.QaThreadResponse;
+import com.beeacademy.backend.dto.response.UploadResponse;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.QaService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +31,13 @@ import java.util.UUID;
 public class QaController {
 
     private final QaService qaService;
+
+    @PostMapping(value = "/qa/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('student', 'teacher')")
+    public ApiResponse<UploadResponse> uploadImage(@RequestPart("file") MultipartFile file) {
+        return ApiResponse.ok(qaService.uploadImage(CurrentUser.required(), file),
+                "Đã tải ảnh lên");
+    }
 
     @GetMapping("/student/qa")
     @PreAuthorize("hasRole('student')")

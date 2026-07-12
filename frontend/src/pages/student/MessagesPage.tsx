@@ -8,12 +8,14 @@ import {
   Loader2,
   MessageSquare,
   PenLine,
+  Paperclip,
   RefreshCw,
   Send,
   X,
 } from 'lucide-react';
 import DashboardHeader from '../../components/DashboardHeader';
 import PageBanner from '../../components/PageBanner';
+import QaImagePicker from '../../components/QaImagePicker';
 import { notify } from '../../lib/toast';
 import { getCourseDetail, getEnrolledCourses } from '../../api/courseService';
 import type { CourseDetail, CourseSummary, LessonDetail } from '../../types/api';
@@ -24,6 +26,7 @@ import {
   QaMessage,
   QaThread,
   QaThreadStatus,
+  uploadQaImage,
 } from '../../api/qaService';
 
 function formatDateTime(iso: string): string {
@@ -87,6 +90,21 @@ function MessageBubble({ message }: { message: QaMessage }) {
           {message.authorName} · {formatDateTime(message.sentAt)}
         </div>
         <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+        {message.attachmentUrl && message.attachmentType?.startsWith('image/') && (
+          <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="block mt-2">
+            <img
+              src={message.attachmentUrl}
+              alt={message.attachmentName ?? 'Ảnh đính kèm'}
+              className="max-h-72 max-w-full rounded-xl object-contain bg-black/5"
+            />
+          </a>
+        )}
+        {message.attachmentUrl && !message.attachmentType?.startsWith('image/') && (
+          <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-2 text-sm underline">
+            <Paperclip className="w-4 h-4" />
+            {message.attachmentName ?? 'File đính kèm'}
+          </a>
+        )}
       </div>
     </div>
   );
@@ -110,6 +128,7 @@ function ComposeModal({ courses, onClose, onCreated }: ComposeModalProps) {
   const [courseDetail, setCourseDetail] = useState<CourseDetail | null>(null);
   const [loadingLessons, setLoadingLessons] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
   const lessons = useMemo(() => flattenLessons(courseDetail), [courseDetail]);
 
@@ -152,10 +171,12 @@ function ComposeModal({ courses, onClose, onCreated }: ComposeModalProps) {
     }
     try {
       setSubmitting(true);
+      const attachment = imageFile ? await uploadQaImage(imageFile) : undefined;
       const thread = await createStudentQaThread({
         courseId,
         lessonId: lessonId || null,
         content: content.trim(),
+        attachment,
       });
       notify.success('Đã gửi câu hỏi tới giáo viên');
       onCreated(thread);
@@ -198,7 +219,6 @@ function ComposeModal({ courses, onClose, onCreated }: ComposeModalProps) {
               {courses.map(course => <option key={course.id} value={course.id}>{course.title}</option>)}
             </select>
           </label>
-
           <label className="block">
             <span className="block text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5">Bài học</span>
             <select
@@ -222,6 +242,7 @@ function ComposeModal({ courses, onClose, onCreated }: ComposeModalProps) {
               className="w-full px-4 py-3 rounded-xl bg-surface-container border border-outline-variant/40 focus:border-primary outline-none text-sm text-on-surface placeholder:text-on-surface-variant/60 resize-none leading-relaxed"
             />
           </label>
+          <QaImagePicker file={imageFile} onChange={setImageFile} disabled={submitting} />
         </div>
 
         <div className="flex items-center justify-between px-5 py-4 border-t border-outline-variant/20">
@@ -250,6 +271,7 @@ export default function MessagesPage() {
   const [showCompose, setShowCompose] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [replyImageFile, setReplyImageFile] = useState<File | null>(null);
 
   const selectedThread = threads.find(thread => thread.id === selectedId) ?? null;
 
@@ -292,9 +314,11 @@ export default function MessagesPage() {
     }
     try {
       setSending(true);
-      const updated = await addStudentQaMessage(selectedThread.id, content);
+      const attachment = replyImageFile ? await uploadQaImage(replyImageFile) : undefined;
+      const updated = await addStudentQaMessage(selectedThread.id, content, attachment);
       upsertThread(updated);
       setReplyInput('');
+      setReplyImageFile(null);
       notify.success('Đã gửi phản hồi');
     } catch (error) {
       notify.error(error instanceof Error ? error.message : 'Không gửi được phản hồi');
@@ -441,6 +465,7 @@ export default function MessagesPage() {
                         rows={3}
                         className="w-full px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant resize-none"
                       />
+                      <QaImagePicker file={replyImageFile} onChange={setReplyImageFile} disabled={sending} />
                       <div className="flex justify-end mt-3">
                         <button
                           onClick={sendFollowUp}

@@ -69,6 +69,25 @@ public class QaThread {
     private List<QaMessage> messages = new ArrayList<>();
 
     public static QaThread create(Profile student, Course course, Lesson lesson, String content) {
+        return createWithAuthor(student, course, lesson, student, content);
+    }
+
+    public static QaThread create(Profile student, Course course, Lesson lesson, String content,
+                                  String attachmentUrl, String attachmentName,
+                                  String attachmentType, Long attachmentSizeBytes) {
+        return createWithAuthor(student, course, lesson, student, content,
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes);
+    }
+
+    public static QaThread createWithAuthor(Profile student, Course course, Lesson lesson,
+                                            Profile author, String content) {
+        return createWithAuthor(student, course, lesson, author, content, null, null, null, null);
+    }
+
+    public static QaThread createWithAuthor(Profile student, Course course, Lesson lesson,
+                                            Profile author, String content,
+                                            String attachmentUrl, String attachmentName,
+                                            String attachmentType, Long attachmentSizeBytes) {
         QaThread thread = new QaThread();
         thread.id = UUID.randomUUID();
         thread.student = student;
@@ -76,7 +95,8 @@ public class QaThread {
         thread.lesson = lesson;
         thread.status = QaThreadStatus.PENDING;
         thread.lastActivityAt = Instant.now();
-        thread.messages.add(QaMessage.create(thread, student, content));
+        thread.messages.add(QaMessage.create(thread, author, content,
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes));
         return thread;
     }
 
@@ -85,14 +105,42 @@ public class QaThread {
     }
 
     public void addStudentMessage(Profile student, String content) {
-        this.messages.add(QaMessage.create(this, student, content));
+        addStudentMessage(student, content, null, null, null, null);
+    }
+
+    public void addStudentMessage(Profile student, String content,
+                                  String attachmentUrl, String attachmentName,
+                                  String attachmentType, Long attachmentSizeBytes) {
+        this.messages.add(QaMessage.create(this, student, content,
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes));
+        this.status = QaThreadStatus.PENDING;
+        this.resolvedAt = null;
+        this.lastActivityAt = Instant.now();
+    }
+
+    public void addParentMessage(Profile parent, String content) {
+        addParentMessage(parent, content, null, null, null, null);
+    }
+
+    public void addParentMessage(Profile parent, String content,
+                                 String attachmentUrl, String attachmentName,
+                                 String attachmentType, Long attachmentSizeBytes) {
+        this.messages.add(QaMessage.create(this, parent, content,
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes));
         this.status = QaThreadStatus.PENDING;
         this.resolvedAt = null;
         this.lastActivityAt = Instant.now();
     }
 
     public void addTeacherMessage(Profile teacher, String content) {
-        this.messages.add(QaMessage.create(this, teacher, content));
+        addTeacherMessage(teacher, content, null, null, null, null);
+    }
+
+    public void addTeacherMessage(Profile teacher, String content,
+                                  String attachmentUrl, String attachmentName,
+                                  String attachmentType, Long attachmentSizeBytes) {
+        this.messages.add(QaMessage.create(this, teacher, content,
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes));
         this.status = QaThreadStatus.ANSWERED;
         this.resolvedAt = null;
         this.lastActivityAt = Instant.now();

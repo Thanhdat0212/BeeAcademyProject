@@ -1,5 +1,6 @@
 package com.beeacademy.backend.model;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -7,6 +8,8 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -15,6 +18,9 @@ import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -51,13 +57,29 @@ public class ComplaintMessage {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @OneToMany(mappedBy = "message", fetch = FetchType.LAZY,
+               cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("createdAt ASC")
+    private List<ComplaintAttachment> attachments = new ArrayList<>();
+
     static ComplaintMessage create(Complaint complaint, Profile author, String content) {
         ComplaintMessage message = new ComplaintMessage();
         message.id = UUID.randomUUID();
         message.complaint = complaint;
         message.author = author;
         message.authorRole = author.getRole();
-        message.content = content.trim();
+        message.content = content == null ? "" : content.trim();
         return message;
+    }
+
+    public List<ComplaintAttachment> getAttachments() {
+        return Collections.unmodifiableList(attachments);
+    }
+
+    /** Gắn một file đính kèm đã upload vào tin nhắn này (cascade khi save). */
+    public void addAttachment(String storagePath, String fileName,
+                              String contentType, long sizeBytes) {
+        this.attachments.add(ComplaintAttachment.create(
+                this, storagePath, fileName, contentType, sizeBytes));
     }
 }

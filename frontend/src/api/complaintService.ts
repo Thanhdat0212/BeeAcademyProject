@@ -28,6 +28,14 @@ export type ComplaintCategory =
   | 'system'          // Lỗi hệ thống (Admin)
   | 'other';
 
+export interface ComplaintAttachment {
+  id: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  url: string;
+}
+
 export interface ComplaintMessage {
   id: string;
   authorId: string;
@@ -35,6 +43,7 @@ export interface ComplaintMessage {
   authorRole: 'student' | 'parent' | 'teacher' | 'admin';
   content: string;
   sentAt: string;
+  attachments: ComplaintAttachment[];
 }
 
 /** Thread đầy đủ — màn chi tiết (panel phải / trang người gửi). */
@@ -110,10 +119,33 @@ export const STATUS_LABELS: Record<ComplaintStatus, string> = {
   rejected: 'Đã từ chối',
 };
 
+// ── Giới hạn file đính kèm (mirror backend) ─────────────────────────────────
+export const ATTACHMENT_MAX_FILES = 5;
+export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+export const ATTACHMENT_ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf';
+
+// Backend nhận multipart: phần JSON tên "data" + các file tên "files".
+function buildComplaintForm(data: object, files?: File[]): FormData {
+  const form = new FormData();
+  form.append('data', new Blob([JSON.stringify(data)], { type: 'application/json' }));
+  (files ?? []).forEach(file => form.append('files', file));
+  return form;
+}
+
+// Upload có thể lớn (tối đa 5 file) → nới timeout so với mặc định 15s.
+const UPLOAD_CONFIG = { timeout: 60000 };
+
 // ── Phía người gửi (HS / PH / GV) ───────────────────────────────────────────
 
-export async function createComplaint(payload: CreateComplaintPayload): Promise<ComplaintDetail> {
-  const res = await apiClient.post<ApiResponse<ComplaintDetail>>('/api/complaints', payload);
+export async function createComplaint(
+  payload: CreateComplaintPayload,
+  files?: File[],
+): Promise<ComplaintDetail> {
+  const res = await apiClient.post<ApiResponse<ComplaintDetail>>(
+    '/api/complaints',
+    buildComplaintForm(payload, files),
+    UPLOAD_CONFIG,
+  );
   return unwrap(res.data);
 }
 
@@ -122,10 +154,15 @@ export async function getMyComplaints(): Promise<ComplaintDetail[]> {
   return unwrap(res.data) ?? [];
 }
 
-export async function replyToMyComplaint(id: string, content: string): Promise<ComplaintDetail> {
+export async function replyToMyComplaint(
+  id: string,
+  content: string,
+  files?: File[],
+): Promise<ComplaintDetail> {
   const res = await apiClient.post<ApiResponse<ComplaintDetail>>(
     `/api/complaints/${id}/messages`,
-    { content },
+    buildComplaintForm({ content }, files),
+    UPLOAD_CONFIG,
   );
   return unwrap(res.data);
 }
@@ -165,10 +202,15 @@ export async function getAdminComplaintStats(): Promise<ComplaintStats> {
   return unwrap(res.data);
 }
 
-export async function adminReplyComplaint(id: string, content: string): Promise<ComplaintDetail> {
+export async function adminReplyComplaint(
+  id: string,
+  content: string,
+  files?: File[],
+): Promise<ComplaintDetail> {
   const res = await apiClient.post<ApiResponse<ComplaintDetail>>(
     `/api/admin/complaints/${id}/reply`,
-    { content },
+    buildComplaintForm({ content }, files),
+    UPLOAD_CONFIG,
   );
   return unwrap(res.data);
 }
@@ -188,11 +230,11 @@ export async function adminUpdateComplaintStatus(
 // Đặt alias để teacher/student page import tên rõ nghĩa mà không tự định nghĩa lại type
 export const listTeacherComplaints  = getMyComplaints;
 export const createTeacherComplaint = createComplaint;
-export const addTeacherComplaintMessage = (id: string, content: string) => replyToMyComplaint(id, content);
+export const addTeacherComplaintMessage = (id: string, content: string, files?: File[]) => replyToMyComplaint(id, content, files);
 
 export const listStudentComplaints  = getMyComplaints;
 export const createStudentComplaint = createComplaint;
-export const addStudentComplaintMessage = (id: string, content: string) => replyToMyComplaint(id, content);
+export const addStudentComplaintMessage = (id: string, content: string, files?: File[]) => replyToMyComplaint(id, content, files);
 
 // Backward-compatible aliases for the all-in-one admin dashboard.
 export type ComplaintThread = ComplaintDetail;
@@ -207,10 +249,11 @@ export async function updateAdminComplaintStatus(
   id: string,
   status: Exclude<ComplaintStatus, 'pending'>,
   responseNote?: string,
+  files?: File[],
 ): Promise<ComplaintThread> {
   const note = responseNote?.trim();
-  if (note) {
-    await adminReplyComplaint(id, note);
+  if (note || (files && files.length > 0)) {
+    await adminReplyComplaint(id, note ?? '', files);
   }
   return adminUpdateComplaintStatus(id, status);
 }

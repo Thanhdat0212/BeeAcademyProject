@@ -1,8 +1,10 @@
 package com.beeacademy.backend.service;
 
+import com.beeacademy.backend.client.SupabaseStorageClient;
 import com.beeacademy.backend.dto.request.CreateQaMessageRequest;
 import com.beeacademy.backend.dto.request.CreateQaThreadRequest;
 import com.beeacademy.backend.dto.response.QaThreadResponse;
+import com.beeacademy.backend.dto.response.UploadResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Course;
@@ -20,19 +22,31 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class QaService {
 
+    private static final String QA_IMAGE_BUCKET = "course-docs";
+    private static final long MAX_QA_IMAGE_BYTES = 5L * 1024 * 1024;
+    private static final Set<String> ALLOWED_IMAGE_MIME = Set.of(
+            "image/png", "image/jpeg", "image/webp");
+
     private final QaThreadRepository qaThreadRepository;
     private final ProfileRepository profileRepository;
     private final CourseRepository courseRepository;
     private final LessonRepository lessonRepository;
     private final EnrollmentRepository enrollmentRepository;
+    private final UserNotificationService notificationService;
+    private final ParentTeacherMessageEmailService parentTeacherMessageEmailService;
+    private final SupabaseStorageClient storageClient;
 
     @Transactional(readOnly = true)
     public List<QaThreadResponse> listStudentThreads(AuthenticatedUser me) {
@@ -52,6 +66,8 @@ public class QaService {
     public QaThreadResponse createStudentThread(AuthenticatedUser me, CreateQaThreadRequest req) {
         Profile student = loadProfile(me.userId());
         assertRole(student, UserRole.STUDENT);
+        validateAttachment(me.userId(), req.attachmentUrl(), req.attachmentType(),
+                req.attachmentSizeBytes());
 
         Course course = courseRepository.findWithCategoryAndTeacherById(req.courseId())
                 .orElseThrow(() -> new ResourceNotFoundException("Course", req.courseId()));
@@ -77,7 +93,9 @@ public class QaService {
         }
 
         QaThread saved = qaThreadRepository.saveAndFlush(
-                QaThread.create(student, course, lesson, req.content()));
+                QaThread.create(student, course, lesson, req.content(),
+                        req.attachmentUrl(), req.attachmentName(),
+                        req.attachmentType(), req.attachmentSizeBytes()));
         return QaThreadResponse.fromEntity(saved);
     }
 
@@ -86,11 +104,15 @@ public class QaService {
                                               CreateQaMessageRequest req) {
         Profile student = loadProfile(me.userId());
         assertRole(student, UserRole.STUDENT);
+        validateAttachment(me.userId(), req.attachmentUrl(), req.attachmentType(),
+                req.attachmentSizeBytes());
         QaThread thread = loadThread(threadId);
         if (!thread.getStudent().getId().equals(me.userId())) {
             throwForbidden();
         }
-        thread.addStudentMessage(student, req.content());
+        thread.addStudentMessage(student, req.content(),
+                req.attachmentUrl(), req.attachmentName(),
+                req.attachmentType(), req.attachmentSizeBytes());
         return QaThreadResponse.fromEntity(qaThreadRepository.saveAndFlush(thread));
     }
 
@@ -99,10 +121,16 @@ public class QaService {
                                               CreateQaMessageRequest req) {
         Profile teacher = loadProfile(me.userId());
         assertRole(teacher, UserRole.TEACHER);
+        validateAttachment(me.userId(), req.attachmentUrl(), req.attachmentType(),
+                req.attachmentSizeBytes());
         QaThread thread = loadThread(threadId);
         verifyTeacherOwner(thread, me.userId());
-        thread.addTeacherMessage(teacher, req.content());
-        return QaThreadResponse.fromEntity(qaThreadRepository.saveAndFlush(thread));
+        thread.addTeacherMessage(teacher, req.content(),
+                req.attachmentUrl(), req.attachmentName(),
+                req.attachmentType(), req.attachmentSizeBytes());
+        QaThread saved = qaThreadRepository.saveAndFlush(thread);
+        notifyParentsAboutTeacherReply(saved, teacher, req.content());
+        return QaThreadResponse.fromEntity(saved);
     }
 
     @Transactional
@@ -116,6 +144,34 @@ public class QaService {
             thread.reopen();
         }
         return QaThreadResponse.fromEntity(qaThreadRepository.saveAndFlush(thread));
+    }
+
+    public UploadResponse uploadImage(AuthenticatedUser me, MultipartFile file) {
+        Profile profile = loadProfile(me.userId());
+        if (profile.getRole() != UserRole.STUDENT && profile.getRole() != UserRole.TEACHER) {
+            throwForbidden();
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("FILE_REQUIRED", "Vui lòng chọn ảnh.");
+        }
+        if (file.getSize() > MAX_QA_IMAGE_BYTES) {
+            throw new BusinessException("FILE_TOO_LARGE", "Ảnh đính kèm tối đa 5 MB.");
+        }
+        String contentType = file.getContentType();
+        if (contentType == null || !ALLOWED_IMAGE_MIME.contains(contentType)) {
+            throw new BusinessException("UNSUPPORTED_FILE_TYPE",
+                    "Chỉ hỗ trợ ảnh PNG, JPG hoặc WEBP.", HttpStatus.BAD_REQUEST);
+        }
+
+        String extension = switch (contentType) {
+            case "image/png" -> ".png";
+            case "image/webp" -> ".webp";
+            default -> ".jpg";
+        };
+        String path = "qa-images/" + me.userId() + "/" + UUID.randomUUID() + extension;
+        String publicUrl = storageClient.upload(QA_IMAGE_BUCKET, path, contentType,
+                file.getResource(), file.getSize());
+        return new UploadResponse(path, publicUrl, contentType, file.getSize());
     }
 
     private QaThread loadThread(UUID threadId) {
@@ -137,6 +193,57 @@ public class QaService {
     private void assertRole(Profile profile, UserRole expected) {
         if (profile.getRole() != expected) {
             throwForbidden();
+        }
+    }
+
+    private void notifyParentsAboutTeacherReply(QaThread thread, Profile teacher, String content) {
+        Map<UUID, Profile> parents = new LinkedHashMap<>();
+        thread.getMessages().stream()
+                .filter(message -> message.getAuthorRole() == UserRole.PARENT)
+                .forEach(message -> parents.putIfAbsent(message.getAuthor().getId(), message.getAuthor()));
+        if (parents.isEmpty()) return;
+
+        String teacherName = displayName(teacher, "Giáo viên");
+        String studentName = displayName(thread.getStudent(), "học sinh");
+        String courseTitle = thread.getCourse().getTitle();
+        for (Profile parent : parents.values()) {
+            notificationService.notify(
+                    parent.getId(),
+                    "parent_teacher_reply",
+                    "Giáo viên đã phản hồi",
+                    "%s đã phản hồi về %s trong khóa %s."
+                            .formatted(teacherName, studentName, courseTitle),
+                    "/parent/messages");
+            parentTeacherMessageEmailService.notifyParent(
+                    parent.getId(),
+                    displayName(parent, "Phụ huynh"),
+                    teacherName,
+                    studentName,
+                    courseTitle,
+                    excerpt(content));
+        }
+    }
+
+    private String displayName(Profile profile, String fallback) {
+        return profile.getFullName() == null || profile.getFullName().isBlank()
+                ? fallback
+                : profile.getFullName();
+    }
+
+    private String excerpt(String content) {
+        if (content == null || content.isBlank()) return "Tin nhắn mới";
+        String trimmed = content.trim();
+        return trimmed.length() <= 180 ? trimmed : trimmed.substring(0, 177) + "...";
+    }
+
+    private void validateAttachment(UUID userId, String url, String contentType, Long sizeBytes) {
+        if (url == null || url.isBlank()) return;
+        String expectedPath = "/storage/v1/object/public/course-docs/qa-images/" + userId + "/";
+        if (contentType == null || !ALLOWED_IMAGE_MIME.contains(contentType)
+                || sizeBytes == null || sizeBytes <= 0 || sizeBytes > MAX_QA_IMAGE_BYTES
+                || !url.contains(expectedPath)) {
+            throw new BusinessException("INVALID_ATTACHMENT",
+                    "Ảnh đính kèm không hợp lệ.", HttpStatus.BAD_REQUEST);
         }
     }
 

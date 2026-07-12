@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Khiếu nại đầy đủ kèm toàn bộ thread tin nhắn — dùng cho màn chi tiết
@@ -24,14 +25,14 @@ public record ComplaintResponse(
         Instant lastActivityAt,
         List<ComplaintMessageResponse> messages
 ) {
-    public static ComplaintResponse fromEntity(Complaint c) {
+    public static ComplaintResponse fromEntity(Complaint c, Function<String, String> urlResolver) {
         String senderName = c.getSender().getFullName();
         if (senderName == null || senderName.isBlank()) {
             senderName = "Người dùng";
         }
         List<ComplaintMessageResponse> messages = c.getMessages().stream()
                 .sorted(Comparator.comparing(m -> m.getCreatedAt() == null ? Instant.EPOCH : m.getCreatedAt()))
-                .map(ComplaintMessageResponse::fromEntity)
+                .map(m -> ComplaintMessageResponse.fromEntity(m, urlResolver))
                 .toList();
         return new ComplaintResponse(
                 c.getId(),

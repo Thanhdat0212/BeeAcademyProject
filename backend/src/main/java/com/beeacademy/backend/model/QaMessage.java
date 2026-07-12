@@ -43,17 +43,43 @@ public class QaMessage {
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
+    @Column(name = "attachment_url")
+    private String attachmentUrl;
+
+    @Column(name = "attachment_name")
+    private String attachmentName;
+
+    @Column(name = "attachment_type")
+    private String attachmentType;
+
+    @Column(name = "attachment_size_bytes")
+    private Long attachmentSizeBytes;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     static QaMessage create(QaThread thread, Profile author, String content) {
+        return create(thread, author, content, null, null, null, null);
+    }
+
+    static QaMessage create(QaThread thread, Profile author, String content,
+                            String attachmentUrl, String attachmentName,
+                            String attachmentType, Long attachmentSizeBytes) {
         QaMessage message = new QaMessage();
         message.id = UUID.randomUUID();
         message.thread = thread;
         message.author = author;
         message.authorRole = author.getRole();
         message.content = content.trim();
+        message.attachmentUrl = blankToNull(attachmentUrl);
+        message.attachmentName = blankToNull(attachmentName);
+        message.attachmentType = blankToNull(attachmentType);
+        message.attachmentSizeBytes = attachmentSizeBytes;
         return message;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

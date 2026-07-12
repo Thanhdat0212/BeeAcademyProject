@@ -10,7 +10,7 @@ public record CreateComplaintRequest(
         String title,
 
         @NotBlank(message = "Vui lòng chọn loại khiếu nại")
-        @Pattern(regexp = "payment|course_review|bank_verify|student_report|content|technical|other",
+        @Pattern(regexp = "payment|course_review|bank_verify|student_report|content|course_content|teacher|grading|parent_link|technical|system|other",
                  message = "Loại khiếu nại không hợp lệ")
         String category,
 
