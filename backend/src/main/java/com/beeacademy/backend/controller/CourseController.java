@@ -13,6 +13,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -40,24 +41,32 @@ public class CourseController {
      * <ul>
      *   <li>{@code subject}: slug danh mục (vd: "toan-hoc")</li>
      *   <li>{@code grade}: số lớp (6-9)</li>
-     *   <li>{@code q}: từ khoá tìm kiếm trong title/description</li>
-     *   <li>{@code page} (default 0), {@code size} (default 12), {@code sort}
-     *       (default: "createdAt,desc") - Spring tự bind vào Pageable.</li>
+     *   <li>{@code q}: từ khoá tìm kiếm</li>
+     *   <li>{@code minPrice}, {@code maxPrice}: khoảng giá thực tế</li>
+     *   <li>{@code minRating}: điểm đánh giá tối thiểu</li>
+     *   <li>{@code featured}: chỉ lấy khoá nổi bật (is_featured=true) cho trang chủ</li>
+     *   <li>{@code page} (default 0), {@code size} (default 20), {@code sort}
+     *       (relevance, newest, best_selling, price_asc, price_desc, rating).</li>
      * </ul>
      *
      * <p>{@code @PageableDefault} đặt giá trị mặc định khi frontend không
-     * truyền. {@code size=12} hợp với grid 4 cột x 3 hàng trên desktop.
+     * truyền. {@code size=20} theo REQ-CRS-001.
      */
     @GetMapping
     public ApiResponse<PageResponse<CourseSummaryResponse>> searchCourses(
             @RequestParam(required = false) String subject,
             @RequestParam(required = false) Integer grade,
             @RequestParam(required = false) String q,
-            @PageableDefault(size = 12, sort = "createdAt", direction = Sort.Direction.DESC)
+            @RequestParam(required = false) Boolean featured,
+            @RequestParam(required = false) Integer minPrice,
+            @RequestParam(required = false) Integer maxPrice,
+            @RequestParam(required = false) Double minRating,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
             Pageable pageable
     ) {
         PageResponse<CourseSummaryResponse> page =
-                courseService.searchCourses(subject, grade, q, pageable);
+                courseService.searchCourses(subject, grade, q, featured,
+                        minPrice, maxPrice, minRating, pageable);
         return ApiResponse.ok(page);
     }
 
@@ -84,5 +93,13 @@ public class CourseController {
     public ApiResponse<CourseDetailResponse> getCourseDetailBySlug(@PathVariable String slug) {
         AuthenticatedUser me = CurrentUser.optional();
         return ApiResponse.ok(courseService.getCourseDetailBySlug(slug, me));
+    }
+
+    /** UC08: ghi nhận lượt mở bài học thử miễn phí để phục vụ Marketing. */
+    @PostMapping("/{courseId}/lessons/{lessonId}/preview-views")
+    public ApiResponse<Void> recordPreviewView(@PathVariable UUID courseId,
+                                                @PathVariable UUID lessonId) {
+        courseService.recordPreviewView(courseId, lessonId, CurrentUser.optional());
+        return ApiResponse.ok(null, "Đã ghi nhận lượt học thử");
     }
 }

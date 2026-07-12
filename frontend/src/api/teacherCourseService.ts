@@ -5,6 +5,7 @@
  */
 import { apiClient, unwrap } from './client';
 import type { ApiResponse, PageResponse } from '../types/api';
+import type { CourseReviewSummary } from '../types/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,7 @@ export interface TeacherCourseResponse {
   slug: string;
   title: string;
   thumbnailUrl: string | null;
+  introVideoUrl: string | null;
   /** UUID danh mục — thêm mới để form edit không cần gọi getCourseDetail() thêm lần nữa. */
   categoryId: string | null;
   categoryName: string | null;
@@ -23,6 +25,8 @@ export interface TeacherCourseResponse {
   totalChapters: number;
   totalLessons: number;
   salesCount: number;
+  versionNo: number;
+  submittedVersionNo: number;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -37,8 +41,19 @@ export interface TeacherLessonResponse {
   videoEmbedUrl: string | null;
   videoStoragePath: string | null;
   videoUrl: string | null;
+  videoFallbackUrl: string | null;
   durationSec: number;
   hasVideo: boolean;
+  completionRule: 'DOCUMENT_OPENED' | 'MARK_AS_COMPLETE' | 'ASSIGNMENT_SUBMITTED' | 'ASSIGNMENT_PASSED' | null;
+  transcript: string | null;
+  subtitleUrl: string | null;
+  slideCueSeconds: string | null;
+  documents: Array<{
+    id: string;
+    name: string;
+    fileType: string;
+    position: number;
+  }>;
 }
 
 export interface TeacherChapterResponse {
@@ -51,9 +66,12 @@ export interface TeacherChapterResponse {
 
 export interface TeacherCourseDetailResponse extends TeacherCourseResponse {
   description: string | null;
+  objective: string | null;
+  audience: string | null;
   categoryId: string | null;
   chapters: TeacherChapterResponse[];
   approvalHistory: ApprovalHistoryResponse[];
+  versions: CourseVersionResponse[];
 }
 
 export interface ApprovalHistoryResponse {
@@ -64,10 +82,21 @@ export interface ApprovalHistoryResponse {
   createdAt: string;
 }
 
+export interface CourseVersionResponse {
+  id: string;
+  versionNo: number;
+  title: string;
+  submittedByName: string | null;
+  submittedAt: string;
+}
+
 export interface CreateCourseRequest {
   title: string;
   description?: string;
+  objective?: string;
+  audience?: string;
   thumbnailUrl?: string;
+  introVideoUrl?: string;
   categoryId: string;
   grades: number[];
   priceVnd: number;
@@ -86,6 +115,12 @@ export interface CreateLessonRequest {
   position?: number;
   isFree: boolean;
   videoEmbedUrl?: string;
+  videoSource?: 'upload' | 'embed' | 'none';
+  completionRule?: 'DOCUMENT_OPENED' | 'MARK_AS_COMPLETE' | 'ASSIGNMENT_SUBMITTED' | 'ASSIGNMENT_PASSED';
+  transcript?: string;
+  subtitleUrl?: string;
+  slideCueSeconds?: string;
+  videoFallbackUrl?: string;
 }
 
 // ─── Course CRUD ─────────────────────────────────────────────────────────────
@@ -110,6 +145,13 @@ export async function getCourseDetail(courseId: string):
   return unwrap(res.data);
 }
 
+export async function getTeacherCourseReviews(courseId: string):
+    Promise<CourseReviewSummary> {
+  const res = await apiClient.get<ApiResponse<CourseReviewSummary>>(
+    `/api/teacher/courses/${encodeURIComponent(courseId)}/reviews`);
+  return unwrap(res.data);
+}
+
 export async function updateCourse(courseId: string, req: Partial<CreateCourseRequest>):
     Promise<TeacherCourseResponse> {
   const res = await apiClient.put<ApiResponse<TeacherCourseResponse>>(
@@ -124,6 +166,17 @@ export async function deleteCourse(courseId: string): Promise<void> {
 export async function submitForReview(courseId: string): Promise<TeacherCourseResponse> {
   const res = await apiClient.post<ApiResponse<TeacherCourseResponse>>(
     `/api/teacher/courses/${courseId}/submit`);
+  return unwrap(res.data);
+}
+
+// Đổi riêng ảnh bìa — cho phép kể cả khi khóa đã xuất bản (ảnh bìa là cosmetic).
+export async function updateCourseThumbnail(courseId: string, file: File):
+    Promise<TeacherCourseResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiClient.put<ApiResponse<TeacherCourseResponse>>(
+    `/api/teacher/courses/${courseId}/thumbnail`, form,
+    { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
   return unwrap(res.data);
 }
 
@@ -146,6 +199,16 @@ export async function updateChapter(courseId: string, chapterId: string,
 
 export async function deleteChapter(courseId: string, chapterId: string): Promise<void> {
   await apiClient.delete(`/api/teacher/courses/${courseId}/chapters/${chapterId}`);
+}
+
+export async function reorderChapters(
+    courseId: string,
+    chapterIds: string[]): Promise<TeacherCourseDetailResponse> {
+  const res = await apiClient.put<ApiResponse<TeacherCourseDetailResponse>>(
+    `/api/teacher/courses/${courseId}/chapters/reorder`,
+    { chapters: chapterIds.map((id, idx) => ({ id, position: idx + 1 })) },
+  );
+  return unwrap(res.data);
 }
 
 // ─── Lesson CRUD ─────────────────────────────────────────────────────────────
@@ -172,6 +235,17 @@ export async function deleteLesson(courseId: string, chapterId: string,
     `/api/teacher/courses/${courseId}/chapters/${chapterId}/lessons/${lessonId}`);
 }
 
+export async function reorderLessons(
+    courseId: string,
+    chapterId: string,
+    lessonIds: string[]): Promise<TeacherCourseDetailResponse> {
+  const res = await apiClient.put<ApiResponse<TeacherCourseDetailResponse>>(
+    `/api/teacher/courses/${courseId}/chapters/${chapterId}/lessons/reorder`,
+    { lessons: lessonIds.map((id, idx) => ({ id, position: idx + 1 })) },
+  );
+  return unwrap(res.data);
+}
+
 // ─── Upload ───────────────────────────────────────────────────────────────────
 
 export interface UploadResponse {
@@ -181,26 +255,38 @@ export interface UploadResponse {
   fileSizeBytes: number;
 }
 
+export interface UploadVideoOptions {
+  durationSec?: number;
+  onProgress?: (pct: number) => void;
+}
+
 export async function uploadVideo(
     courseId: string, chapterId: string, lessonId: string,
     file: File,
-    onProgress?: (pct: number) => void): Promise<UploadResponse> {
+    options?: UploadVideoOptions): Promise<UploadResponse> {
   const form = new FormData();
   form.append('file', file);
+  if (options?.durationSec && options.durationSec > 0) {
+    form.append('durationSec', Math.floor(options.durationSec).toString());
+  }
   const res = await apiClient.post<ApiResponse<UploadResponse>>(
     `/api/upload/video/${courseId}/${chapterId}/${lessonId}`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (e) => {
-        if (onProgress && e.total) onProgress(Math.round(e.loaded / e.total * 100));
+        if (options?.onProgress && e.total) {
+          options.onProgress(Math.round(e.loaded / e.total * 100));
+        }
       },
     });
   return unwrap(res.data);
 }
 
 export async function uploadDocument(lessonId: string, file: File,
+                                      slot: 'pdf' | 'slide',
                                       displayName?: string): Promise<UploadResponse> {
   const form = new FormData();
   form.append('file', file);
+  form.append('slot', slot);
   if (displayName) form.append('name', displayName);
   const res = await apiClient.post<ApiResponse<UploadResponse>>(
     `/api/upload/document/${lessonId}`, form,
@@ -208,11 +294,24 @@ export async function uploadDocument(lessonId: string, file: File,
   return unwrap(res.data);
 }
 
+export async function deleteDocument(lessonId: string, documentId: string): Promise<void> {
+  await apiClient.delete(`/api/upload/document/${lessonId}/${documentId}`);
+}
+
 export async function uploadCourseThumbnail(file: File): Promise<UploadResponse> {
   const form = new FormData();
   form.append('file', file);
   const res = await apiClient.post<ApiResponse<UploadResponse>>(
     '/api/upload/course-thumbnail', form,
+    { headers: { 'Content-Type': 'multipart/form-data' } });
+  return unwrap(res.data);
+}
+
+export async function uploadCourseIntroVideo(file: File): Promise<UploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiClient.post<ApiResponse<UploadResponse>>(
+    '/api/upload/course-intro-video', form,
     { headers: { 'Content-Type': 'multipart/form-data' } });
   return unwrap(res.data);
 }

@@ -45,6 +45,7 @@ public class ApprovalService {
     private final CourseRepository          courseRepository;
     private final ProfileRepository         profileRepository;
     private final ApprovalHistoryRepository historyRepository;
+    private final UserNotificationService   notificationService;
 
     // ========================================================================
     // Admin views
@@ -78,6 +79,9 @@ public class ApprovalService {
         courseRepository.save(course);
 
         historyRepository.save(ApprovalHistory.create(course, admin, "approved", comment));
+        notifyTeacherCourseReviewed(course, "course_approved",
+                "Khóa học đã được duyệt",
+                "Khóa học \"%s\" đã được duyệt và xuất bản.".formatted(course.getTitle()));
         log.info("Admin {} duyệt khóa học {} → PUBLISHED", adminUser.userId(), courseId);
         // TODO: gửi email thông báo GV khi JavaMailSender sẵn sàng
     }
@@ -96,6 +100,9 @@ public class ApprovalService {
         courseRepository.save(course);
 
         historyRepository.save(ApprovalHistory.create(course, admin, "rejected", comment));
+        notifyTeacherCourseReviewed(course, "course_rejected",
+                "Khóa học bị từ chối",
+                "Khóa học \"%s\" bị từ chối. Lý do: %s".formatted(course.getTitle(), comment.trim()));
         log.info("Admin {} từ chối khóa học {}", adminUser.userId(), courseId);
     }
 
@@ -114,6 +121,9 @@ public class ApprovalService {
 
         historyRepository.save(
                 ApprovalHistory.create(course, admin, "needs_revision", comment));
+        notifyTeacherCourseReviewed(course, "course_revision_requested",
+                "Khóa học cần chỉnh sửa",
+                "Khóa học \"%s\" cần chỉnh sửa. Ghi chú: %s".formatted(course.getTitle(), comment.trim()));
         log.info("Admin {} yêu cầu sửa khóa học {}", adminUser.userId(), courseId);
     }
 
@@ -135,5 +145,13 @@ public class ApprovalService {
     private Profile loadProfile(UUID id) {
         return profileRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Profile", id));
+    }
+
+    private void notifyTeacherCourseReviewed(Course course, String type, String title, String body) {
+        if (course.getTeacher() == null) {
+            log.warn("Course {} has no teacher, skip teacher notification {}", course.getId(), type);
+            return;
+        }
+        notificationService.notify(course.getTeacher().getId(), type, title, body, "/teacher/courses");
     }
 }

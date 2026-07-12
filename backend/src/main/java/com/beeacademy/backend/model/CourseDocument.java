@@ -18,8 +18,8 @@ import java.util.UUID;
 /**
  * Tài liệu đính kèm (PDF, slide) cho một bài giảng.
  *
- * <p>File được upload lên Supabase Storage bucket "course-docs" (PUBLIC).
- * URL truy cập trực tiếp không cần signed URL.
+ * <p>File được upload lên Supabase Storage bucket private "course-documents".
+ * Học viên chỉ nhận one-time download link do backend cấp (UC15).
  *
  * <p>Quan hệ: N bài giảng có M tài liệu đính kèm (1 lesson → nhiều document).
  */
@@ -41,9 +41,17 @@ public class CourseDocument {
     @Column(name = "name", nullable = false)
     private String name;
 
-    /** Supabase Storage public URL. */
-    @Column(name = "file_url", nullable = false)
+    /** URL legacy từ bucket public; không được trả về cho học viên. */
+    @Column(name = "file_url")
     private String fileUrl;
+
+    /** Path trong bucket storage, dùng để tạo signed URL khi học sinh tải. */
+    @Column(name = "storage_path")
+    private String storagePath;
+
+    /** Bucket chứa object. Bản ghi cũ mặc định là course-docs để được di trú an toàn. */
+    @Column(name = "storage_bucket")
+    private String storageBucket;
 
     /** Loại file: pdf | pptx | docx. */
     @Column(name = "file_type", nullable = false)
@@ -64,14 +72,37 @@ public class CourseDocument {
     public static CourseDocument create(Lesson lesson, String name,
                                         String fileUrl, String fileType,
                                         long fileSizeBytes, int position) {
+        return create(lesson, name, fileUrl, null, fileType, fileSizeBytes, position);
+    }
+
+    public static CourseDocument create(Lesson lesson, String name,
+                                        String fileUrl, String storagePath,
+                                        String fileType, long fileSizeBytes, int position) {
+        return create(lesson, name, fileUrl, storagePath, "course-docs",
+                fileType, fileSizeBytes, position);
+    }
+
+    public static CourseDocument create(Lesson lesson, String name,
+                                        String fileUrl, String storagePath,
+                                        String storageBucket, String fileType,
+                                        long fileSizeBytes, int position) {
         CourseDocument d = new CourseDocument();
         d.id            = UUID.randomUUID();
         d.lesson        = lesson;
         d.name          = name;
         d.fileUrl       = fileUrl;
+        d.storagePath   = storagePath;
+        d.storageBucket = storageBucket;
         d.fileType      = fileType;
         d.fileSizeBytes = fileSizeBytes;
         d.position      = position;
         return d;
+    }
+
+    /** Chuyển metadata sang object private sau khi di trú xong. */
+    public void moveToPrivateStorage(String bucket, String path) {
+        this.storageBucket = bucket;
+        this.storagePath = path;
+        this.fileUrl = null;
     }
 }

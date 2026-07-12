@@ -12,6 +12,10 @@ public record CourseDiscussionReplyResponse(
         String authorRole,
         String authorAvatarUrl,
         String content,
+        String attachmentUrl,
+        String attachmentName,
+        String attachmentType,
+        Long attachmentSizeBytes,
         Instant createdAt
 ) {
     public static CourseDiscussionReplyResponse fromEntity(CourseDiscussionReply reply) {
@@ -22,6 +26,10 @@ public record CourseDiscussionReplyResponse(
                 reply.getAuthor().getRole().toDbValue(),
                 reply.getAuthor().getAvatarUrl(),
                 reply.getContent(),
+                reply.getAttachmentUrl(),
+                reply.getAttachmentName(),
+                reply.getAttachmentType(),
+                reply.getAttachmentSizeBytes(),
                 reply.getCreatedAt()
         );
     }

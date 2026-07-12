@@ -10,6 +10,11 @@ public record CreateCourseDiscussionThreadRequest(
 
         @NotBlank(message = "Vui lòng nhập nội dung câu hỏi")
         @Size(max = 5000, message = "Câu hỏi tối đa 5000 ký tự")
-        String content
+        String content,
+
+        @Size(max = 1000) String attachmentUrl,
+        @Size(max = 255) String attachmentName,
+        @Size(max = 100) String attachmentType,
+        Long attachmentSizeBytes
 ) {
 }

@@ -2,11 +2,14 @@ package com.beeacademy.backend.repository.spec;
 
 import com.beeacademy.backend.model.Category;
 import com.beeacademy.backend.model.Course;
+import com.beeacademy.backend.model.CourseReview;
 import com.beeacademy.backend.model.CourseStatus;
+import com.beeacademy.backend.model.Enrollment;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Root;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.util.StringUtils;
@@ -90,7 +93,6 @@ public final class CourseSpecifications {
         return (root, query, cb) -> matchGradePredicate(root, cb, grade);
     }
 
-    // ── [Đồng bộ team3/develop · search-course] Tìm kiếm mềm bỏ dấu tiếng Việt, tách token ──
     /**
      * Tìm kiếm mềm theo nhiều trường:
      * title, description, slug, category, teacher.
@@ -154,7 +156,143 @@ public final class CourseSpecifications {
      */
     public static Specification<Course> onlyFeatured(Boolean featured) {
         if (featured == null || !featured) return null;
-        return (root, query, cb) -> cb.isTrue(root.get("is_featured"));
+        return (root, query, cb) -> cb.isTrue(root.get("isFeatured"));
+    }
+
+    /** Lọc theo giá thực tế (sale price nếu có, ngược lại là giá gốc). */
+    public static Specification<Course> matchEffectivePrice(Integer minPrice, Integer maxPrice) {
+        if (minPrice == null && maxPrice == null) return null;
+        return (root, query, cb) -> {
+            Expression<Integer> effectivePrice = cb.<Integer>coalesce()
+                    .value(root.get("salePriceVnd"))
+                    .value(root.get("priceVnd"));
+            List<Predicate> predicates = new ArrayList<>(2);
+            if (minPrice != null && minPrice >= 0) {
+                predicates.add(cb.greaterThanOrEqualTo(effectivePrice, minPrice));
+            }
+            if (maxPrice != null && maxPrice >= 0) {
+                predicates.add(cb.lessThanOrEqualTo(effectivePrice, maxPrice));
+            }
+            return predicates.isEmpty() ? cb.conjunction()
+                    : cb.and(predicates.toArray(Predicate[]::new));
+        };
+    }
+
+    /** Lọc khóa học có điểm đánh giá trung bình từ minRating trở lên. */
+    public static Specification<Course> matchMinimumRating(Double minRating) {
+        if (minRating == null || minRating <= 0) return null;
+        return (root, query, cb) -> cb.greaterThanOrEqualTo(
+                averageRating(query, cb, root), minRating);
+    }
+
+    /** Sắp xếp UC06 bằng subquery DB, không phụ thuộc @Formula của Hibernate. */
+    public static Specification<Course> orderBySort(String sort) {
+        return (root, query, cb) -> {
+            if (isCountQuery(query)) return cb.conjunction();
+
+            switch (sort) {
+                case "price_asc" -> query.orderBy(cb.asc(effectivePrice(root, cb)));
+                case "price_desc" -> query.orderBy(cb.desc(effectivePrice(root, cb)));
+                case "rating", "rating_desc" -> query.orderBy(
+                        cb.desc(averageRating(query, cb, root)),
+                        cb.desc(root.get("createdAt")));
+                case "best_selling", "bestselling" -> query.orderBy(
+                        cb.desc(studentCount(query, cb, root)),
+                        cb.desc(root.get("createdAt")));
+                case "relevance", "newest", "createdAt" -> query.orderBy(
+                        cb.desc(root.get("createdAt")));
+                default -> query.orderBy(cb.desc(root.get("createdAt")));
+            }
+            return cb.conjunction();
+        };
+    }
+
+    /**
+     * Xếp kết quả phù hợp nhất lên trước khi có từ khóa tìm kiếm.
+     * Điểm ưu tiên: tiêu đề > danh mục/giáo viên > mô tả/slug.
+     */
+    public static Specification<Course> orderByKeywordRelevance(String keyword) {
+        if (!StringUtils.hasText(keyword)) return null;
+        List<String> tokens = tokenizeKeyword(keyword);
+        if (tokens.isEmpty()) return null;
+
+        return (root, query, cb) -> {
+            if (isCountQuery(query)) return cb.conjunction();
+
+            var category = root.join("category", JoinType.LEFT);
+            var teacher = root.join("teacher", JoinType.LEFT);
+            Expression<String> title = normalizeForSearch(cb, root.get("title"));
+            Expression<String> description = normalizeForSearch(cb, root.get("description"));
+            Expression<String> slug = normalizeForSearch(cb, root.get("slug"));
+            Expression<String> categoryName = normalizeForSearch(cb, category.get("name"));
+            Expression<String> categorySlug = normalizeForSearch(cb, category.get("slug"));
+            Expression<String> teacherName = normalizeForSearch(cb, teacher.get("fullName"));
+
+            Expression<Integer> score = cb.literal(0);
+            for (String token : tokens) {
+                String pattern = "%" + escapeLikeToken(token) + "%";
+                score = cb.sum(score, weightedMatch(cb, title, pattern, 6));
+                score = cb.sum(score, weightedMatch(cb, categoryName, pattern, 4));
+                score = cb.sum(score, weightedMatch(cb, categorySlug, pattern, 3));
+                score = cb.sum(score, weightedMatch(cb, teacherName, pattern, 3));
+                score = cb.sum(score, weightedMatch(cb, description, pattern, 2));
+                score = cb.sum(score, weightedMatch(cb, slug, pattern, 1));
+                Integer gradeToken = parseGradeToken(token);
+                if (gradeToken != null) {
+                    score = cb.sum(score, weightedPredicate(
+                            cb, matchGradePredicate(root, cb, gradeToken), 4));
+                }
+            }
+            query.orderBy(cb.desc(score), cb.desc(root.get("createdAt")));
+            return cb.conjunction();
+        };
+    }
+
+    private static Expression<Integer> weightedMatch(CriteriaBuilder cb,
+                                                       Expression<String> field,
+                                                       String pattern,
+                                                       int weight) {
+        return cb.<Integer>selectCase()
+                .when(cb.like(field, pattern, '\\'), weight)
+                .otherwise(0);
+    }
+
+    private static Expression<Integer> weightedPredicate(CriteriaBuilder cb,
+                                                           Predicate predicate,
+                                                           int weight) {
+        return cb.<Integer>selectCase().when(predicate, weight).otherwise(0);
+    }
+
+    private static Expression<Integer> effectivePrice(Root<Course> root, CriteriaBuilder cb) {
+        return cb.<Integer>coalesce()
+                .value(root.get("salePriceVnd"))
+                .value(root.get("priceVnd"));
+    }
+
+    private static Expression<Double> averageRating(CriteriaQuery<?> query,
+                                                     CriteriaBuilder cb,
+                                                     Root<Course> root) {
+        var subquery = query.subquery(Double.class);
+        var review = subquery.from(CourseReview.class);
+        subquery.select(cb.avg(review.get("rating")));
+        subquery.where(cb.equal(review.get("course").get("id"), root.get("id")));
+        return cb.<Double>coalesce().value(subquery).value(0.0);
+    }
+
+    private static Expression<Long> studentCount(CriteriaQuery<?> query,
+                                                  CriteriaBuilder cb,
+                                                  Root<Course> root) {
+        var subquery = query.subquery(Long.class);
+        var enrollment = subquery.from(Enrollment.class);
+        subquery.select(cb.count(enrollment));
+        subquery.where(cb.equal(enrollment.get("courseId"), root.get("id")));
+        return subquery;
+    }
+
+    private static boolean isCountQuery(CriteriaQuery<?> query) {
+        Class<?> resultType = query.getResultType();
+        return resultType == Long.class || resultType == long.class
+                || resultType == Integer.class || resultType == int.class;
     }
 
     private static List<String> tokenizeKeyword(String keyword) {

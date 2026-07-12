@@ -3,6 +3,7 @@ package com.beeacademy.backend.dto.response;
 import com.beeacademy.backend.model.Course;
 
 import java.util.Arrays;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -29,6 +30,10 @@ import java.util.stream.Collectors;
  * @param isOnSale        true nếu đang giảm giá
  * @param isFeatured      true nếu được nổi bật
  * @param hasFreePreview  true nếu khóa có ít nhất 1 bài học được mở xem thử
+ * @param averageRating   điểm đánh giá trung bình (0 nếu chưa có)
+ * @param reviewCount     số lượt đánh giá
+ * @param studentCount    số học viên đã ghi danh (đếm từ enrollments) — feature riêng của local,
+ *                        giữ lại khi gộp team3 (team3 đã bỏ field này)
  * @param totalChapters   tổng số chương
  * @param totalLessons    tổng số bài
  * @param totalDurationSec  tổng thời lượng giây
@@ -38,7 +43,10 @@ public record CourseSummaryResponse(
         String slug,
         String title,
         String description,
+        String objective,
+        String audience,
         String thumbnailUrl,
+        String introVideoUrl,
         String categoryName,
         String categorySlug,
         String teacherName,
@@ -49,12 +57,18 @@ public record CourseSummaryResponse(
         boolean isOnSale,
         Boolean isFeatured,
         boolean hasFreePreview,
+        double averageRating,
+        long reviewCount,
+        int studentCount,
         Integer totalChapters,
         Integer totalLessons,
         Integer totalDurationSec,
-        Integer studentCount,
-        Double ratingAvg,
-        Integer reviewCount
+        Integer progressPct,
+        /** Chỉ có dữ liệu ở endpoint /api/me/courses. */
+        Instant purchasedAt,
+        Instant lastAccessedAt,
+        String learningStatus,
+        Boolean finalExamPassed
 ) {
 
     /**
@@ -65,15 +79,58 @@ public record CourseSummaryResponse(
      * khi map page (nếu list 20 courses thì N=20 → 40 query extra).
      */
     public static CourseSummaryResponse fromEntity(Course course) {
-        return fromEntity(course, false, 0, null, 0);
+        return fromEntity(course, false, 0.0, 0, 0);
     }
 
     public static CourseSummaryResponse fromEntity(Course course, boolean hasFreePreview) {
-        return fromEntity(course, hasFreePreview, 0, null, 0);
+        return fromEntity(course, hasFreePreview, 0.0, 0, 0);
     }
 
-    public static CourseSummaryResponse fromEntity(Course course, boolean hasFreePreview,
-                                                   int studentCount, Double ratingAvg, int reviewCount) {
+    // Overload không kèm studentCount: giữ tương thích các caller cũ (default 0 học viên).
+    public static CourseSummaryResponse fromEntity(
+            Course course,
+            boolean hasFreePreview,
+            double averageRating,
+            long reviewCount
+    ) {
+        return fromEntity(course, hasFreePreview, averageRating, reviewCount, 0);
+    }
+
+    public static CourseSummaryResponse fromEntity(
+            Course course,
+            boolean hasFreePreview,
+            double averageRating,
+            long reviewCount,
+            int studentCount
+    ) {
+        return fromEntity(course, hasFreePreview, averageRating, reviewCount, studentCount,
+                null, null, null, null, null);
+    }
+
+    public static CourseSummaryResponse fromEntity(
+            Course course,
+            boolean hasFreePreview,
+            double averageRating,
+            long reviewCount,
+            int studentCount,
+            Integer progressPct
+    ) {
+        return fromEntity(course, hasFreePreview, averageRating, reviewCount, studentCount,
+                progressPct, null, null, null, null);
+    }
+
+    public static CourseSummaryResponse fromEntity(
+            Course course,
+            boolean hasFreePreview,
+            double averageRating,
+            long reviewCount,
+            int studentCount,
+            Integer progressPct,
+            Instant purchasedAt,
+            Instant lastAccessedAt,
+            String learningStatus,
+            Boolean finalExamPassed
+    ) {
         // Boxing int[] → List<Integer> để JSON ra mảng JSON chuẩn
         List<Integer> grades = Arrays.stream(course.getGrades()).boxed().collect(Collectors.toList());
 
@@ -86,7 +143,10 @@ public record CourseSummaryResponse(
                 course.getSlug(),
                 course.getTitle(),
                 course.getDescription(),
+                course.getObjective(),
+                course.getAudience(),
                 course.getThumbnailUrl(),
+                course.getIntroVideoUrl(),
                 categoryName,
                 categorySlug,
                 teacherName,
@@ -97,12 +157,17 @@ public record CourseSummaryResponse(
                 course.isOnSale(),
                 course.getIsFeatured(),
                 hasFreePreview,
+                averageRating,
+                reviewCount,
+                studentCount,
                 course.getTotalChapters(),
                 course.getTotalLessons(),
                 course.getTotalDurationSec(),
-                studentCount,
-                ratingAvg,
-                reviewCount
+                progressPct,
+                purchasedAt,
+                lastAccessedAt,
+                learningStatus,
+                finalExamPassed
         );
     }
 }

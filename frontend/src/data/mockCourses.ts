@@ -10,10 +10,12 @@ export interface QuizQuestion {
 }
 
 export interface LessonDocument {
+  id?: string;
   name: string;
-  fileUrl: string;
+  fileUrl: string | null;
   fileType: string;
   fileSizeBytes: number;
+  position?: number;
 }
 
 export interface Lesson {
@@ -24,6 +26,11 @@ export interface Lesson {
   url: string;
   isFree?: boolean;
   isCompleted?: boolean;
+  completionRule?: 'DOCUMENT_OPENED' | 'MARK_AS_COMPLETE' | 'ASSIGNMENT_SUBMITTED' | 'ASSIGNMENT_PASSED' | null;
+  transcript?: string | null;
+  subtitleUrl?: string | null;
+  videoFallbackUrl?: string | null;
+  slideCueSeconds?: string | null;
   questions?: QuizQuestion[];
   documents?: LessonDocument[];
 }
@@ -33,10 +40,18 @@ export interface Course {
   title: string;
   description: string;
   detailedDescription?: string;
+  objective?: string;
+  audience?: string;
   price?: string;
+  originalPrice?: string;
+  isOnSale?: boolean;
+  categorySlug?: string;
+  totalDurationSec?: number;
+  totalChapters?: number;
   subject: Subject;
   grade: Grade;
   image: string;
+  introVideoUrl?: string;
   rating: number;
   reviewCount?: number;
   students: number;
@@ -44,6 +59,10 @@ export interface Course {
   isEnrolled: boolean;
   hasFreePreview?: boolean;
   progress?: number;
+  purchasedAt?: string | null;
+  lastAccessedAt?: string | null;
+  learningStatus?: 'not_started' | 'in_progress' | 'completed' | null;
+  finalExamPassed?: boolean | null;
   lessons?: Lesson[];
 }
 

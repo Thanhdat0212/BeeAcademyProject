@@ -17,6 +17,10 @@ public record CourseDiscussionThreadResponse(
         String authorRole,
         String authorAvatarUrl,
         String content,
+        String attachmentUrl,
+        String attachmentName,
+        String attachmentType,
+        Long attachmentSizeBytes,
         Instant createdAt,
         Instant lastActivityAt,
         List<CourseDiscussionReplyResponse> replies
@@ -37,6 +41,10 @@ public record CourseDiscussionThreadResponse(
                 role,
                 thread.getAuthor().getAvatarUrl(),
                 thread.getContent(),
+                thread.getAttachmentUrl(),
+                thread.getAttachmentName(),
+                thread.getAttachmentType(),
+                thread.getAttachmentSizeBytes(),
                 thread.getCreatedAt(),
                 thread.getLastActivityAt(),
                 replies

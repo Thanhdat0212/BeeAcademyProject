@@ -3,22 +3,27 @@ package com.beeacademy.backend.controller;
 import com.beeacademy.backend.dto.request.CreateChapterRequest;
 import com.beeacademy.backend.dto.request.CreateCourseRequest;
 import com.beeacademy.backend.dto.request.CreateLessonRequest;
+import com.beeacademy.backend.dto.request.ReorderChaptersRequest;
+import com.beeacademy.backend.dto.request.ReorderLessonsRequest;
 import com.beeacademy.backend.dto.request.UpdateChapterRequest;
 import com.beeacademy.backend.dto.request.UpdateCourseRequest;
 import com.beeacademy.backend.dto.request.UpdateLessonRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
+import com.beeacademy.backend.dto.response.CourseReviewSummaryResponse;
 import com.beeacademy.backend.dto.response.PageResponse;
 import com.beeacademy.backend.dto.response.TeacherChapterResponse;
 import com.beeacademy.backend.dto.response.TeacherCourseDetailResponse;
 import com.beeacademy.backend.dto.response.TeacherCourseResponse;
 import com.beeacademy.backend.dto.response.TeacherLessonResponse;
 import com.beeacademy.backend.security.CurrentUser;
+import com.beeacademy.backend.service.CourseReviewService;
 import com.beeacademy.backend.service.TeacherCourseService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,7 +32,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -44,6 +51,7 @@ import java.util.UUID;
 public class TeacherCourseController {
 
     private final TeacherCourseService courseService;
+    private final CourseReviewService courseReviewService;
 
     // ── Course ────────────────────────────────────────────────────────────────
 
@@ -67,12 +75,28 @@ public class TeacherCourseController {
         return ApiResponse.ok(courseService.getCourseDetail(courseId, CurrentUser.required()));
     }
 
+    @GetMapping("/courses/{courseId}/reviews")
+    public ApiResponse<CourseReviewSummaryResponse> getCourseReviews(
+            @PathVariable UUID courseId) {
+        return ApiResponse.ok(
+                courseReviewService.getTeacherCourseReviews(courseId, CurrentUser.required()));
+    }
+
     @PutMapping("/courses/{courseId}")
     public ApiResponse<TeacherCourseResponse> updateCourse(
             @PathVariable UUID courseId,
             @Valid @RequestBody UpdateCourseRequest req) {
         return ApiResponse.ok(
                 courseService.updateCourse(courseId, CurrentUser.required(), req));
+    }
+
+    @PutMapping(value = "/courses/{courseId}/thumbnail", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<TeacherCourseResponse> updateThumbnail(
+            @PathVariable UUID courseId,
+            @RequestParam("file") MultipartFile file) {
+        return ApiResponse.ok(
+                courseService.updateThumbnail(courseId, CurrentUser.required(), file),
+                "Đã cập nhật ảnh bìa");
     }
 
     @DeleteMapping("/courses/{courseId}")
@@ -118,6 +142,15 @@ public class TeacherCourseController {
 
     // ── Lesson ────────────────────────────────────────────────────────────────
 
+    @PutMapping("/courses/{courseId}/chapters/reorder")
+    public ApiResponse<TeacherCourseDetailResponse> reorderChapters(
+            @PathVariable UUID courseId,
+            @Valid @RequestBody ReorderChaptersRequest req) {
+        return ApiResponse.ok(
+                courseService.reorderChapters(courseId, CurrentUser.required(), req),
+                "Đã cập nhật thứ tự chương");
+    }
+
     @PostMapping("/courses/{courseId}/chapters/{chapterId}/lessons")
     public ApiResponse<TeacherLessonResponse> addLesson(
             @PathVariable UUID courseId,
@@ -146,5 +179,14 @@ public class TeacherCourseController {
             @PathVariable UUID lessonId) {
         courseService.deleteLesson(courseId, chapterId, lessonId, CurrentUser.required());
         return ApiResponse.ok(null, "Xóa bài giảng thành công");
+    }
+    @PutMapping("/courses/{courseId}/chapters/{chapterId}/lessons/reorder")
+    public ApiResponse<TeacherCourseDetailResponse> reorderLessons(
+            @PathVariable UUID courseId,
+            @PathVariable UUID chapterId,
+            @Valid @RequestBody ReorderLessonsRequest req) {
+        return ApiResponse.ok(
+                courseService.reorderLessons(courseId, chapterId, CurrentUser.required(), req),
+                "Đã cập nhật thứ tự bài giảng");
     }
 }

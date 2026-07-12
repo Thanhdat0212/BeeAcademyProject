@@ -8,12 +8,19 @@ import com.beeacademy.backend.dto.response.PageResponse;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Course;
 import com.beeacademy.backend.model.CourseDocument;
+import com.beeacademy.backend.model.CourseReviewModerationStatus;
+import com.beeacademy.backend.model.Enrollment;
 import com.beeacademy.backend.model.Lesson;
 import com.beeacademy.backend.repository.CategoryRepository;
 import com.beeacademy.backend.repository.CourseContentCount;
 import com.beeacademy.backend.repository.CourseDocumentRepository;
 import com.beeacademy.backend.repository.CourseRepository;
+import com.beeacademy.backend.repository.CourseReviewRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
+import com.beeacademy.backend.repository.CourseProgressItemRepository;
+import com.beeacademy.backend.repository.StudentVideoProgressRepository;
+import com.beeacademy.backend.repository.QuizAttemptRepository;
+import com.beeacademy.backend.repository.ExamAttemptRepository;
 import com.beeacademy.backend.repository.LessonRepository;
 import com.beeacademy.backend.repository.QuizConfigRepository;
 import com.beeacademy.backend.repository.spec.CourseSpecifications;
@@ -21,12 +28,18 @@ import com.beeacademy.backend.security.AuthenticatedUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.util.Collections;
+import java.time.Instant;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -49,14 +62,22 @@ import java.util.stream.Collectors;
 public class CourseService {
 
     private static final String VIDEO_BUCKET = "course-videos";
+    private static final int FINAL_EXAM_SLOT_INDEX = 3;
 
     private final CourseRepository         courseRepository;
     private final CategoryRepository       categoryRepository;
     private final EnrollmentRepository     enrollmentRepository;
     private final LessonRepository         lessonRepository;
     private final CourseDocumentRepository documentRepository;
+    private final CourseReviewRepository   courseReviewRepository;
     private final QuizConfigRepository     quizConfigRepository;
     private final SupabaseStorageClient    storageClient;
+    private final CourseProgressService    courseProgressService;
+    private final CourseProgressItemRepository courseProgressItemRepository;
+    private final StudentVideoProgressRepository studentVideoProgressRepository;
+    private final QuizAttemptRepository quizAttemptRepository;
+    private final ExamAttemptRepository examAttemptRepository;
+    private final JdbcTemplate             jdbcTemplate;
 
     // ========================================================================
     // UC06 - Tìm kiếm & lọc khoá học
@@ -75,7 +96,10 @@ public class CourseService {
      *
      * @param subjectSlug   slug danh mục (toan-hoc, ngu-van, …), nullable
      * @param grade         số lớp (6-9), nullable
-     * @param keyword       từ khoá tìm kiếm, nullable
+     * @param keyword       từ khoá tìm kiếm trong thông tin công khai, nullable
+     * @param minPrice      giá thực tế tối thiểu, nullable
+     * @param maxPrice      giá thực tế tối đa, nullable
+     * @param minRating     điểm đánh giá trung bình tối thiểu, nullable
      * @param pageable      paging + sort do controller pass xuống
      * @return PageResponse chứa CourseSummaryResponse
      */
@@ -83,34 +107,71 @@ public class CourseService {
     public PageResponse<CourseSummaryResponse> searchCourses(String subjectSlug,
                                                               Integer grade,
                                                               String keyword,
+                                                              Boolean featured,
+                                                              Integer minPrice,
+                                                              Integer maxPrice,
+                                                              Double minRating,
                                                               Pageable pageable) {
+        String requestedSort = requestedSort(pageable);
+        boolean relevanceSort = StringUtils.hasText(keyword)
+                && ("relevance".equals(requestedSort) || "createdAt".equals(requestedSort));
         // Build spec composable. Specification.where() có thể nhận null spec -
         // trả về spec "always true" → khởi đầu sạch.
         Specification<Course> spec = Specification.where(CourseSpecifications.onlyPublished())
                 .and(CourseSpecifications.matchCategorySlug(subjectSlug))
                 .and(CourseSpecifications.matchGrade(grade))
-                .and(CourseSpecifications.matchKeyword(keyword));
+                .and(CourseSpecifications.matchKeyword(keyword))
+                .and(CourseSpecifications.matchEffectivePrice(minPrice, maxPrice))
+                .and(CourseSpecifications.matchMinimumRating(minRating))
+                .and(relevanceSort ? CourseSpecifications.orderByKeywordRelevance(keyword) : null)
+                .and(relevanceSort ? null : CourseSpecifications.orderBySort(requestedSort))
+                .and(CourseSpecifications.onlyFeatured(featured));
 
-        Page<Course> coursePage = courseRepository.findAll(spec, pageable);
-        log.debug("Search courses: subject={}, grade={}, q={}, found={}",
-                subjectSlug, grade, keyword, coursePage.getTotalElements());
+        Pageable effectivePageable = normalizeSearchPageable(pageable, requestedSort, relevanceSort);
+        Page<Course> coursePage = courseRepository.findAll(spec, effectivePageable);
+        log.debug("Search courses: subject={}, grade={}, q={}, minPrice={}, maxPrice={}, minRating={}, sort={}, found={}",
+                subjectSlug, grade, keyword, minPrice, maxPrice, minRating,
+                requestedSort, coursePage.getTotalElements());
 
         Set<UUID> previewCourseIds = findCoursesWithFreePreview(coursePage.getContent());
-
-        List<UUID> courseIds = coursePage.getContent().stream().map(Course::getId).toList();
-        Map<UUID, Integer> studentCounts = buildStudentCounts(courseIds);
-        Map<UUID, double[]> ratingStats = buildRatingStats(courseIds);
+        Map<UUID, CourseReviewService.RatingSummary> ratingByCourseId = summarizeRatings(coursePage.getContent());
+        // studentCount: feature riêng của local (team3 đã bỏ) — đếm enrollments 1 lần/batch.
+        Map<UUID, Integer> studentCounts = buildStudentCounts(coursePage.getContent());
 
         // Map qua DTO. Lưu ý: page query mặc định không JOIN FETCH category/teacher
         // → nếu truy cập course.getCategory().getName() sẽ trigger N+1.
         // GIẢI PHÁP: ở GĐ này dữ liệu nhỏ (9 mock courses) chấp nhận N+1.
         // Khi scale, thêm @EntityGraph trên một method findAll Specification tuỳ chỉnh.
         return PageResponse.of(coursePage,
-                course -> CourseSummaryResponse.fromEntity(course,
-                        previewCourseIds.contains(course.getId()),
-                        studentCounts.getOrDefault(course.getId(), 0),
-                        ratingAvgOf(ratingStats, course.getId()),
-                        reviewCountOf(ratingStats, course.getId())));
+                course -> {
+                    CourseReviewService.RatingSummary rating = ratingByCourseId.getOrDefault(
+                            course.getId(),
+                            new CourseReviewService.RatingSummary(0.0, 0)
+                    );
+                    return CourseSummaryResponse.fromEntity(
+                            course,
+                            previewCourseIds.contains(course.getId()),
+                            rating.averageRating(),
+                            rating.reviewCount(),
+                            studentCounts.getOrDefault(course.getId(), 0)
+                    );
+                });
+    }
+
+    private String requestedSort(Pageable pageable) {
+        if (pageable == null || pageable.getSort().isUnsorted()) return "newest";
+        return pageable.getSort().iterator().next().getProperty();
+    }
+
+    /** Map các nhãn sort của UC06 sang field read-only/cột thật trong DB. */
+    private Pageable normalizeSearchPageable(Pageable pageable,
+                                              String requestedSort,
+                                              boolean relevanceSort) {
+        int page = pageable == null ? 0 : pageable.getPageNumber();
+        int size = pageable == null ? 20 : pageable.getPageSize();
+        // CriteriaSpecification đã đặt ORDER BY; không để Pageable sinh
+        // ORDER BY được tạo trực tiếp trong CriteriaSpecification.
+        return PageRequest.of(page, size, Sort.unsorted());
     }
 
     // ========================================================================
@@ -131,31 +192,34 @@ public class CourseService {
     public CourseDetailResponse getCourseDetail(UUID id, AuthenticatedUser me) {
         Course course = courseRepository.findWithCategoryAndTeacherById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Course", id));
+        ensureCanViewCourseDetail(course, me);
 
         boolean canSeeAllVideos = canUserAccessAllVideos(course, me);
-        return buildDetailResponse(course, canSeeAllVideos);
+        CourseDetailResponse response = CourseDetailResponse.fromEntity(course, canSeeAllVideos,
+                buildUrlResolver(canSeeAllVideos), buildDocMap(course),
+                buildChaptersWithQuiz(course));
+        Object[] rawRating = courseReviewRepository.summarizeByCourseId(
+                course.getId(), CourseReviewModerationStatus.PUBLISHED);
+        return response
+                .withRating(extractAverageRating(rawRating), extractReviewCount(rawRating))
+                .withStudentCount(enrollmentRepository.countByCourseId(course.getId()));
     }
 
     @Transactional(readOnly = true)
     public CourseDetailResponse getCourseDetailBySlug(String slug, AuthenticatedUser me) {
         Course course = courseRepository.findWithCategoryAndTeacherBySlug(slug)
                 .orElseThrow(() -> new ResourceNotFoundException("Course", slug));
+        ensureCanViewCourseDetail(course, me);
 
         boolean canSeeAllVideos = canUserAccessAllVideos(course, me);
-        return buildDetailResponse(course, canSeeAllVideos);
-    }
-
-    /** Dựng response chi tiết kèm số học viên + đánh giá thật của khóa học. */
-    private CourseDetailResponse buildDetailResponse(Course course, boolean canSeeAllVideos) {
-        List<UUID> ids = List.of(course.getId());
-        int studentCount = buildStudentCounts(ids).getOrDefault(course.getId(), 0);
-        Map<UUID, double[]> ratingStats = buildRatingStats(ids);
-        return CourseDetailResponse.fromEntity(course, canSeeAllVideos,
+        CourseDetailResponse response = CourseDetailResponse.fromEntity(course, canSeeAllVideos,
                 buildUrlResolver(canSeeAllVideos), buildDocMap(course),
-                buildChaptersWithQuiz(course),
-                studentCount,
-                ratingAvgOf(ratingStats, course.getId()),
-                reviewCountOf(ratingStats, course.getId()));
+                buildChaptersWithQuiz(course));
+        Object[] rawRating = courseReviewRepository.summarizeByCourseId(
+                course.getId(), CourseReviewModerationStatus.PUBLISHED);
+        return response
+                .withRating(extractAverageRating(rawRating), extractReviewCount(rawRating))
+                .withStudentCount(enrollmentRepository.countByCourseId(course.getId()));
     }
 
     /**
@@ -247,6 +311,41 @@ public class CourseService {
         return enrollmentRepository.existsByStudentIdAndCourseId(me.userId(), course.getId());
     }
 
+    /**
+     * UC08: chỉ ghi nhận khi bài học thực sự thuộc khóa PUBLISHED và được đánh
+     * dấu isFree. Không tin dữ liệu do frontend gửi lên.
+     */
+    @Transactional
+    public void recordPreviewView(UUID courseId, UUID lessonId, AuthenticatedUser me) {
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new ResourceNotFoundException("Course", courseId));
+        ensureCanViewCourseDetail(course, me);
+
+        Lesson lesson = lessonRepository.findWithChapterAndCourseById(lessonId)
+                .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
+        if (!lesson.getChapter().getCourse().getId().equals(courseId)
+                || !Boolean.TRUE.equals(lesson.getIsFree())) {
+            throw new ResourceNotFoundException("Lesson", lessonId);
+        }
+
+        jdbcTemplate.update("""
+                INSERT INTO public.course_preview_views (id, course_id, lesson_id, viewed_at)
+                VALUES (?, ?, ?, NOW())
+                """, UUID.randomUUID(), courseId, lessonId);
+    }
+
+    /**
+     * UC07: chỉ khóa PUBLISHED mới công khai. Khóa chưa xuất bản chỉ giáo viên
+     * sở hữu và Admin được xem; mọi trường hợp khác nhận 404 như SRS quy định.
+     */
+    private void ensureCanViewCourseDetail(Course course, AuthenticatedUser me) {
+        if (course.getStatus().isPubliclyVisible()) return;
+        if (me != null && "admin".equalsIgnoreCase(me.role())) return;
+        if (me != null && course.getTeacher() != null
+                && course.getTeacher().getId().equals(me.userId())) return;
+        throw new ResourceNotFoundException("Course", course.getId());
+    }
+
     // ========================================================================
     // UC — Danh sách khoá học của tôi (đã enroll)
     // ========================================================================
@@ -262,61 +361,84 @@ public class CourseService {
     @Transactional(readOnly = true)
     public List<CourseSummaryResponse> getMyCourses(AuthenticatedUser me) {
         if (me == null) return Collections.emptyList();
-        List<Course> courses = courseRepository.findEnrolledByStudentId(me.userId());
+        List<Enrollment> enrollments = enrollmentRepository
+                .findByStudentIdOrderByEnrolledAtDesc(me.userId());
+        if (enrollments.isEmpty()) return Collections.emptyList();
+
+        List<UUID> courseIds = enrollments.stream().map(Enrollment::getCourseId).toList();
+        Map<UUID, Enrollment> enrollmentByCourse = enrollments.stream()
+                .collect(Collectors.toMap(Enrollment::getCourseId, Function.identity()));
+        Map<UUID, Course> courseById = courseRepository.findByIdIn(courseIds).stream()
+                .collect(Collectors.toMap(Course::getId, Function.identity()));
+        List<Course> courses = courseIds.stream()
+                .map(courseById::get)
+                .filter(java.util.Objects::nonNull)
+                .toList();
         Set<UUID> previewCourseIds = findCoursesWithFreePreview(courses);
-        List<UUID> courseIds = courses.stream().map(Course::getId).toList();
-        Map<UUID, Integer> studentCounts = buildStudentCounts(courseIds);
-        Map<UUID, double[]> ratingStats = buildRatingStats(courseIds);
-        return courses
-                .stream()
-                .map(course -> CourseSummaryResponse.fromEntity(course,
-                        previewCourseIds.contains(course.getId()),
-                        studentCounts.getOrDefault(course.getId(), 0),
-                        ratingAvgOf(ratingStats, course.getId()),
-                        reviewCountOf(ratingStats, course.getId())))
+        Map<UUID, CourseReviewService.RatingSummary> ratingByCourseId = summarizeRatings(courses);
+        Map<UUID, Integer> studentCounts = buildStudentCounts(courses);
+        Map<UUID, Integer> progressByCourse = courseProgressService.calculateLessonProgressForCourses(
+                me.userId(),
+                courseIds
+        );
+        Set<UUID> passedFinalCourseIds = Set.copyOf(examAttemptRepository
+                .findPassedFinalCourseIds(me.userId(), courseIds, FINAL_EXAM_SLOT_INDEX));
+        Map<UUID, Instant> latestActivityByCourse = new HashMap<>();
+        mergeLatestActivity(latestActivityByCourse,
+                courseProgressItemRepository.findLatestCompletedAtByStudentAndCourseIds(me.userId(), courseIds));
+        mergeLatestActivity(latestActivityByCourse,
+                studentVideoProgressRepository.findLatestUpdatedAtByStudentAndCourseIds(me.userId(), courseIds));
+        mergeLatestActivity(latestActivityByCourse,
+                quizAttemptRepository.findLatestActivityByStudentAndCourseIds(me.userId(), courseIds));
+        mergeLatestActivity(latestActivityByCourse,
+                examAttemptRepository.findLatestActivityByStudentAndCourseIds(me.userId(), courseIds));
+
+        return courses.stream()
+                .sorted(Comparator.comparing(
+                        (Course course) -> latestActivityByCourse.getOrDefault(
+                                course.getId(), enrollmentByCourse.get(course.getId()).getEnrolledAt()),
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .map(course -> {
+                    Enrollment enrollment = enrollmentByCourse.get(course.getId());
+                    CourseReviewService.RatingSummary rating = ratingByCourseId.getOrDefault(
+                            course.getId(),
+                            new CourseReviewService.RatingSummary(0.0, 0)
+                    );
+                    int progressPct = progressByCourse.getOrDefault(course.getId(), 0);
+                    boolean finalExamPassed = passedFinalCourseIds.contains(course.getId());
+                    String learningStatus = progressPct == 0
+                            ? "not_started"
+                            : progressPct >= 100 && finalExamPassed
+                            ? "completed"
+                            : "in_progress";
+                    Instant purchasedAt = enrollment.getEnrolledAt();
+                    Instant lastAccessedAt = latestActivityByCourse.getOrDefault(
+                            course.getId(), purchasedAt);
+                    return CourseSummaryResponse.fromEntity(
+                            course,
+                            previewCourseIds.contains(course.getId()),
+                            rating.averageRating(),
+                            rating.reviewCount(),
+                            studentCounts.getOrDefault(course.getId(), 0),
+                            progressPct,
+                            purchasedAt,
+                            lastAccessedAt,
+                            learningStatus,
+                            finalExamPassed
+                    );
+                })
                 .toList();
     }
 
-    // ========================================================================
-    // Số liệu thật: học viên (enrollments) + đánh giá (reviews)
-    // ========================================================================
-
-    /** courseId → số học viên đã ghi danh (1 query batch). */
-    private Map<UUID, Integer> buildStudentCounts(List<UUID> courseIds) {
-        if (courseIds == null || courseIds.isEmpty()) return Collections.emptyMap();
-        Map<UUID, Integer> result = new HashMap<>();
-        for (Object[] row : enrollmentRepository.countGroupedByCourseId(courseIds)) {
-            result.put(toUuid(row[0]), ((Number) row[1]).intValue());
+    private void mergeLatestActivity(Map<UUID, Instant> target, List<Object[]> rows) {
+        for (Object[] row : rows) {
+            if (row.length < 2 || !(row[0] instanceof UUID courseId)
+                    || !(row[1] instanceof Instant activityAt)) {
+                continue;
+            }
+            target.merge(courseId, activityAt,
+                    (current, candidate) -> candidate.isAfter(current) ? candidate : current);
         }
-        return result;
-    }
-
-    /** courseId → [điểm trung bình, số lượt đánh giá] (1 query batch). */
-    private Map<UUID, double[]> buildRatingStats(List<UUID> courseIds) {
-        if (courseIds == null || courseIds.isEmpty()) return Collections.emptyMap();
-        Map<UUID, double[]> result = new HashMap<>();
-        for (Object[] row : courseRepository.findRatingStatsByCourseIds(courseIds)) {
-            double avg = row[1] != null ? ((Number) row[1]).doubleValue() : 0.0;
-            int count = row[2] != null ? ((Number) row[2]).intValue() : 0;
-            result.put(toUuid(row[0]), new double[]{avg, count});
-        }
-        return result;
-    }
-
-    /** Điểm trung bình làm tròn 1 chữ số; null khi chưa có đánh giá nào. */
-    private Double ratingAvgOf(Map<UUID, double[]> stats, UUID courseId) {
-        double[] s = stats.get(courseId);
-        if (s == null || s[1] <= 0) return null;
-        return Math.round(s[0] * 10.0) / 10.0;
-    }
-
-    private int reviewCountOf(Map<UUID, double[]> stats, UUID courseId) {
-        double[] s = stats.get(courseId);
-        return s != null ? (int) s[1] : 0;
-    }
-
-    private UUID toUuid(Object value) {
-        return value instanceof UUID uuid ? uuid : UUID.fromString(value.toString());
     }
 
     // ========================================================================
@@ -335,7 +457,6 @@ public class CourseService {
                 .toList();
     }
 
-    // [Đồng bộ team3/develop · trial-course] Tập courseId có ít nhất 1 bài học thử miễn phí
     private Set<UUID> findCoursesWithFreePreview(List<Course> courses) {
         if (courses == null || courses.isEmpty()) {
             return Collections.emptySet();
@@ -349,5 +470,52 @@ public class CourseService {
                 .filter(count -> count.getItemCount() > 0)
                 .map(CourseContentCount::getCourseId)
                 .collect(Collectors.toCollection(HashSet::new));
+    }
+
+    /**
+     * courseId → số học viên đã ghi danh (1 query batch trên enrollments).
+     * Feature riêng của local; team3 đã bỏ studentCount khỏi response.
+     */
+    private Map<UUID, Integer> buildStudentCounts(List<Course> courses) {
+        if (courses == null || courses.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<UUID> courseIds = courses.stream().map(Course::getId).toList();
+        Map<UUID, Integer> result = new HashMap<>();
+        for (Object[] row : enrollmentRepository.countGroupedByCourseId(courseIds)) {
+            UUID courseId = row[0] instanceof UUID uuid ? uuid : UUID.fromString(row[0].toString());
+            result.put(courseId, ((Number) row[1]).intValue());
+        }
+        return result;
+    }
+
+    private Map<UUID, CourseReviewService.RatingSummary> summarizeRatings(List<Course> courses) {
+        if (courses == null || courses.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<UUID> courseIds = courses.stream().map(Course::getId).toList();
+        return courseReviewRepository
+                .summarizeByCourseIds(courseIds, CourseReviewModerationStatus.PUBLISHED).stream()
+                .collect(Collectors.toMap(
+                        row -> (UUID) row[0],
+                        row -> new CourseReviewService.RatingSummary(
+                                round1(((Number) row[1]).doubleValue()),
+                                ((Number) row[2]).longValue()
+                        )
+                ));
+    }
+
+    private double extractAverageRating(Object[] rawRating) {
+        if (rawRating == null || rawRating.length < 2 || rawRating[0] == null) return 0.0;
+        return round1(((Number) rawRating[0]).doubleValue());
+    }
+
+    private long extractReviewCount(Object[] rawRating) {
+        if (rawRating == null || rawRating.length < 2 || rawRating[1] == null) return 0;
+        return ((Number) rawRating[1]).longValue();
+    }
+
+    private double round1(double value) {
+        return Math.round(value * 10.0) / 10.0;
     }
 }

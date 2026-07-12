@@ -23,6 +23,7 @@ public record TeacherCourseResponse(
         String slug,
         String title,
         String thumbnailUrl,
+        String introVideoUrl,
         UUID   categoryId,      // FIX: thêm để form edit không cần thêm 1 API call
         String categoryName,
         List<Integer> grades,
@@ -32,6 +33,8 @@ public record TeacherCourseResponse(
         Integer totalChapters,
         Integer totalLessons,
         Integer salesCount,
+        Integer versionNo,
+        Integer submittedVersionNo,
         Instant publishedAt,
         Instant createdAt,
         Instant updatedAt
@@ -47,13 +50,14 @@ public record TeacherCourseResponse(
     public static TeacherCourseResponse fromEntity(Course c, int salesCount,
                                                    int totalChapters, int totalLessons) {
         return new TeacherCourseResponse(
-                c.getId(), c.getSlug(), c.getTitle(), c.getThumbnailUrl(),
+                c.getId(), c.getSlug(), c.getTitle(), c.getThumbnailUrl(), c.getIntroVideoUrl(),
                 c.getCategory() != null ? c.getCategory().getId()   : null,
                 c.getCategory() != null ? c.getCategory().getName() : null,
                 Arrays.stream(c.getGrades()).boxed().collect(Collectors.toList()),
                 c.getPriceVnd(), c.getSalePriceVnd(),
                 c.getStatus().toDbValue(),
                 totalChapters, totalLessons, salesCount,
+                c.getVersionNo(), c.getSubmittedVersionNo(),
                 c.getPublishedAt(),
                 c.getCreatedAt(), c.getUpdatedAt()
         );

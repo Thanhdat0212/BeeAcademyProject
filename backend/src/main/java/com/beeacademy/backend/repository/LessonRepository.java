@@ -51,6 +51,9 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
     @Query("SELECT COUNT(l.id) FROM Lesson l WHERE l.chapter.course.id = :courseId")
     int countByCourseId(@Param("courseId") UUID courseId);
 
+    @Query("SELECT COUNT(l.id) > 0 FROM Lesson l WHERE l.id = :lessonId AND l.chapter.course.id = :courseId")
+    boolean existsByIdAndCourseId(@Param("lessonId") UUID lessonId, @Param("courseId") UUID courseId);
+
     @Query("""
            SELECT l.chapter.course.id AS courseId, COUNT(l.id) AS itemCount
            FROM Lesson l
@@ -59,7 +62,6 @@ public interface LessonRepository extends JpaRepository<Lesson, UUID> {
            """)
     List<CourseContentCount> countByCourseIds(@Param("courseIds") List<UUID> courseIds);
 
-    // ── [Đồng bộ team3/develop · trial-course] Đếm số bài học MIỄN PHÍ (isFree) để hiện badge "học thử" ──
     @Query("""
            SELECT l.chapter.course.id AS courseId, COUNT(l.id) AS itemCount
            FROM Lesson l

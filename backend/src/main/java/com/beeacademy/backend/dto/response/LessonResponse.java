@@ -12,16 +12,24 @@ public record LessonResponse(
         String title,
         String videoUrl,
         String videoEmbedUrl,
+        String videoFallbackUrl,
         Integer durationSec,
         Integer position,
         Boolean isFree,
+        String completionRule,
+        String transcript,
+        String subtitleUrl,
+        String slideCueSeconds,
         List<DocumentDto> documents
 ) {
 
-    /** Tài liệu đính kèm (PDF/slide) — public URL truy cập trực tiếp. */
-    public record DocumentDto(String name, String fileUrl, String fileType, Long fileSizeBytes) {
-        public static DocumentDto fromEntity(CourseDocument d) {
-            return new DocumentDto(d.getName(), d.getFileUrl(), d.getFileType(), d.getFileSizeBytes());
+    /** Tài liệu đính kèm — chỉ metadata, không bao giờ lộ URL storage. */
+    public record DocumentDto(UUID id, String name, String fileUrl, String fileType,
+                              Long fileSizeBytes, Integer position) {
+        public static DocumentDto fromEntity(CourseDocument d, boolean exposePreviewUrl) {
+            return new DocumentDto(d.getId(), d.getName(),
+                    exposePreviewUrl ? d.getFileUrl() : null,
+                    d.getFileType(), d.getFileSizeBytes(), d.getPosition());
         }
     }
 
@@ -34,15 +42,14 @@ public record LessonResponse(
     public static LessonResponse fromEntity(Lesson lesson, boolean includeUrl,
                                              String signedUrl,
                                              List<CourseDocument> docs) {
-        // [Đồng bộ team3/develop · trial-course] Bài học isFree cho xem video dù chưa mua khóa
         boolean canSee = includeUrl || Boolean.TRUE.equals(lesson.getIsFree());
         String videoUrl = canSee
                 ? firstNonBlank(signedUrl, lesson.getVideoUrl())
                 : null;
         String embedUrl = canSee ? firstNonBlank(lesson.getVideoEmbedUrl()) : null;
 
-        List<DocumentDto> docDtos = (docs != null && !docs.isEmpty())
-                ? docs.stream().map(DocumentDto::fromEntity).toList()
+        List<DocumentDto> docDtos = (canSee && docs != null && !docs.isEmpty())
+                ? docs.stream().map(d -> DocumentDto.fromEntity(d, false)).toList()
                 : Collections.emptyList();
 
         return new LessonResponse(
@@ -50,9 +57,14 @@ public record LessonResponse(
                 lesson.getTitle(),
                 videoUrl,
                 embedUrl,
+                canSee ? lesson.getVideoFallbackUrl() : null,
                 lesson.getDurationSec(),
                 lesson.getPosition(),
                 lesson.getIsFree(),
+                lesson.getCompletionRule(),
+                lesson.getTranscript(),
+                lesson.getSubtitleUrl(),
+                lesson.getSlideCueSeconds(),
                 docDtos
         );
     }

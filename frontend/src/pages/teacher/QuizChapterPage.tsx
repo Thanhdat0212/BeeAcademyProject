@@ -1,3 +1,4 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
 /**
  * QuizChapterPage — /teacher/quiz
  * GV chọn khóa học → chọn chương → cấu hình quiz
@@ -24,7 +25,7 @@ import {
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Megaphone, Database, CheckCircle2,
   ChevronDown, Shuffle, Timer, AlertTriangle,
-  Circle, ListChecks, Zap, TrendingUp, Minus,
+  Circle, ListChecks, Zap, TrendingUp, Minus, UserCircle, Lock, Star,
 } from 'lucide-react';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
@@ -32,6 +33,7 @@ import {
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: 'Tổng quan',         path: '/teacher'           },
   { icon: BookOpen,        label: 'Khóa học của tôi',  path: '/teacher/courses'   },
+  { icon: Star,            label: 'Đánh giá khóa học', path: '/teacher/reviews'   },
   { icon: FileText,        label: 'Bài giảng',          path: '/teacher/content'   },
   { icon: PenSquare,       label: 'Quiz chương',        path: '/teacher/quiz'      },
   { icon: Database,        label: 'Ngân hàng câu hỏi', path: '/teacher/questions' },
@@ -41,6 +43,8 @@ const NAV_ITEMS = [
   { icon: Megaphone,       label: 'Khiếu nại',          path: '/teacher/complaints'},
   { icon: BarChart2,       label: 'Doanh thu',          path: '/teacher/revenue'   },
   { icon: Landmark,        label: 'TK ngân hàng',       path: '/teacher/bank'      },
+  { icon: UserCircle,      label: 'Hồ sơ',              path: '/teacher/profile'   },
+  { icon: Lock,            label: 'Tài khoản',           path: '/teacher/account'   },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -95,6 +99,12 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
       </button>
     </label>
   );
+}
+
+function correctChoiceCount(
+  choices: Array<{ isCorrect: boolean | null | undefined }>,
+) {
+  return choices.filter(choice => Boolean(choice.isCorrect)).length;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -317,13 +327,13 @@ export default function QuizChapterPage() {
           <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 text-on-surface-variant hover:bg-surface-container rounded-lg"><Menu className="w-5 h-5" /></button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Quiz chương</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="text-on-surface-variant hover:text-primary"><Bell className="w-5 h-5" /></button>
+            <TeacherNotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-bold text-on-surface leading-none">{user?.name ?? 'Giáo viên'}</p>
                 <p className="text-xs text-on-surface-variant mt-0.5">Giáo viên</p>
               </div>
-              <img src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'GV')}&background=7c3aed&color=fff&bold=true&size=64`} alt="avatar" className="w-9 h-9 rounded-full border-2 border-primary/30" />
+              <img src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'GV')}&background=7c3aed&color=fff&bold=true&size=64`} alt="avatar" className="w-9 h-9 rounded-full object-cover border-2 border-primary/30" />
             </div>
           </div>
         </header>
@@ -633,7 +643,9 @@ export default function QuizChapterPage() {
                                       <div className="flex items-center gap-2 mt-1">
                                         <DiffBadge d={q.difficulty} />
                                         <span className="text-xs text-on-surface-variant">
-                                          {q.type === 'multiple_choice' ? 'Trắc nghiệm' : 'Đúng/Sai'}
+                                          {q.type === 'multiple_choice'
+                                            ? (correctChoiceCount(q.choices) > 1 ? 'Trắc nghiệm nhiều đáp án' : 'Trắc nghiệm 1 đáp án')
+                                            : 'Đúng/Sai'}
                                         </span>
                                         {q.usageCount > 0 && (
                                           <span className="text-xs text-on-surface-variant">· dùng {q.usageCount} lần</span>

@@ -25,4 +25,8 @@ public interface CourseDocumentRepository extends JpaRepository<CourseDocument, 
         "SELECT d FROM CourseDocument d WHERE d.lesson.id IN :lessonIds ORDER BY d.position ASC")
     List<CourseDocument> findByLessonIdIn(@org.springframework.data.repository.query.Param("lessonIds")
                                            List<UUID> lessonIds);
+
+    /** Bản ghi chưa ở bucket private, dùng cho job di trú an toàn từ course-docs. */
+    List<CourseDocument> findTop25ByStorageBucketIsNullOrStorageBucketNotOrderByCreatedAtAsc(
+            String privateBucket);
 }

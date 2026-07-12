@@ -6,6 +6,11 @@ import jakarta.validation.constraints.Size;
 public record CreateCourseDiscussionReplyRequest(
         @NotBlank(message = "Vui lòng nhập nội dung phản hồi")
         @Size(max = 5000, message = "Phản hồi tối đa 5000 ký tự")
-        String content
+        String content,
+
+        @Size(max = 1000) String attachmentUrl,
+        @Size(max = 255) String attachmentName,
+        @Size(max = 100) String attachmentType,
+        Long attachmentSizeBytes
 ) {
 }
