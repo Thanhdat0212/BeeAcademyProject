@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -23,4 +24,8 @@ public class LinkedStudentResponse {
     private String avatarUrl;
     private String code;
     private String grade;
+    private String linkStatus;
+    private UUID unlinkRequestedById;
+    private String unlinkRequestedByRole;
+    private Instant unlinkRequestedAt;
 }

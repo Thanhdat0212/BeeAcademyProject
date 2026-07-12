@@ -1,3 +1,5 @@
+import TeacherNotificationBell from '../../components/TeacherNotificationBell';
+import QaImagePicker from '../../components/QaImagePicker';
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -22,9 +24,14 @@ import {
   Menu,
   MessageSquare,
   PenSquare,
+  Paperclip,
   RefreshCw,
   Search,
   Send,
+  Star,
+  Trash2,
+  UserCircle,
+  Lock,
   X,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -36,10 +43,14 @@ import {
   QaThread,
   QaThreadStatus,
   updateTeacherQaStatus,
+  uploadQaImage,
 } from '../../api/qaService';
 import {
   addCourseDiscussionReply,
+  deleteCourseDiscussionReply,
+  deleteCourseDiscussionThread,
   listCourseDiscussionThreads,
+  updateCourseDiscussionReply,
 } from '../../api/courseDiscussionService';
 import type { CourseDiscussionThread } from '../../api/courseDiscussionService';
 import { listMyCourses } from '../../api/teacherCourseService';
@@ -48,6 +59,7 @@ import type { TeacherCourseResponse } from '../../api/teacherCourseService';
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: 'Tổng quan', path: '/teacher' },
   { icon: BookOpen, label: 'Khóa học của tôi', path: '/teacher/courses' },
+  { icon: Star, label: 'Đánh giá khóa học', path: '/teacher/reviews' },
   { icon: FileText, label: 'Bài giảng', path: '/teacher/content' },
   { icon: PenSquare, label: 'Quiz chương', path: '/teacher/quiz' },
   { icon: Database, label: 'Ngân hàng câu hỏi', path: '/teacher/questions' },
@@ -57,6 +69,8 @@ const NAV_ITEMS = [
   { icon: Megaphone, label: 'Khiếu nại', path: '/teacher/complaints' },
   { icon: BarChart2, label: 'Doanh thu', path: '/teacher/revenue' },
   { icon: Landmark, label: 'TK ngân hàng', path: '/teacher/bank' },
+  { icon: UserCircle, label: 'Hồ sơ', path: '/teacher/profile' },
+  { icon: Lock, label: 'Tài khoản', path: '/teacher/account' },
 ];
 
 const QUICK_REPLY_TEMPLATES = [
@@ -91,6 +105,19 @@ function avatarFor(name: string, url: string | null | undefined, size = 36): str
   return url || `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&size=${size}&background=random&bold=true`;
 }
 
+function jwtSubject(token: string | null): string | null {
+  if (!token) return null;
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = JSON.parse(atob(normalized));
+    return typeof decoded.sub === 'string' ? decoded.sub : null;
+  } catch {
+    return null;
+  }
+}
+
 function roleLabel(role: CourseDiscussionThread['authorRole']): string {
   const labels: Record<CourseDiscussionThread['authorRole'], string> = {
     student: 'Học sinh',
@@ -103,6 +130,14 @@ function roleLabel(role: CourseDiscussionThread['authorRole']): string {
 
 function hasTeacherReply(thread: CourseDiscussionThread): boolean {
   return thread.replies.some(reply => reply.authorRole === 'teacher' || reply.authorRole === 'admin');
+}
+
+function directThreadDisplayName(thread: QaThread): string {
+  const firstMessage = thread.messages[0];
+  if (firstMessage?.authorRole === 'parent') {
+    return `${firstMessage.authorName} (phụ huynh của ${thread.studentName})`;
+  }
+  return thread.studentName;
 }
 
 function StatusBadge({ status }: { status: QaThreadStatus }) {
@@ -145,6 +180,21 @@ function MessageBubble({ message }: { message: QaMessage }) {
           {message.authorName} · {formatDateTime(message.sentAt)}
         </div>
         <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+        {message.attachmentUrl && message.attachmentType?.startsWith('image/') && (
+          <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="block mt-2">
+            <img
+              src={message.attachmentUrl}
+              alt={message.attachmentName ?? 'Ảnh đính kèm'}
+              className="max-h-72 max-w-full rounded-xl object-contain bg-black/5"
+            />
+          </a>
+        )}
+        {message.attachmentUrl && !message.attachmentType?.startsWith('image/') && (
+          <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-2 text-sm underline">
+            <Paperclip className="w-4 h-4" />
+            {message.attachmentName ?? 'File đính kèm'}
+          </a>
+        )}
       </div>
     </div>
   );
@@ -154,6 +204,7 @@ export default function TeacherQAPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const user = useAuthStore(state => state.user);
+  const accessToken = useAuthStore(state => state.accessToken);
   const logout = useAuthStore(state => state.logout);
   const initialView = new URLSearchParams(location.search).get('tab') === 'common' ? 'common' : 'direct';
 
@@ -165,6 +216,7 @@ export default function TeacherQAPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | QaThreadStatus>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [replyInput, setReplyInput] = useState('');
+  const [replyImageFile, setReplyImageFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [teacherCourses, setTeacherCourses] = useState<TeacherCourseResponse[]>([]);
@@ -173,13 +225,18 @@ export default function TeacherQAPage() {
   const [selectedDiscussionId, setSelectedDiscussionId] = useState<string | null>(null);
   const [discussionSearchTerm, setDiscussionSearchTerm] = useState('');
   const [discussionReplyInput, setDiscussionReplyInput] = useState('');
+  const [discussionReplyImageFile, setDiscussionReplyImageFile] = useState<File | null>(null);
+  const [editingDiscussionReplyId, setEditingDiscussionReplyId] = useState<string | null>(null);
+  const [editingDiscussionReplyText, setEditingDiscussionReplyText] = useState('');
   const [loadingCourses, setLoadingCourses] = useState(true);
   const [loadingDiscussion, setLoadingDiscussion] = useState(false);
   const [sendingDiscussionReply, setSendingDiscussionReply] = useState(false);
+  const [mutatingDiscussionId, setMutatingDiscussionId] = useState<string | null>(null);
 
   const selectedThread = threads.find(t => t.id === selectedId) ?? null;
   const selectedCourse = teacherCourses.find(c => c.id === selectedDiscussionCourseId) ?? null;
   const selectedDiscussionThread = discussionThreads.find(t => t.id === selectedDiscussionId) ?? null;
+  const currentUserId = user?.id ?? jwtSubject(accessToken);
 
   const courseOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -198,7 +255,10 @@ export default function TeacherQAPage() {
           t.studentName.toLowerCase().includes(q) ||
           t.courseTitle.toLowerCase().includes(q) ||
           (t.lessonTitle ?? '').toLowerCase().includes(q) ||
-          t.messages.some(m => m.content.toLowerCase().includes(q))
+          t.messages.some(m =>
+            m.authorName.toLowerCase().includes(q) ||
+            m.content.toLowerCase().includes(q)
+          )
         );
       });
   }, [courseFilter, searchTerm, statusFilter, threads]);
@@ -300,9 +360,11 @@ export default function TeacherQAPage() {
     }
     try {
       setSending(true);
-      const updated = await addTeacherQaMessage(selectedThread.id, content);
+      const attachment = replyImageFile ? await uploadQaImage(replyImageFile) : undefined;
+      const updated = await addTeacherQaMessage(selectedThread.id, content, attachment);
       setThreads(prev => prev.map(t => t.id === updated.id ? updated : t));
       setReplyInput('');
+      setReplyImageFile(null);
       notify.success('Đã gửi câu trả lời');
     } catch (error) {
       notify.error(error instanceof Error ? error.message : 'Không gửi được câu trả lời');
@@ -320,18 +382,89 @@ export default function TeacherQAPage() {
     }
     try {
       setSendingDiscussionReply(true);
+      const attachment = discussionReplyImageFile
+        ? await uploadQaImage(discussionReplyImageFile)
+        : undefined;
       const updated = await addCourseDiscussionReply(
         selectedDiscussionCourseId,
         selectedDiscussionThread.id,
         content,
+        attachment,
       );
       setDiscussionThreads(prev => prev.map(thread => thread.id === updated.id ? updated : thread));
       setDiscussionReplyInput('');
+      setDiscussionReplyImageFile(null);
       notify.success('Đã gửi trả lời vào Q&A chung');
     } catch (error) {
       notify.error(error instanceof Error ? error.message : 'Không gửi được câu trả lời');
     } finally {
       setSendingDiscussionReply(false);
+    }
+  }
+
+  async function deleteSelectedDiscussionThread() {
+    if (!selectedDiscussionThread || !selectedDiscussionCourseId) return;
+    if (!window.confirm('Xóa câu hỏi này và toàn bộ phản hồi bên dưới?')) return;
+    try {
+      setMutatingDiscussionId(selectedDiscussionThread.id);
+      await deleteCourseDiscussionThread(selectedDiscussionCourseId, selectedDiscussionThread.id);
+      setDiscussionThreads(prev => prev.filter(thread => thread.id !== selectedDiscussionThread.id));
+      setSelectedDiscussionId(null);
+      notify.success('Đã xóa câu hỏi khỏi Q&A chung');
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Không xóa được câu hỏi');
+    } finally {
+      setMutatingDiscussionId(null);
+    }
+  }
+
+  function startEditDiscussionReply(replyId: string, content: string) {
+    setEditingDiscussionReplyId(replyId);
+    setEditingDiscussionReplyText(content);
+  }
+
+  async function saveDiscussionReplyEdit(replyId: string) {
+    if (!selectedDiscussionThread || !selectedDiscussionCourseId) return;
+    const content = editingDiscussionReplyText.trim();
+    if (!content) {
+      notify.error('Vui lòng nhập nội dung phản hồi');
+      return;
+    }
+    try {
+      setMutatingDiscussionId(replyId);
+      const updated = await updateCourseDiscussionReply(
+        selectedDiscussionCourseId,
+        selectedDiscussionThread.id,
+        replyId,
+        content,
+      );
+      setDiscussionThreads(prev => prev.map(thread => thread.id === updated.id ? updated : thread));
+      setEditingDiscussionReplyId(null);
+      setEditingDiscussionReplyText('');
+      notify.success('Đã cập nhật phản hồi');
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Không cập nhật được phản hồi');
+    } finally {
+      setMutatingDiscussionId(null);
+    }
+  }
+
+  async function deleteDiscussionReply(replyId: string) {
+    if (!selectedDiscussionThread || !selectedDiscussionCourseId) return;
+    if (!window.confirm('Xóa phản hồi này?')) return;
+    try {
+      setMutatingDiscussionId(replyId);
+      const updated = await deleteCourseDiscussionReply(
+        selectedDiscussionCourseId,
+        selectedDiscussionThread.id,
+        replyId,
+      );
+      setDiscussionThreads(prev => prev.map(thread => thread.id === updated.id ? updated : thread));
+      notify.success('Đã xóa phản hồi');
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Không xóa được phản hồi');
+    } finally {
+      setMutatingDiscussionId(null);
     }
   }
 
@@ -408,13 +541,11 @@ export default function TeacherQAPage() {
           </button>
           <h1 className="font-extrabold text-on-surface text-lg hidden lg:block">Hỏi & Đáp</h1>
           <div className="flex items-center gap-4 ml-auto">
-            <button className="relative text-on-surface-variant hover:text-primary transition-colors">
-              <Bell className="w-5 h-5" />
-            </button>
+            <TeacherNotificationBell />
             <img
-              src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
+              src={user?.avatar ?? `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name ?? 'Giao Vien')}&background=7c3aed&color=fff&bold=true&size=64`}
               alt="Teacher avatar"
-              className="w-9 h-9 rounded-full border-2 border-primary/30"
+              className="w-9 h-9 rounded-full object-cover border-2 border-primary/30"
             />
           </div>
         </header>
@@ -423,8 +554,8 @@ export default function TeacherQAPage() {
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-extrabold text-on-surface mb-1">Hỏi & Đáp với học sinh</h2>
-                <p className="text-on-surface-variant text-sm">Trả lời câu hỏi theo từng cuộc hội thoại và đánh dấu đã giải quyết khi xong.</p>
+                <h2 className="text-2xl font-extrabold text-on-surface mb-1">Hỏi & Đáp trực tiếp</h2>
+                <p className="text-on-surface-variant text-sm">Trả lời câu hỏi của học sinh hoặc phụ huynh theo từng cuộc hội thoại.</p>
               </div>
               <button
                 onClick={() => activeView === 'common' ? loadDiscussionThreads() : loadThreads()}
@@ -489,7 +620,7 @@ export default function TeacherQAPage() {
                     type="text"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
-                    placeholder="Tên học sinh, bài học, nội dung..."
+                    placeholder="Tên học sinh, phụ huynh, bài học, nội dung..."
                     className="w-full pl-9 pr-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant"
                   />
                 </div>
@@ -515,6 +646,7 @@ export default function TeacherQAPage() {
                   {filteredThreads.map(thread => {
                     const isSelected = thread.id === selectedId;
                     const firstMessage = thread.messages[0];
+                    const displayName = directThreadDisplayName(thread);
                     return (
                       <button
                         key={thread.id}
@@ -527,12 +659,12 @@ export default function TeacherQAPage() {
                       >
                         <div className="flex items-start gap-2 mb-2">
                           <img
-                            src={`https://ui-avatars.com/api/?name=${encodeURIComponent(thread.studentName)}&size=36&background=random&bold=true`}
-                            alt={thread.studentName}
+                            src={`https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&size=36&background=random&bold=true`}
+                            alt={displayName}
                             className="w-8 h-8 rounded-full flex-shrink-0"
                           />
                           <div className="min-w-0 flex-1">
-                            <p className={`font-bold text-sm line-clamp-1 ${isSelected ? 'text-primary' : 'text-on-surface'}`}>{thread.studentName}</p>
+                            <p className={`font-bold text-sm line-clamp-1 ${isSelected ? 'text-primary' : 'text-on-surface'}`}>{displayName}</p>
                             <p className="text-xs text-on-surface-variant line-clamp-1">{thread.lessonTitle ?? thread.courseTitle}</p>
                           </div>
                           <StatusBadge status={thread.status} />
@@ -560,7 +692,7 @@ export default function TeacherQAPage() {
                   <div className="px-5 py-4 border-b border-outline-variant/30">
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div className="min-w-0 flex-1">
-                        <p className="font-extrabold text-on-surface">{selectedThread.studentName}</p>
+                        <p className="font-extrabold text-on-surface">{directThreadDisplayName(selectedThread)}</p>
                         <p className="text-xs text-on-surface-variant">Bắt đầu: {formatDateTime(selectedThread.createdAt)}</p>
                       </div>
                       <StatusBadge status={selectedThread.status} />
@@ -600,6 +732,7 @@ export default function TeacherQAPage() {
                       rows={3}
                       className="w-full px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant resize-none"
                     />
+                    <QaImagePicker file={replyImageFile} onChange={setReplyImageFile} disabled={sending} />
 
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-3">
                       <button
@@ -753,11 +886,22 @@ export default function TeacherQAPage() {
                                 {roleLabel(selectedDiscussionThread.authorRole)} · {formatDateTime(selectedDiscussionThread.createdAt)}
                               </p>
                             </div>
+                            <div className="flex flex-col items-end gap-2">
                             <span className={`text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${
                               hasTeacherReply(selectedDiscussionThread) ? 'bg-green-500/10 text-green-700' : 'bg-amber-500/10 text-amber-700'
                             }`}>
                               {hasTeacherReply(selectedDiscussionThread) ? 'Đã trả lời' : 'Chưa trả lời'}
                             </span>
+                            <button
+                              type="button"
+                              onClick={deleteSelectedDiscussionThread}
+                              disabled={mutatingDiscussionId === selectedDiscussionThread.id}
+                              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-60"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Xóa câu hỏi
+                            </button>
+                            </div>
                           </div>
                           <div className="flex items-center gap-2 text-sm flex-wrap">
                             <span className="text-on-surface-variant">Bài giảng:</span>
@@ -773,6 +917,15 @@ export default function TeacherQAPage() {
                                 {selectedDiscussionThread.authorName} · {formatDateTime(selectedDiscussionThread.createdAt)}
                               </div>
                               <p className="text-sm whitespace-pre-wrap leading-relaxed">{selectedDiscussionThread.content}</p>
+                              {selectedDiscussionThread.attachmentUrl && selectedDiscussionThread.attachmentType?.startsWith('image/') && (
+                                <a href={selectedDiscussionThread.attachmentUrl} target="_blank" rel="noreferrer" className="block mt-2">
+                                  <img
+                                    src={selectedDiscussionThread.attachmentUrl}
+                                    alt={selectedDiscussionThread.attachmentName ?? 'Ảnh câu hỏi'}
+                                    className="max-h-80 max-w-full rounded-xl object-contain bg-black/5"
+                                  />
+                                </a>
+                              )}
                             </div>
                           </div>
 
@@ -788,7 +941,73 @@ export default function TeacherQAPage() {
                                   <div className={`text-xs font-bold mb-1 ${isTeacher ? 'text-on-primary/80' : 'text-on-surface-variant'}`}>
                                     {reply.authorName} · {roleLabel(reply.authorRole)} · {formatDateTime(reply.createdAt)}
                                   </div>
-                                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{reply.content}</p>
+                                  {editingDiscussionReplyId === reply.id ? (
+                                    <div className="mt-2 space-y-2">
+                                      <textarea
+                                        value={editingDiscussionReplyText}
+                                        onChange={event => setEditingDiscussionReplyText(event.target.value)}
+                                        className="w-full min-h-[76px] rounded-lg border border-outline-variant/40 bg-surface px-3 py-2 text-sm text-on-surface outline-none focus:border-primary"
+                                      />
+                                      <div className="flex justify-end gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingDiscussionReplyId(null);
+                                            setEditingDiscussionReplyText('');
+                                          }}
+                                          className="rounded-lg px-3 py-1.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container"
+                                        >
+                                          Hủy
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => saveDiscussionReplyEdit(reply.id)}
+                                          disabled={mutatingDiscussionId === reply.id}
+                                          className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-on-primary disabled:opacity-60"
+                                        >
+                                          {mutatingDiscussionId === reply.id ? 'Đang lưu...' : 'Lưu'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{reply.content}</p>
+                                  )}
+                                  {reply.attachmentUrl && reply.attachmentType?.startsWith('image/') && (
+                                    <a href={reply.attachmentUrl} target="_blank" rel="noreferrer" className="block mt-2">
+                                      <img
+                                        src={reply.attachmentUrl}
+                                        alt={reply.attachmentName ?? 'Ảnh phản hồi'}
+                                        className="max-h-64 max-w-full rounded-xl object-contain bg-black/5"
+                                      />
+                                    </a>
+                                  )}
+                                  {editingDiscussionReplyId !== reply.id && (
+                                    <div className={`mt-2 flex items-center gap-2 ${isTeacher ? 'justify-end' : 'justify-start'}`}>
+                                      {currentUserId === reply.authorId && (
+                                        <button
+                                          type="button"
+                                          onClick={() => startEditDiscussionReply(reply.id, reply.content)}
+                                          className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold ${
+                                            isTeacher ? 'text-on-primary/85 hover:bg-white/10' : 'text-on-surface-variant hover:bg-surface'
+                                          }`}
+                                        >
+                                          <PenSquare className="h-3.5 w-3.5" />
+                                          Sửa
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => deleteDiscussionReply(reply.id)}
+                                        disabled={mutatingDiscussionId === reply.id}
+                                        className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold disabled:opacity-60 ${
+                                          isTeacher ? 'text-on-primary/85 hover:bg-white/10' : 'text-red-600 hover:bg-red-50'
+                                        }`}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        Xóa
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -817,6 +1036,11 @@ export default function TeacherQAPage() {
                             placeholder="Nhập nội dung trả lời công khai..."
                             rows={3}
                             className="w-full px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant resize-none"
+                          />
+                          <QaImagePicker
+                            file={discussionReplyImageFile}
+                            onChange={setDiscussionReplyImageFile}
+                            disabled={sendingDiscussionReply}
                           />
 
                           <div className="flex justify-end mt-3">

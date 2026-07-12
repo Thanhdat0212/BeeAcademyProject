@@ -1,17 +1,17 @@
-/**
- * ExcelImportModal — Phase 2
- * Giáo viên upload file .xlsx → parse → preview → bulk import
+﻿/**
+ * ExcelImportModal â€” Phase 2
+ * GiÃ¡o viÃªn upload file .xlsx â†’ parse â†’ preview â†’ bulk import
  *
- * Định dạng Excel (hàng 1 = header, dữ liệu từ hàng 2):
- *   A: Nội dung câu hỏi   (bắt buộc)
- *   B: Loại               TN = trắc nghiệm | DS = đúng/sai
- *   C: Độ khó             D = dễ | TB = trung bình | K = khó
- *   D: Đáp án A           (bắt buộc)
- *   E: Đáp án B           (bắt buộc)
- *   F: Đáp án C           (tùy chọn)
- *   G: Đáp án D           (tùy chọn)
- *   H: Đáp án đúng        A / B / C / D
- *   I: Giải thích         (tùy chọn)
+ * Äá»‹nh dáº¡ng Excel (hÃ ng 1 = header, dá»¯ liá»‡u tá»« hÃ ng 2):
+ *   A: Ná»™i dung cÃ¢u há»i
+ *   B: Loáº¡i (TN/DS/DC/TL/TLN/TLD/HA/AU)
+ *   C: Äá»™ khÃ³ (D/TB/K)
+ *   D-G: ÄÃ¡p Ã¡n A-D (cho cÃ¢u tráº¯c nghiá»‡m)
+ *   H: ÄÃ¡p Ã¡n Ä‘Ãºng
+ *   I: Giáº£i thÃ­ch
+ *   J: ÄÃ¡p Ã¡n cháº¥p nháº­n
+ *   K: Cáº·p ná»‘i
+ *   L-R: metadata má»Ÿ rá»™ng theo tá»«ng loáº¡i
  */
 
 import { useState, useRef, useCallback } from 'react';
@@ -19,7 +19,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { notify } from '../../lib/toast';
 import * as questionService from '../../api/questionService';
-import type { CreateQuestionRequest } from '../../api/questionService';
+import type { CreateQuestionRequest, QuestionMetadata } from '../../api/questionService';
+import type { QuestionBankResponse } from '../../api/questionBankService';
 import { isApiError } from '../../api/client';
 import { listCategories } from '../../api/courseService';
 import { listMyCourses, getCourseDetail } from '../../api/teacherCourseService';
@@ -31,21 +32,21 @@ import {
 } from 'lucide-react';
 import { useEffect } from 'react';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// Types
 
 type Difficulty = 'easy' | 'medium' | 'hard';
 
 interface ParsedRow {
   rowNum: number;
   content: string;
-  type: 'multiple_choice' | 'true_false';
+  type: CreateQuestionRequest['type'];
   difficulty: Difficulty;
   choices: Array<{ content: string; isCorrect: boolean }>;
   explanation: string;
+  metadata?: QuestionMetadata | null;
   error?: string;
 }
-
-// ─── Excel parser ─────────────────────────────────────────────────────────────
+// Excel parser
 
 function plain(value: unknown): string {
   return String(value ?? '').trim();
@@ -54,17 +55,20 @@ function plain(value: unknown): string {
 function token(value: unknown): string {
   return plain(value)
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/Đ/g, 'D')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/Ä‘/g, 'd')
+    .replace(/Ä/g, 'D')
     .toUpperCase();
 }
 
-function parseQuestionType(value: unknown): 'multiple_choice' | 'true_false' {
+function parseQuestionType(value: unknown): CreateQuestionRequest['type'] {
   const t = token(value);
-  return ['DS', 'DUNG/SAI', 'TRUE_FALSE', 'TRUEFALSE', 'TF'].includes(t)
-    ? 'true_false'
-    : 'multiple_choice';
+  if (['DS', 'DUNG/SAI', 'TRUE_FALSE', 'TRUEFALSE', 'TF'].includes(t)) return 'true_false';
+  if (['DC', 'DIEN_CHO_TRONG', 'FILL_IN_BLANK', 'FILLBLANK'].includes(t)) return 'fill_in_blank';
+  if (['TLN', 'TU_LUAN_NGAN', 'ESSAY_SHORT'].includes(t)) return 'essay';
+  if (['TLD', 'TU_LUAN_DAI', 'ESSAY_LONG'].includes(t)) return 'essay';
+  if (['TL', 'TU_LUAN', 'TULUAN', 'ESSAY'].includes(t)) return 'essay';
+  return 'multiple_choice';
 }
 
 function parseDifficulty(value: unknown): Difficulty {
@@ -74,18 +78,50 @@ function parseDifficulty(value: unknown): Difficulty {
   return 'medium';
 }
 
-function correctChoiceIndex(value: unknown): number {
-  const c = token(value);
-  if (['A', '1'].includes(c)) return 0;
-  if (['B', '2'].includes(c)) return 1;
-  if (['C', '3'].includes(c)) return 2;
-  if (['D', '4'].includes(c)) return 3;
-  return -1;
+function correctChoiceIndices(value: unknown): number[] {
+  const raw = plain(value);
+  if (!raw) return [];
+  return raw
+    .split(/[,\s;/|+-]+/)
+    .map(token)
+    .map(c => {
+      if (['A', '1'].includes(c)) return 0;
+      if (['B', '2'].includes(c)) return 1;
+      if (['C', '3'].includes(c)) return 2;
+      if (['D', '4'].includes(c)) return 3;
+      return -1;
+    })
+    .filter(index => index >= 0)
+    .filter((index, position, arr) => arr.indexOf(index) === position);
 }
 
 function trueFalseCorrectIndex(value: unknown): number {
   const c = token(value);
   return ['B', 'S', 'SAI', 'FALSE', 'F', '0'].includes(c) ? 1 : 0;
+}
+
+function splitValues(value: unknown): string[] {
+  return plain(value)
+    .split(/\r?\n|[|;,]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function questionTypeLabel(type: CreateQuestionRequest['type']): string {
+  const labels: Record<CreateQuestionRequest['type'], string> = {
+    multiple_choice: 'Trắc nghiệm',
+    true_false: 'Đúng / Sai',
+    fill_in_blank: 'Điền vào chỗ trống',
+    matching: 'Nối cột (ngừng dùng)',
+    essay: 'Tự luận chung',
+    essay_short: 'Tự luận chung',
+    essay_long: 'Tự luận chung',
+    image_question: 'Câu hỏi hình ảnh',
+    formula_question: 'Câu hỏi công thức (ngừng dùng)',
+    audio_question: 'Câu hỏi audio',
+    file_upload: 'Nộp file / ảnh (ngừng dùng)',
+  };
+  return labels[type];
 }
 
 function getErrorMessage(err: unknown, fallback: string): string {
@@ -109,13 +145,14 @@ function parseExcel(file: File): Promise<ParsedRow[]> {
         const rows: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
         const parsed: ParsedRow[] = [];
-        // Bỏ hàng header (hàng 0)
+        // Skip the header row (row 0).
         for (let i = 1; i < rows.length; i++) {
           const r = rows[i];
-          // Bỏ qua hàng trống hoàn toàn
+          // Ignore fully empty rows.
           if (!r.some(cell => String(cell).trim())) continue;
 
           const content     = plain(r[0]);
+          const rawTypeToken = token(r[1] || 'TN');
           const type        = parseQuestionType(r[1] || 'TN');
           const difficulty  = parseDifficulty(r[2] || 'TB');
           const ansA        = plain(r[3]);
@@ -123,12 +160,39 @@ function parseExcel(file: File): Promise<ParsedRow[]> {
           const ansC        = plain(r[5]);
           const ansD        = plain(r[6]);
           const explanation = plain(r[8]);
+          const acceptedAnswers = splitValues(r[9]);
+          const sampleAnswer = plain(r[10]);
+          const wordLimit = plain(r[11]);
+          const gradingRubric = plain(r[12]);
 
           // Build choices
           let choices: Array<{ content: string; isCorrect: boolean }>;
+          let metadata: QuestionMetadata | null = null;
           let error: string | undefined;
 
-          if (type === 'true_false') {
+          const unsupportedType = [
+            'NC', 'NOI_COT', 'MATCHING',
+            'CT', 'CONG_THUC', 'FORMULA_QUESTION',
+            'NF', 'NOP_FILE', 'FILE_UPLOAD',
+            'HA', 'HINH_ANH', 'IMAGE_QUESTION',
+            'AU', 'AUDIO_QUESTION', 'NGHE_AUDIO',
+          ].includes(rawTypeToken);
+
+          if (unsupportedType) {
+            choices = [];
+            error = 'Import Excel chỉ hỗ trợ trắc nghiệm, đúng/sai, điền vào chỗ trống và tự luận chung. Câu hỏi hình ảnh/audio phải thêm thủ công.';
+          } else if (type === 'essay') {
+            choices = [];
+            metadata = {
+              sampleAnswer: sampleAnswer || undefined,
+              wordLimit: wordLimit ? Number(wordLimit) : null,
+              gradingRubric: gradingRubric || undefined,
+            };
+          } else if (type === 'fill_in_blank') {
+            choices = [];
+            metadata = { acceptedAnswers };
+            if (acceptedAnswers.length === 0) error = 'Cần cột đáp án chấp nhận';
+          } else if (type === 'true_false') {
             const correctIdx = trueFalseCorrectIndex(r[7] || 'A');
             choices = [
               { content: 'Đúng', isCorrect: correctIdx === 0 },
@@ -136,22 +200,20 @@ function parseExcel(file: File): Promise<ParsedRow[]> {
             ];
           } else {
             const raw = [ansA, ansB, ansC, ansD].filter(Boolean);
-            if (raw.length < 2) {
-              error = 'Cần ít nhất 2 đáp án';
-            }
-            const correctIdx = correctChoiceIndex(r[7] || 'A');
+            if (raw.length < 2) error = 'Cần ít nhất 2 đáp án';
+            const correctIndices = correctChoiceIndices(r[7] || 'A');
             choices = raw.map((c, idx) => ({
               content: c,
-              isCorrect: idx === correctIdx,
+              isCorrect: correctIndices.includes(idx),
             }));
-            if (correctIdx < 0 || correctIdx >= raw.length) {
+            if (correctIndices.length === 0 || correctIndices.some(correctIdx => correctIdx >= raw.length)) {
               error = `Đáp án đúng "${plain(r[7])}" không hợp lệ`;
             }
           }
 
           if (!content) error = 'Thiếu nội dung câu hỏi';
 
-          parsed.push({ rowNum: i + 1, content, type, difficulty, choices, explanation, error });
+          parsed.push({ rowNum: i + 1, content, type, difficulty, choices, explanation, metadata, error });
         }
         resolve(parsed);
       } catch (err) {
@@ -163,32 +225,39 @@ function parseExcel(file: File): Promise<ParsedRow[]> {
   });
 }
 
-// ─── Download template ────────────────────────────────────────────────────────
+// Download template
 
 function downloadTemplate() {
   const header = [
     'Nội dung câu hỏi',
-    'Loại (TN/DS)',
+    'Loại (TN/DS/DC/TL)',
     'Độ khó (D/TB/K)',
     'Đáp án A',
     'Đáp án B',
     'Đáp án C',
     'Đáp án D',
-    'Đáp án đúng (A/B/C/D)',
+    'Đáp án đúng (A/B/C/D hoặc A,B,..., bỏ trống nếu không phải trắc nghiệm)',
     'Giải thích (tùy chọn)',
+    'Đáp án chấp nhận (ngăn bởi |)',
+    'Đáp án mẫu',
+    'Giới hạn từ',
+    'Rubric',
   ];
   const examples = [
-    ['Phương trình bậc hai ax²+bx+c=0 có tối đa bao nhiêu nghiệm thực?', 'TN', 'D', '1 nghiệm', '2 nghiệm', '3 nghiệm', '0 nghiệm', 'B', 'Theo định lý cơ bản đại số'],
-    ['Trái đất quay quanh Mặt Trời.', 'DS', 'D', '', '', '', '', 'A', ''],
-    ['Nguyên tố nào có số hiệu nguyên tử bằng 1?', 'TN', 'TB', 'Heli', 'Oxy', 'Hydro', 'Carbon', 'C', 'H có Z=1 trong bảng tuần hoàn'],
+    ['Phương trình bậc hai ax²+bx+c=0 có tối đa bao nhiêu nghiệm thực?', 'TN', 'D', '1 nghiệm', '2 nghiệm', '3 nghiệm', '0 nghiệm', 'B', 'Theo định lý cơ bản đại số', '', '', '', ''],
+    ['Những số nào sau đây là số nguyên tố?', 'TN', 'TB', '2', '3', '4', '5', 'A,B,D', 'Có thể có nhiều đáp án đúng', '', '', '', ''],
+    ['Trái đất quay quanh Mặt Trời.', 'DS', 'D', '', '', '', '', 'A', '', '', '', '', ''],
+    ['Thủ đô của Việt Nam là ___', 'DC', 'D', '', '', '', '', '', '', 'Hà Nội|Ha Noi', '', '', ''],
+    ['Trình bày các bước giải phương trình bậc hai bằng công thức nghiệm.', 'TL', 'K', '', '', '', '', '', 'Câu tự luận', '', 'Nêu đủ công thức và cách thay số', '150', 'Trình bày đúng công thức và các bước thay số'],
   ];
 
   const ws = XLSX.utils.aoa_to_sheet([header, ...examples]);
 
   // Style header row width
   ws['!cols'] = [
-    { wch: 50 }, { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 20 },
-    { wch: 20 }, { wch: 20 }, { wch: 22 }, { wch: 35 },
+    { wch: 50 }, { wch: 22 }, { wch: 16 }, { wch: 20 }, { wch: 20 },
+    { wch: 20 }, { wch: 20 }, { wch: 30 }, { wch: 35 }, { wch: 28 },
+    { wch: 28 }, { wch: 14 }, { wch: 24 },
   ];
 
   const wb = XLSX.utils.book_new();
@@ -196,7 +265,7 @@ function downloadTemplate() {
   XLSX.writeFile(wb, 'mau_ngan_hang_cau_hoi.xlsx');
 }
 
-// ─── Difficulty badge (small) ─────────────────────────────────────────────────
+// Difficulty badge
 
 function DiffBadge({ d }: { d: Difficulty }) {
   const map = {
@@ -210,15 +279,21 @@ function DiffBadge({ d }: { d: Difficulty }) {
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// Main component
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onImported: () => void;
+  selectedQuestionBank?: QuestionBankResponse | null;
 }
 
-export default function ExcelImportModal({ open, onClose, onImported }: Props) {
+export default function ExcelImportModal({
+  open,
+  onClose,
+  onImported,
+  selectedQuestionBank = null,
+}: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Context selectors
@@ -249,14 +324,20 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
       .finally(() => setLoadingMeta(false));
   }, [open]);
 
-  // Load chapters + lock category khi chọn course
+  useEffect(() => {
+    if (!open || !selectedQuestionBank) return;
+    setCategoryId(selectedQuestionBank.categoryId);
+    setGrade(String(selectedQuestionBank.grade));
+  }, [open, selectedQuestionBank]);
+
+  // Load chapters and lock category when a course is selected.
   useEffect(() => {
     if (!courseId) { setChapters([]); setChapterId(''); return; }
     setLoadingCh(true);
     getCourseDetail(courseId)
       .then(d => {
         setChapters(d.chapters);
-        // Luôn fill (bỏ điều kiện !categoryId cũ) — đảm bảo category khớp course
+        // Always sync the category from the selected course.
         if (d.categoryId) setCategoryId(d.categoryId);
         if (d.grades?.[0]) setGrade(String(d.grades[0]));
       })
@@ -311,12 +392,33 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
   const errorRows  = rows.filter(r => r.error);
 
   function handleCourseChange(nextCourseId: string) {
+    const selectedCourse = courses.find(c => c.id === nextCourseId);
+    if (selectedCourse && selectedQuestionBank) {
+      const matchesBank = selectedCourse.categoryId === selectedQuestionBank.categoryId
+        && (selectedCourse.grades?.includes(selectedQuestionBank.grade) ?? false);
+      if (!matchesBank) {
+        notify.error('Khóa học phải cùng môn học và lớp với ngân hàng câu hỏi đang chọn');
+        return;
+      }
+    }
+
     setCourseId(nextCourseId);
     setChapterId('');
 
-    if (!nextCourseId) return;
+    if (!nextCourseId) {
+      if (selectedQuestionBank) {
+        setCategoryId(selectedQuestionBank.categoryId);
+        setGrade(String(selectedQuestionBank.grade));
+      }
+      return;
+    }
 
-    const selectedCourse = courses.find(c => c.id === nextCourseId);
+    if (selectedQuestionBank) {
+      setCategoryId(selectedQuestionBank.categoryId);
+      setGrade(String(selectedQuestionBank.grade));
+      return;
+    }
+
     if (selectedCourse?.categoryId) setCategoryId(selectedCourse.categoryId);
     setGrade(selectedCourse?.grades?.[0] ? String(selectedCourse.grades[0]) : '');
   }
@@ -329,12 +431,14 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
     const requests: CreateQuestionRequest[] = validRows.map(r => ({
       categoryId,
       grade: Number(grade),
+      questionBankId: selectedQuestionBank?.id || undefined,
       chapterId: chapterId || undefined,
       content:     r.content,
       explanation: r.explanation || undefined,
       difficulty:  r.difficulty,
       type:        r.type,
       choices:     r.choices,
+      metadata:    r.metadata ?? null,
     }));
 
     setImporting(true);
@@ -349,14 +453,14 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
       }
     } catch (err) {
       if (!wasNetworkErrorAlreadyToasted(err)) {
-        notify.error(getErrorMessage(err, 'Nhập thất bại — kiểm tra lại kết nối'));
+        notify.error(getErrorMessage(err, 'Nhập thất bại - kiểm tra lại kết nối'));
       }
     } finally {
       setImporting(false);
     }
   }
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // Render
   return (
     <AnimatePresence>
       {open && (
@@ -385,7 +489,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                 </div>
                 <div>
                   <h2 className="font-extrabold text-on-surface">Nhập câu hỏi từ Excel</h2>
-                  <p className="text-xs text-on-surface-variant">Hỗ trợ .xlsx / .xls — tối đa 200 câu mỗi lần</p>
+                  <p className="text-xs text-on-surface-variant">Hỗ trợ .xlsx / .xls - tối đa 200 câu mỗi lần</p>
                 </div>
               </div>
               <button onClick={handleClose} className="p-2 rounded-xl hover:bg-surface-container text-on-surface-variant">
@@ -396,13 +500,16 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
             {/* Body */}
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
-              {/* Step 1 — Tải template */}
+              {/* Step 1 - Tải template */}
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
                 <Eye className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-blue-800">Bước 1 — Tải file mẫu</p>
+                  <p className="text-sm font-bold text-blue-800">Bước 1 - Tải file mẫu</p>
                   <p className="text-xs text-blue-600 mt-0.5">
-                    File mẫu có 3 câu hỏi ví dụ giúp bạn điền đúng định dạng.
+                    File mẫu chỉ hỗ trợ 4 dạng: trắc nghiệm, đúng/sai, điền vào chỗ trống và tự luận chung.
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Câu hỏi hình ảnh và audio cần được thêm thủ công ở mục Thêm câu hỏi.
                   </p>
                 </div>
                 <button
@@ -413,17 +520,23 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                 </button>
               </div>
 
-              {/* Step 2 — Chọn khóa học + môn + chương */}
+              {/* Step 2 - Chọn khóa học + môn + chương */}
               <div>
                 <p className="text-sm font-bold text-on-surface mb-2">
-                  Bước 2 — Gắn nhãn cho toàn bộ câu hỏi trong file
+                  Bước 2 - Gắn nhãn cho toàn bộ câu hỏi trong file
                 </p>
+                {selectedQuestionBank && (
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    Đang nhập vào question bank <span className="font-bold">{selectedQuestionBank.title}</span>.
+                    Môn học và lớp sẽ được khóa theo bank này.
+                  </div>
+                )}
                 {(() => {
-                  const isCategoryLocked = Boolean(courseId);
-                  const isGradeLocked = Boolean(courseId);
+                  const isCategoryLocked = Boolean(courseId || selectedQuestionBank);
+                  const isGradeLocked = Boolean(courseId || selectedQuestionBank);
                   return (
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                      {/* Khóa học — chọn trước để auto-fill môn */}
+                      {/* Khóa học */}
                       <div>
                         <label className="block text-xs font-semibold text-on-surface-variant mb-1">Khóa học</label>
                         <div className="relative">
@@ -440,7 +553,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                         </div>
                       </div>
 
-                      {/* Môn học — locked khi đã chọn course */}
+                      {/* Môn học */}
                       <div>
                         <label className="block text-xs font-semibold text-on-surface-variant mb-1">
                           Môn học <span className="text-red-500">*</span>
@@ -460,7 +573,9 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                           }
                         </div>
                         {isCategoryLocked && (
-                          <p className="text-xs text-primary/70 mt-1">Lấy từ khóa học</p>
+                          <p className="text-xs text-primary/70 mt-1">
+                            {selectedQuestionBank ? 'Lấy từ question bank' : 'Lấy từ khóa học'}
+                          </p>
                         )}
                       </div>
 
@@ -483,7 +598,9 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                           }
                         </div>
                         {isGradeLocked && (
-                          <p className="text-xs text-primary/70 mt-1">Lấy từ khóa học</p>
+                          <p className="text-xs text-primary/70 mt-1">
+                            {selectedQuestionBank ? 'Lấy từ question bank' : 'Lấy từ khóa học'}
+                          </p>
                         )}
                       </div>
 
@@ -496,7 +613,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                             disabled={!courseId || loadingCh}
                             className="w-full appearance-none pl-3 pr-8 py-2.5 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary disabled:opacity-50"
                           >
-                            <option value="">-- Cấp môn học --</option>
+                            <option value="">-- Chọn chương --</option>
                             {chapters.map(ch => <option key={ch.id} value={ch.id}>{ch.title.slice(0, 35)}</option>)}
                           </select>
                           {loadingCh
@@ -510,9 +627,9 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                 })()}
               </div>
 
-              {/* Step 3 — Upload file */}
+              {/* Step 3 - Upload file */}
               <div>
-                <p className="text-sm font-bold text-on-surface mb-2">Bước 3 — Chọn file Excel</p>
+                <p className="text-sm font-bold text-on-surface mb-2">Bước 3 - Chọn file Excel</p>
                 <div
                   onDrop={onDrop}
                   onDragOver={e => e.preventDefault()}
@@ -531,7 +648,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                       <div className="text-left">
                         <p className="font-bold text-on-surface text-sm">{fileName}</p>
                         <p className="text-xs text-on-surface-variant">
-                          {rows.length} dòng · {validRows.length} hợp lệ · {errorRows.length} lỗi
+                          {rows.length} dòng - {validRows.length} hợp lệ - {errorRows.length} lỗi
                         </p>
                       </div>
                       <button
@@ -556,7 +673,7 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm font-bold text-on-surface">
-                      Preview — {rows.length} câu hỏi
+                      Preview - {rows.length} câu hỏi
                       {errorRows.length > 0 && (
                         <span className="ml-2 text-red-500 text-xs font-semibold">
                           ({errorRows.length} dòng lỗi sẽ bị bỏ qua)
@@ -588,13 +705,20 @@ export default function ExcelImportModal({ open, onClose, onImported }: Props) {
                                 <p className="truncate">{row.content || <span className="text-red-400 italic">Trống</span>}</p>
                               </td>
                               <td className="px-3 py-2 whitespace-nowrap text-on-surface-variant">
-                                {row.type === 'multiple_choice' ? 'Trắc nghiệm' : 'Đúng/Sai'}
+                                {questionTypeLabel(row.type)}
                               </td>
                               <td className="px-3 py-2">
                                 <DiffBadge d={row.difficulty} />
                               </td>
                               <td className="px-3 py-2 text-on-surface">
-                                {row.choices.find(c => c.isCorrect)?.content.slice(0, 30) ?? '—'}
+                                {row.choices.length > 0
+                                  ? row.choices
+                                    .filter(c => c.isCorrect)
+                                    .map(c => c.content.slice(0, 30))
+                                    .join(', ') || '-'
+                                  : row.metadata?.acceptedAnswers?.join(', ')
+                                    || row.metadata?.sampleAnswer?.slice(0, 30)
+                                    || '-'}
                               </td>
                               <td className="px-3 py-2">
                                 {row.error ? (

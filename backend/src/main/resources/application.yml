@@ -52,11 +52,11 @@ spring:
         physical_naming_strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
     open-in-view: false   # Tắt OSIV - tránh lazy load ngoài transaction (best practice)
 
-  # Upload: avatar (5MB) + video khoá học (500MB)
+  # Upload: avatar (5MB) + video khóa học (2GB) + tài liệu (100MB)
   servlet:
     multipart:
-      max-file-size: 500MB
-      max-request-size: 500MB
+      max-file-size: 2GB
+      max-request-size: 2GB
 
   # --------------------------------------------------------------------------
   # Mail: gửi OTP qua Gmail SMTP
@@ -88,7 +88,7 @@ supabase:
 # ============================================================================
 app:
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
   dev-mode: ${DEV_MODE:false}
   frontend-url: ${FRONTEND_URL:http://localhost:3000}
   gemini:

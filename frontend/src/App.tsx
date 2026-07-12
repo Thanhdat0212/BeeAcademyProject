@@ -17,8 +17,13 @@ import FavoritesPage from './pages/student/FavoritesPage';
 import AccountPage from './pages/student/AccountPage';
 import AvatarPage from './pages/student/AvatarPage';
 import ComplaintsPage from './pages/student/ComplaintsPage';
+import ProgressPage from './pages/student/ProgressPage';
+import RewardsPage from './pages/student/RewardsPage';
 import StudentQuizPage from './pages/student/StudentQuizPage';
 import StudentExamPage from './pages/student/StudentExamPage';
+import NotificationsPage from './pages/student/NotificationsPage';
+import CertificatesPage from './pages/student/CertificatesPage';
+import AiTutorPage from './pages/student/AiTutorPage';
 import DashboardAdmin from './pages/admin/DashboardAdmin';
 import DashboardTeacher from './pages/teacher/DashboardTeacher';
 import TeacherCoursesPage from './pages/teacher/CoursesPage';
@@ -30,21 +35,28 @@ import TeacherQAPage from './pages/teacher/QAPage';
 import TeacherRevenuePage from './pages/teacher/RevenuePage';
 import TeacherBankPage from './pages/teacher/BankPage';
 import TeacherComplaintsPage from './pages/teacher/ComplaintsPage';
+import TeacherReviewsPage from './pages/teacher/ReviewsPage';
 import QuestionBankPage from './pages/teacher/QuestionBankPage';
+import TeacherProfilePage from './pages/teacher/ProfilePage';
+import TeacherAccountPage from './pages/teacher/AccountPage';
 import ApprovalsPage from './pages/admin/ApprovalsPage';
 import CourseReviewPage from './pages/admin/CourseReviewPage';
 import OAuthCallbackPage from './pages/common/OAuthCallbackPage';
+import CertificateVerifyPage from './pages/common/CertificateVerifyPage';
 import ParentDashboard from './pages/parents/ParentDashboard';
 import ParentCourses from './pages/parents/ParentCourses';
 import ParentProgress from './pages/parents/ParentProgress';
 import ParentMessages from './pages/parents/ParentMessages';
 import ParentStudentLink from './pages/parents/ParentStudentLink';
+import ParentPayments from './pages/parents/ParentPayments';
 import ProtectedRoute from './components/ProtectedRoute';
+import MaintenanceGate from './components/MaintenanceGate';
 
 export default function App() {
   return (
     <BrowserRouter>
       <Toaster />
+      <MaintenanceGate>
       <Routes>
         {/* ── Public ── */}
         <Route path="/" element={<LandingPage />} />
@@ -52,35 +64,47 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/auth/callback" element={<OAuthCallbackPage />} />
+        <Route path="/certificates/verify/:verificationCode" element={<CertificateVerifyPage />} />
 
 
         {/* ── Student (cần đăng nhập) ── */}
         <Route path="/quiz" element={<ProtectedRoute><QuizPage /></ProtectedRoute>} />
+        {/* Giữ public (không ProtectedRoute): khách vãng lai duyệt danh sách + chi tiết
+            + học thử khóa miễn phí khi chưa đăng nhập. Không gắn role="student" như team3
+            để không chặn luồng học thử/SEO trang khóa học. */}
         <Route path="/courses" element={<CoursesPage />} />
         <Route path="/courses/:id" element={<CourseDetailPage />} />
         <Route path="/courses/:courseId/chapters/:chapterId/quiz" element={<ProtectedRoute><StudentQuizPage /></ProtectedRoute>} />
         <Route path="/courses/:courseId/exams/:slotIndex" element={<ProtectedRoute><StudentExamPage /></ProtectedRoute>} />
-        <Route path="/checkout"      element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
-        <Route path="/payment-result" element={<ProtectedRoute><PaymentResultPage /></ProtectedRoute>} />
-        <Route path="/orders"        element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
-        <Route path="/favorites"     element={<ProtectedRoute><FavoritesPage /></ProtectedRoute>} />
+        <Route path="/checkout"      element={<ProtectedRoute role="student"><CheckoutPage /></ProtectedRoute>} />
+        <Route path="/payment-result" element={<ProtectedRoute role="student"><PaymentResultPage /></ProtectedRoute>} />
+        <Route path="/orders"        element={<ProtectedRoute role="student"><OrdersPage /></ProtectedRoute>} />
+        <Route path="/favorites"     element={<ProtectedRoute role="student"><FavoritesPage /></ProtectedRoute>} />
+        <Route path="/progress"      element={<ProtectedRoute role="student"><ProgressPage /></ProtectedRoute>} />
+        <Route path="/rewards"       element={<ProtectedRoute role="student"><RewardsPage /></ProtectedRoute>} />
+        <Route path="/certificates"  element={<ProtectedRoute role="student"><CertificatesPage /></ProtectedRoute>} />
+        <Route path="/ai-tutor"      element={<ProtectedRoute role="student"><AiTutorPage /></ProtectedRoute>} />
         <Route path="/messages"      element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
         <Route path="/profile"       element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
         <Route path="/account/type"  element={<ProtectedRoute><ComingSoonPage title="Loại tài khoản" subtitle="Quản lý gói đăng ký của bạn" /></ProtectedRoute>} />
         <Route path="/account/photo" element={<ProtectedRoute><AvatarPage /></ProtectedRoute>} />
         <Route path="/account"       element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
         <Route path="/complaints"    element={<ProtectedRoute><ComplaintsPage /></ProtectedRoute>} />
+        <Route path="/notifications" element={<ProtectedRoute role="student"><NotificationsPage /></ProtectedRoute>} />
 
         {/* ── Parent (chỉ role=parent) ── */}
         <Route path="/parent"          element={<ProtectedRoute role="parent"><ParentDashboard /></ProtectedRoute>} />
         <Route path="/parent/courses"  element={<ProtectedRoute role="parent"><ParentCourses /></ProtectedRoute>} />
         <Route path="/parent/progress" element={<ProtectedRoute role="parent"><ParentProgress /></ProtectedRoute>} />
+        <Route path="/parent/payments" element={<ProtectedRoute role="parent"><ParentPayments /></ProtectedRoute>} />
         <Route path="/parent/messages" element={<ProtectedRoute role="parent"><ParentMessages /></ProtectedRoute>} />
         <Route path="/parent/link"     element={<ProtectedRoute role="parent"><ParentStudentLink /></ProtectedRoute>} />
 
         {/* ── Teacher (chỉ role=teacher) ── */}
         <Route path="/teacher"            element={<ProtectedRoute role="teacher"><DashboardTeacher /></ProtectedRoute>} />
         <Route path="/teacher/courses"    element={<ProtectedRoute role="teacher"><TeacherCoursesPage /></ProtectedRoute>} />
+        <Route path="/teacher/reviews"    element={<ProtectedRoute role="teacher"><TeacherReviewsPage /></ProtectedRoute>} />
+        <Route path="/teacher/courses/:courseId/reviews" element={<ProtectedRoute role="teacher"><TeacherReviewsPage /></ProtectedRoute>} />
         <Route path="/teacher/content"    element={<ProtectedRoute role="teacher"><TeacherContentPage /></ProtectedRoute>} />
         <Route path="/teacher/quiz"       element={<ProtectedRoute role="teacher"><TeacherQuizChapterPage /></ProtectedRoute>} />
         <Route path="/teacher/exam"       element={<ProtectedRoute role="teacher"><TeacherExamPage /></ProtectedRoute>} />
@@ -90,6 +114,8 @@ export default function App() {
         <Route path="/teacher/revenue"    element={<ProtectedRoute role="teacher"><TeacherRevenuePage /></ProtectedRoute>} />
         <Route path="/teacher/bank"       element={<ProtectedRoute role="teacher"><TeacherBankPage /></ProtectedRoute>} />
         <Route path="/teacher/questions"  element={<ProtectedRoute role="teacher"><QuestionBankPage /></ProtectedRoute>} />
+        <Route path="/teacher/profile"    element={<ProtectedRoute role="teacher"><TeacherProfilePage /></ProtectedRoute>} />
+        <Route path="/teacher/account"    element={<ProtectedRoute role="teacher"><TeacherAccountPage /></ProtectedRoute>} />
 
         {/* ── Admin (chỉ role=admin) ── */}
         <Route path="/admin"                     element={<ProtectedRoute role="admin"><DashboardAdmin /></ProtectedRoute>} />
@@ -102,6 +128,7 @@ export default function App() {
         <Route path="/admin/reports"    element={<ProtectedRoute role="admin"><ComingSoonPage title="Báo cáo & Thống kê"   subtitle="Phân tích dữ liệu và báo cáo tổng hợp" /></ProtectedRoute>} />
         <Route path="/admin/settings"   element={<ProtectedRoute role="admin"><ComingSoonPage title="Cài đặt hệ thống"     subtitle="Cấu hình và tuỳ chỉnh hệ thống" /></ProtectedRoute>} />
       </Routes>
+      </MaintenanceGate>
     </BrowserRouter>
   );
 }

@@ -15,16 +15,21 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useSystemStore } from '../../store/useSystemStore';
+import { getSystemSettings, updateSystemSettings } from '../../api/systemService';
 import { notify } from '../../lib/toast';
 import { apiClient, unwrap } from '../../api/client';
 import type { ApiResponse, PageResponse } from '../../types/api';
 import {
   listAdminComplaints,
+  getAdminComplaint,
   updateAdminComplaintStatus,
   adminReplyComplaint,
   type ComplaintThread,
   type ComplaintSummary,
+  type ComplaintAttachment,
 } from '../../api/complaintService';
+import { AttachmentPicker, MessageAttachments } from '../../components/complaints/ComplaintAttachments';
 import {
   LayoutDashboard, BookOpen, Users, ShoppingBag,
   FileText, TrendingUp, TrendingDown, DollarSign,
@@ -79,6 +84,7 @@ interface Complaint {
   responseNote?: string;
   messageCount?: number;
   lastActivityAt?: string;
+  attachments?: ComplaintAttachment[];
 }
 
 interface SystemAnnouncement {
@@ -151,6 +157,7 @@ function mapComplaintThread(thread: ComplaintThread): Complaint {
     createdAt: formatApiDateTime(thread.createdAt),
     status: thread.status,
     responseNote: lastAdminMessage?.content,
+    attachments: firstMessage?.attachments ?? [],
     messageCount: thread.messages.length,
     lastActivityAt: formatApiDateTime(thread.lastActivityAt),
   };
@@ -215,6 +222,8 @@ export default function DashboardAdmin() {
   const navigate = useNavigate();
   const location = useLocation();
   const logout = useAuthStore(state => state.logout);
+  const setGlobalMaintenanceMode = useSystemStore(state => state.setMaintenanceMode);
+  const setGlobalMaintenanceUntil = useSystemStore(state => state.setMaintenanceUntil);
 
   // Lấy tab hoạt động từ URL query (?tab=...), mặc định là 'overview'
   const activeTab = location.pathname === '/admin/complaints'
@@ -232,6 +241,8 @@ export default function DashboardAdmin() {
   // State cấu hình hệ thống
   const [platformFeePercent, setPlatformFeePercent] = useState(20);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   // ───────────────────────────────────────────────────────────────────────────
   // STATE CHO CÁC BIỂU MẪU & MODALS
@@ -249,6 +260,7 @@ export default function DashboardAdmin() {
   // Modal Xử lý khiếu nại
   const [complaintModal, setComplaintModal] = useState<{ isOpen: boolean; complaint: Complaint | null }>({ isOpen: false, complaint: null });
   const [complaintReply, setComplaintReply] = useState('');
+  const [complaintFiles, setComplaintFiles] = useState<File[]>([]);
 
   // Biểu mẫu gửi thông báo mới
   const [announcementForm, setAnnouncementForm] = useState({
@@ -347,9 +359,20 @@ export default function DashboardAdmin() {
     } catch {}
   }, []);
 
+  const loadSettings = useCallback(async () => {
+    setLoadingSettings(true);
+    try {
+      const data = await getSystemSettings();
+      setPlatformFeePercent(data.platformFeePercent);
+      setMaintenanceMode(data.maintenanceMode);
+    } catch { notify.error('Không tải được cấu hình hệ thống'); }
+    finally { setLoadingSettings(false); }
+  }, []);
+
   useEffect(() => { Promise.all([loadOverview(), loadUserStats(), loadPendingCourses(), loadComplaints()]); }, [loadOverview, loadUserStats, loadPendingCourses, loadComplaints]);
   useEffect(() => { if (activeTab === 'users') loadUsers(0); }, [activeTab, loadUsers]);
   useEffect(() => { if (activeTab === 'payouts') { loadPayouts(); loadPayoutStats(); } }, [activeTab, loadPayouts, loadPayoutStats]);
+  useEffect(() => { if (activeTab === 'settings') loadSettings(); }, [activeTab, loadSettings]);
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchUser), 300);
     return () => clearTimeout(t);
@@ -537,6 +560,48 @@ export default function DashboardAdmin() {
     return complaints.filter(c => filterComplaintStatus === 'all' || c.status === filterComplaintStatus);
   }, [complaints, filterComplaintStatus]);
 
+  // Danh sách dùng summary (messages rỗng) để tránh N+1. Khi mở modal mới fetch
+  // thread đầy đủ để có nội dung khiếu nại gốc + phản hồi gần nhất của Admin.
+  async function openComplaintDetail(summary: Complaint) {
+    setComplaintModal({ isOpen: true, complaint: summary });
+    setComplaintReply(summary.responseNote || '');
+    setComplaintFiles([]);
+    try {
+      const thread = await getAdminComplaint(summary.id);
+      const mapped = mapComplaintThread(thread);
+      setComplaintModal({ isOpen: true, complaint: mapped });
+      setComplaintReply(mapped.responseNote || '');
+      setComplaints(prev => prev.map(c => c.id === mapped.id ? mapped : c));
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Khong tai duoc chi tiet khieu nai');
+    }
+  }
+
+  // Admin gửi phản hồi mà KHÔNG đóng đơn — tiếp tục trao đổi với người gửi.
+  // Backend tự chuyển trạng thái sang "đang xử lý".
+  async function handleAdminReply() {
+    const complaint = complaintModal.complaint;
+    if (!complaint) return;
+    if (!complaintReply.trim() && complaintFiles.length === 0) {
+      notify.error('Vui lòng nhập nội dung phản hồi!');
+      return;
+    }
+    setUpdatingComplaint(true);
+    try {
+      const updated = await adminReplyComplaint(complaint.id, complaintReply.trim(), complaintFiles);
+      const mapped = mapComplaintThread(updated);
+      setComplaints(prev => prev.map(c => c.id === mapped.id ? mapped : c));
+      setComplaintModal({ isOpen: true, complaint: mapped });
+      setComplaintReply('');
+      setComplaintFiles([]);
+      notify.success('Đã gửi phản hồi');
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Khong the gui phan hoi');
+    } finally {
+      setUpdatingComplaint(false);
+    }
+  }
+
   async function handleResolveComplaint(status: 'resolved' | 'rejected') {
     if (!complaintReply.trim()) {
       notify.error('Vui lòng nhập nội dung xử lý/phản hồi!');
@@ -547,15 +612,14 @@ export default function DashboardAdmin() {
 
     setUpdatingComplaint(true);
     try {
-      if (complaintReply.trim()) {
-        await adminReplyComplaint(complaint.id, complaintReply.trim());
-      }
+      await adminReplyComplaint(complaint.id, complaintReply.trim(), complaintFiles);
       const updated = await updateAdminComplaintStatus(complaint.id, status);
       const mapped = mapComplaintThread(updated);
       setComplaints(prev => prev.map(c => c.id === mapped.id ? mapped : c));
       notify.success(status === 'resolved' ? 'Da giai quyet khieu nai thanh cong!' : 'Da bac bo khieu nai!');
       setComplaintModal({ isOpen: false, complaint: null });
       setComplaintReply('');
+      setComplaintFiles([]);
       return;
     } catch (error) {
       notify.error(error instanceof Error ? error.message : 'Khong the cap nhat khieu nai');
@@ -1464,7 +1528,7 @@ export default function DashboardAdmin() {
                               </td>
                               <td className="px-6 py-3.5 text-right">
                                 <button
-                                  onClick={() => { setComplaintModal({ isOpen: true, complaint: c }); setComplaintReply(c.responseNote || ''); }}
+                                  onClick={() => openComplaintDetail(c)}
                                   className="px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-xl text-xs font-bold transition-colors"
                                 >
                                   {c.status === 'pending' || c.status === 'in_progress' ? 'Xử lý ngay' : 'Xem chi tiết'}
@@ -1628,12 +1692,13 @@ export default function DashboardAdmin() {
                         <p className="text-xs text-on-surface-variant mt-0.5">Chặn tất cả lưu lượng của khách và học sinh để sửa lỗi phần cứng.</p>
                       </div>
                       <button
+                        disabled={loadingSettings}
                         onClick={() => {
                           const newState = !maintenanceMode;
                           setMaintenanceMode(newState);
-                          notify.info(`Đã ${newState ? 'Kích hoạt' : 'Tắt'} chế độ bảo trì hệ thống!`);
+                          notify.info(`Đã ${newState ? 'Bật' : 'Tắt'} chế độ bảo trì — bấm "Lưu thay đổi" để áp dụng.`);
                         }}
-                        className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 focus:outline-none ${
+                        className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
                           maintenanceMode ? 'bg-red-500' : 'bg-gray-300'
                         }`}
                       >
@@ -1644,10 +1709,25 @@ export default function DashboardAdmin() {
                     </div>
 
                     <button
-                      onClick={() => notify.success('Đã cập nhật các cấu hình hệ thống!')}
-                      className="px-6 py-2 bg-primary text-on-primary font-bold rounded-xl text-sm shadow-md hover:bg-primary-container transition-colors"
+                      disabled={savingSettings || loadingSettings}
+                      onClick={async () => {
+                        setSavingSettings(true);
+                        try {
+                          const updated = await updateSystemSettings({ maintenanceMode, platformFeePercent });
+                          setPlatformFeePercent(updated.platformFeePercent);
+                          setMaintenanceMode(updated.maintenanceMode);
+                          setGlobalMaintenanceMode(updated.maintenanceMode);
+                          setGlobalMaintenanceUntil(updated.maintenanceUntil);
+                          notify.success('Đã cập nhật các cấu hình hệ thống!');
+                        } catch (err: any) {
+                          notify.error(err?.message ?? 'Không thể cập nhật cấu hình hệ thống');
+                        } finally {
+                          setSavingSettings(false);
+                        }
+                      }}
+                      className="px-6 py-2 bg-primary text-on-primary font-bold rounded-xl text-sm shadow-md hover:bg-primary-container transition-colors disabled:opacity-50"
                     >
-                      Lưu thay đổi
+                      {savingSettings ? 'Đang lưu...' : 'Lưu thay đổi'}
                     </button>
                   </div>
                 </div>
@@ -1860,10 +1940,13 @@ export default function DashboardAdmin() {
                 <div className="p-4 bg-surface-container rounded-2xl border border-outline-variant/10 text-xs text-on-surface-variant leading-relaxed">
                   <p className="font-bold text-on-surface mb-1">Nội dung khiếu nại:</p>
                   <p className="italic">{complaintModal.complaint?.content}</p>
+                  {complaintModal.complaint?.attachments && (
+                    <MessageAttachments attachments={complaintModal.complaint.attachments} />
+                  )}
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-on-surface-variant uppercase">Nội dung phản hồi giải quyết</label>
+                  <label className="text-xs font-bold text-on-surface-variant uppercase">Nội dung phản hồi</label>
                   <textarea
                     rows={3}
                     required
@@ -1873,6 +1956,9 @@ export default function DashboardAdmin() {
                     placeholder="Nhập hướng xử lý, đính kèm kết quả hoặc cam kết bồi hoàn/sửa đổi nội dung học..."
                     className="w-full px-3 py-2 bg-surface-container border border-outline-variant/30 rounded-xl text-sm focus:outline-none focus:border-primary disabled:opacity-75 disabled:cursor-not-allowed"
                   />
+                  {complaintModal.complaint?.status !== 'resolved' && complaintModal.complaint?.status !== 'rejected' && (
+                    <AttachmentPicker files={complaintFiles} onChange={setComplaintFiles} disabled={updatingComplaint} />
+                  )}
                 </div>
               </div>
 
@@ -1880,11 +1966,11 @@ export default function DashboardAdmin() {
                 {complaintModal.complaint?.status === 'pending' || complaintModal.complaint?.status === 'in_progress' ? (
                   <>
                     <button
-                      onClick={() => handleResolveComplaint('resolved')}
+                      onClick={handleAdminReply}
                       disabled={updatingComplaint}
-                      className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-bold shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="flex-1 py-2 bg-primary hover:bg-primary/90 text-on-primary rounded-xl text-sm font-bold shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      Duyệt giải quyết
+                      Gửi phản hồi
                     </button>
                     <button
                       onClick={() => handleResolveComplaint('rejected')}

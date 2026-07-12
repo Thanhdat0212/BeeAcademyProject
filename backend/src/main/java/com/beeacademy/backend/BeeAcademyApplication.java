@@ -4,6 +4,7 @@ import com.beeacademy.backend.config.SupabaseProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Entry point của Spring Boot application.
@@ -23,6 +24,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
  */
 @SpringBootApplication
 @EnableConfigurationProperties(SupabaseProperties.class)
+@EnableScheduling
 public class BeeAcademyApplication {
 
     /**

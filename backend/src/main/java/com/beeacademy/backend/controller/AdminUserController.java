@@ -6,6 +6,7 @@ import com.beeacademy.backend.dto.response.PageResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Profile;
+import com.beeacademy.backend.model.TeacherApprovalStatus;
 import com.beeacademy.backend.model.UserRole;
 import com.beeacademy.backend.repository.ProfileRepository;
 import lombok.RequiredArgsConstructor;
@@ -91,6 +92,38 @@ public class AdminUserController {
         profile.changeRole(newRole);
         profileRepository.save(profile);
         return ApiResponse.ok(null, "Đã cập nhật role thành " + role);
+    }
+
+    /** Duyệt hoặc từ chối vai trò giáo viên sau khi đăng ký. */
+    @PatchMapping("/{userId}/teacher-approval")
+    public ApiResponse<Void> updateTeacherApproval(@PathVariable UUID userId,
+                                                   @RequestParam String status) {
+        Profile profile = profileRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Profile", userId));
+        if (profile.getRole() != UserRole.TEACHER) {
+            throw new BusinessException(
+                    "NOT_TEACHER",
+                    "Chỉ tài khoản giáo viên mới có trạng thái phê duyệt.",
+                    HttpStatus.BAD_REQUEST);
+        }
+
+        TeacherApprovalStatus approvalStatus;
+        try {
+            approvalStatus = TeacherApprovalStatus.fromDbValue(status);
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException(
+                    "INVALID_TEACHER_APPROVAL_STATUS",
+                    "Trạng thái phê duyệt giáo viên không hợp lệ.",
+                    HttpStatus.BAD_REQUEST);
+        }
+
+        switch (approvalStatus) {
+            case PENDING -> profile.markTeacherPendingApproval();
+            case APPROVED -> profile.approveTeacher();
+            case REJECTED -> profile.rejectTeacher();
+        }
+        profileRepository.save(profile);
+        return ApiResponse.ok(null, "Đã cập nhật trạng thái phê duyệt giáo viên.");
     }
 
     /** Thống kê số lượng user theo role — dùng cho Overview tab. */
