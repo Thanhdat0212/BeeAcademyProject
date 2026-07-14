@@ -42,9 +42,11 @@ import {
   getAdminPayouts,
   getAdminPayoutStats,
   confirmPayout,
+  broadcastNotification,
   type AdminOverview,
   type AdminPayoutRow,
   type AdminPayoutStats,
+  type BroadcastTargetRole,
 } from '../../api/adminService';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -266,6 +268,7 @@ export default function DashboardAdmin() {
   const [announcementForm, setAnnouncementForm] = useState({
     title: '', content: '', target: 'all' as SystemAnnouncement['target'], priority: 'normal' as SystemAnnouncement['priority']
   });
+  const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
 
   // Tìm kiếm và lọc
   const [searchUser, setSearchUser] = useState('');
@@ -643,25 +646,42 @@ export default function DashboardAdmin() {
   // ───────────────────────────────────────────────────────────────────────────
   // WORKFLOW 5: GỬI THÔNG BÁO HỆ THỐNG (UC41)
   // ───────────────────────────────────────────────────────────────────────────
-  function handleSendAnnouncement(e: React.FormEvent) {
+  const ANNOUNCEMENT_TARGET_TO_ROLE: Record<SystemAnnouncement['target'], BroadcastTargetRole> = {
+    all: 'ALL', students: 'STUDENT', teachers: 'TEACHER', parents: 'PARENT',
+  };
+
+  async function handleSendAnnouncement(e: React.FormEvent) {
     e.preventDefault();
     if (!announcementForm.title.trim() || !announcementForm.content.trim()) {
       notify.error('Vui lòng nhập đầy đủ tiêu đề và nội dung thông báo!');
       return;
     }
 
-    const newAnn: SystemAnnouncement = {
-      id: `ANN-${String(announcements.length + 1).padStart(3, '0')}`,
-      title: announcementForm.title,
-      content: announcementForm.content,
-      target: announcementForm.target,
-      priority: announcementForm.priority,
-      sentAt: new Date().toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
-    };
+    setSendingAnnouncement(true);
+    try {
+      const result = await broadcastNotification({
+        targetRole: ANNOUNCEMENT_TARGET_TO_ROLE[announcementForm.target],
+        title: announcementForm.title.trim(),
+        body: announcementForm.content.trim(),
+      });
 
-    setAnnouncements(prev => [newAnn, ...prev]);
-    notify.success('Đã phát đi thông báo hệ thống thành công!');
-    setAnnouncementForm({ title: '', content: '', target: 'all', priority: 'normal' });
+      const newAnn: SystemAnnouncement = {
+        id: `ANN-${String(announcements.length + 1).padStart(3, '0')}`,
+        title: announcementForm.title,
+        content: announcementForm.content,
+        target: announcementForm.target,
+        priority: announcementForm.priority,
+        sentAt: new Date().toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
+      };
+
+      setAnnouncements(prev => [newAnn, ...prev]);
+      notify.success(`Đã gửi thông báo tới ${result.recipientCount} người dùng!`);
+      setAnnouncementForm({ title: '', content: '', target: 'all', priority: 'normal' });
+    } catch (err: unknown) {
+      notify.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Không gửi được thông báo');
+    } finally {
+      setSendingAnnouncement(false);
+    }
   }
 
   // Cấu hình thanh Sidebar
@@ -1611,10 +1631,11 @@ export default function DashboardAdmin() {
 
                       <button
                         type="submit"
-                        className="w-full inline-flex items-center justify-center gap-2 py-2.5 bg-primary text-on-primary font-bold rounded-xl text-sm hover:bg-primary-container shadow-md transition-colors"
+                        disabled={sendingAnnouncement}
+                        className="w-full inline-flex items-center justify-center gap-2 py-2.5 bg-primary text-on-primary font-bold rounded-xl text-sm hover:bg-primary-container shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         <Send className="w-4 h-4" />
-                        Phát thông báo hệ thống
+                        {sendingAnnouncement ? 'Đang gửi...' : 'Phát thông báo hệ thống'}
                       </button>
                     </form>
                   </div>

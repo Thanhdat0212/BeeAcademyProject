@@ -79,6 +79,29 @@ export async function markAdminNotificationRead(notificationId: string):
   return unwrap(res.data);
 }
 
+export type BroadcastTargetRole = 'ALL' | 'STUDENT' | 'TEACHER' | 'PARENT';
+
+export interface BroadcastNotificationPayload {
+  targetRole: BroadcastTargetRole;
+  title: string;
+  body: string;
+  targetUrl?: string;
+}
+
+export interface BroadcastNotificationResult {
+  recipientCount: number;
+}
+
+export async function broadcastNotification(
+  payload: BroadcastNotificationPayload,
+): Promise<BroadcastNotificationResult> {
+  const res = await apiClient.post<ApiResponse<BroadcastNotificationResult>>(
+    '/api/admin/notifications/broadcast',
+    payload,
+  );
+  return unwrap(res.data);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Kế toán & Lương (UC37 / UC39 / UC40)
 //  GET   /api/admin/payouts          — danh sách kỳ đối soát theo GV/tháng
