@@ -15,6 +15,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import DashboardHeader from '../../components/DashboardHeader';
+import AiMessageContent from '../../components/AiMessageContent';
 import { notify } from '../../lib/toast';
 import { isApiError } from '../../api/client';
 import {
@@ -57,7 +58,7 @@ function ChatBubble({ message }: { message: AiChatMessage }) {
             <Bot className="w-3.5 h-3.5" /> Bee AI
           </p>
         )}
-        {message.content}
+        {isUser ? message.content : <AiMessageContent content={message.content} />}
       </div>
     </div>
   );
@@ -162,7 +163,8 @@ export default function AiTutorPage() {
       const reply = await sendAiChat(nextMessages.slice(-20));
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (err: unknown) {
-      notify.error(isApiError(err) ? err.message : 'Trợ lý AI đang bận, thử lại sau');
+      // Lỗi mạng/timeout: interceptor trong client.ts đã toast rồi — chỉ toast lỗi backend
+      if (isApiError(err)) notify.error(err.message);
       setMessages(prev => prev.slice(0, -1));
       setInput(question);
     } finally {
@@ -181,7 +183,8 @@ export default function AiTutorPage() {
         notify.error('AI trả về định dạng không chuẩn — hiển thị dạng văn bản');
       }
     } catch (err: unknown) {
-      notify.error(isApiError(err) ? err.message : 'Không tạo được lộ trình, thử lại sau');
+      // Lỗi mạng/timeout: interceptor trong client.ts đã toast rồi — chỉ toast lỗi backend
+      if (isApiError(err)) notify.error(err.message);
     } finally {
       setLoadingRoadmap(false);
     }
@@ -331,8 +334,8 @@ export default function AiTutorPage() {
                 <div className="space-y-6">
                   {roadmap && <RoadmapView roadmap={roadmap} />}
                   {roadmapRawText && (
-                    <div className="rounded-2xl border border-outline-variant/40 bg-surface-container p-5 text-sm text-on-surface whitespace-pre-line leading-relaxed">
-                      {roadmapRawText}
+                    <div className="rounded-2xl border border-outline-variant/40 bg-surface-container p-5 text-sm text-on-surface leading-relaxed">
+                      <AiMessageContent content={roadmapRawText} />
                     </div>
                   )}
                   <button

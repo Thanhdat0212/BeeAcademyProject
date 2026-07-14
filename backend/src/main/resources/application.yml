@@ -96,7 +96,8 @@ app:
     # Lấy key tại: https://aistudio.google.com/app/apikey
     # Đặt vào backend/.env: GEMINI_API_KEY=your_key_here
     api-key: ${GEMINI_API_KEY:}
-    model: ${GEMINI_MODEL:gemini-2.0-flash}
+    # gemini-2.0-flash đã bị Google cắt quota free tier (429 limit: 0) — dùng 2.5-flash
+    model: ${GEMINI_MODEL:gemini-2.5-flash}
 
 # ============================================================================
 # SePay Webhook — xác thực API key

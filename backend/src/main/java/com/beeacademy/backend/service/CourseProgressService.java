@@ -104,6 +104,11 @@ public class CourseProgressService {
                 .forEach(attempt -> latestQuizByConfig.putIfAbsent(
                         attempt.getQuizConfig().getId(), attempt));
 
+        // 1 query cho tất cả khóa thay vì 1 query/khóa (giảm độ trễ trước khi gọi Gemini)
+        Map<UUID, List<Chapter>> chaptersByCourse =
+                chapterRepository.findWithLessonsByCourseIdIn(courseIds).stream()
+                        .collect(Collectors.groupingBy(chapter -> chapter.getCourse().getId()));
+
         List<StudentLearningProgressResponse.CourseProgressDetail> courseDetails = courses.stream()
                 .map(course -> buildCourseProgressDetail(
                         course,
@@ -112,7 +117,8 @@ public class CourseProgressService {
                         completedByItemId,
                         quizByChapter,
                         latestQuizByConfig,
-                        passedFinalCourseIds.contains(course.getId())))
+                        passedFinalCourseIds.contains(course.getId()),
+                        chaptersByCourse.getOrDefault(course.getId(), List.of())))
                 .toList();
 
         int totalLessons = courseDetails.stream().mapToInt(StudentLearningProgressResponse.CourseProgressDetail::totalLessons).sum();
@@ -295,9 +301,9 @@ public class CourseProgressService {
             Map<UUID, CourseProgressItem> completedByItemId,
             Map<UUID, QuizConfig> quizByChapter,
             Map<UUID, QuizAttempt> latestQuizByConfig,
-            boolean finalExamPassed
+            boolean finalExamPassed,
+            List<Chapter> chapters
     ) {
-        List<Chapter> chapters = chapterRepository.findWithLessonsByCourseId(course.getId());
         List<StudentLearningProgressResponse.ChapterProgressDetail> chapterDetails = chapters.stream()
                 .map(chapter -> buildChapterProgressDetail(
                         chapter,

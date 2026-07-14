@@ -17,16 +17,26 @@ export interface AiRoadmap {
   }>;
 }
 
+// Gemini có thể mất >15s (timeout mặc định của apiClient) — nới riêng cho AI,
+// và phải LỚN HƠN timeout Gemini phía backend (60s) để nhận lỗi tiếng Việt
+// từ server thay vì lỗi mạng chung chung.
+const CHAT_CONFIG = { timeout: 75_000 };
+const ROADMAP_CONFIG = { timeout: 90_000 };
+
 export async function sendAiChat(messages: AiChatMessage[]): Promise<string> {
   const response = await apiClient.post<ApiResponse<string>>(
     '/api/student/ai/chat',
     { messages },
+    CHAT_CONFIG,
   );
   return unwrap(response.data);
 }
 
 export async function getAiRoadmap(): Promise<string> {
-  const response = await apiClient.get<ApiResponse<string>>('/api/student/ai/roadmap');
+  const response = await apiClient.get<ApiResponse<string>>(
+    '/api/student/ai/roadmap',
+    ROADMAP_CONFIG,
+  );
   return unwrap(response.data);
 }
 

@@ -60,6 +60,20 @@ public interface ChapterRepository extends JpaRepository<Chapter, UUID> {
     List<Chapter> findWithLessonsByCourseId(@Param("courseId") UUID courseId);
 
     /**
+     * Bản gộp nhiều khóa của {@link #findWithLessonsByCourseId} — fetch course
+     * kèm theo để group theo courseId không dính lazy proxy.
+     * Dùng ở tổng hợp tiến độ học (tránh 1 query/khóa khi HS có nhiều khóa).
+     */
+    @EntityGraph(attributePaths = {"lessons", "course"})
+    @Query("""
+           SELECT ch
+           FROM Chapter ch
+           WHERE ch.course.id IN :courseIds
+           ORDER BY ch.position ASC
+           """)
+    List<Chapter> findWithLessonsByCourseIdIn(@Param("courseIds") List<UUID> courseIds);
+
+    /**
      * Load chapter kèm course trong 1 query — dùng khi cần truy cập
      * chapter.getCourse() ngay sau đó (tránh N+1 lazy load).
      * Cụ thể: validate categoryId của câu hỏi phải khớp category của course.
