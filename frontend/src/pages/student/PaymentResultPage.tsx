@@ -128,6 +128,11 @@ export default function PaymentResultPage() {
 
   const c = config[status];
 
+  // Vào thẳng khóa học vừa mua; mua nhiều khóa hoặc thiếu thông tin đơn → về danh sách
+  const learnLink = order?.items?.length === 1
+    ? `/courses/${order.items[0].courseId}`
+    : '/courses';
+
   return (
     <div className="min-h-screen bg-surface flex items-center justify-center p-4 font-sans relative overflow-hidden">
       <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full blur-[100px] opacity-15 pointer-events-none ${c.glow}`} />
@@ -172,7 +177,7 @@ export default function PaymentResultPage() {
         <div className="flex flex-col gap-4">
           {status === 'success' && (
             <>
-              <Link to="/courses" className="w-full py-4 bg-primary text-on-primary rounded-xl font-bold text-lg shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2">
+              <Link to={learnLink} className="w-full py-4 bg-primary text-on-primary rounded-xl font-bold text-lg shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2">
                 Vào Học Ngay <ArrowRight className="w-5 h-5" />
               </Link>
               <Link to="/orders" className="w-full py-3 bg-surface-container hover:bg-surface-container-high text-on-surface rounded-xl font-semibold transition-colors flex items-center justify-center gap-2">

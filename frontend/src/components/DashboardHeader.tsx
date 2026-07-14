@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import DashboardSidebar from './DashboardSidebar';
 import { motion, AnimatePresence } from 'motion/react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCartStore } from '../store/useCartStore';
 import { useAuthStore } from '../store/useAuthStore';
 import type { Course } from '../data/mockCourses';
@@ -168,7 +168,6 @@ function notificationTypeLabel(type: string) {
 
 export default function DashboardHeader() {
   const navigate = useNavigate();
-  const location = useLocation();
   const cartItems = useCartStore(state => state.items);
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
@@ -287,6 +286,9 @@ export default function DashboardHeader() {
     }
   }
 
+  // Polling 60s là đủ cho badge thông báo — 15s + refetch mỗi lần đổi trang
+  // tạo ~12 request nền/phút (3 API × student) tranh connection pool với
+  // request chính của trang. Event bee:* + focus đã lo các cập nhật tức thời.
   useEffect(() => {
     loadHeaderNotifications();
 
@@ -294,7 +296,7 @@ export default function DashboardHeader() {
     window.addEventListener('bee:user-notifications-updated', reloadNotifications);
     window.addEventListener('bee:student-parent-link-invitations-updated', reloadNotifications);
     window.addEventListener('focus', reloadNotifications);
-    const intervalId = window.setInterval(reloadNotifications, 15000);
+    const intervalId = window.setInterval(reloadNotifications, 60000);
 
     return () => {
       window.removeEventListener('bee:user-notifications-updated', reloadNotifications);
@@ -302,7 +304,7 @@ export default function DashboardHeader() {
       window.removeEventListener('focus', reloadNotifications);
       window.clearInterval(intervalId);
     };
-  }, [user?.role, location.pathname]);
+  }, [user?.role]);
 
   useEffect(() => {
     setHighlightedIdx(-1);

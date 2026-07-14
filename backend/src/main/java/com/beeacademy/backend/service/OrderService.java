@@ -53,6 +53,14 @@ public class OrderService {
 
     private static final String PAYOS_API_URL = "https://api-merchant.payos.vn/v2/payment-requests";
 
+    // PayOS chậm/treo không được giữ request (và connection DB trong pool) vô hạn
+    // — trước đây HttpClient.newHttpClient() không có timeout nào.
+    private static final java.time.Duration PAYOS_TIMEOUT = java.time.Duration.ofSeconds(8);
+
+    private static final HttpClient PAYOS_HTTP_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(PAYOS_TIMEOUT)
+            .build();
+
     @Transactional
     public OrderResponse createOrder(AuthenticatedUser me, CreateOrderRequest req) {
         if (!UserRole.STUDENT.toDbValue().equalsIgnoreCase(me.role())) {
@@ -148,16 +156,16 @@ public class OrderService {
 
             log.debug("PayOS request: {}", bodyJson);
 
-            HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(PAYOS_API_URL))
+                .timeout(PAYOS_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .header("x-client-id", payosClientId)
                 .header("x-api-key", payosApiKey)
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
                 .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = PAYOS_HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
 
             log.debug("PayOS response ({}): {}", response.statusCode(), response.body());
 
@@ -285,15 +293,15 @@ public class OrderService {
      */
     String fetchPayOSStatus(long orderCode) {
         try {
-            HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://api-merchant.payos.vn/v2/payment-requests/" + orderCode))
+                .timeout(PAYOS_TIMEOUT)
                 .header("x-client-id", payosClientId)
                 .header("x-api-key", payosApiKey)
                 .GET()
                 .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = PAYOS_HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
             ObjectMapper mapper = new ObjectMapper();
             JsonNode root = mapper.readTree(response.body());
 

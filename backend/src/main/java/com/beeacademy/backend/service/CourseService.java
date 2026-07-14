@@ -138,10 +138,8 @@ public class CourseService {
         // studentCount: feature riêng của local (team3 đã bỏ) — đếm enrollments 1 lần/batch.
         Map<UUID, Integer> studentCounts = buildStudentCounts(coursePage.getContent());
 
-        // Map qua DTO. Lưu ý: page query mặc định không JOIN FETCH category/teacher
-        // → nếu truy cập course.getCategory().getName() sẽ trigger N+1.
-        // GIẢI PHÁP: ở GĐ này dữ liệu nhỏ (9 mock courses) chấp nhận N+1.
-        // Khi scale, thêm @EntityGraph trên một method findAll Specification tuỳ chỉnh.
+        // Map qua DTO. findAll(spec) đã override với @EntityGraph(category, teacher)
+        // trong CourseRepository — không còn N+1 khi DTO đọc tên category/teacher.
         return PageResponse.of(coursePage,
                 course -> {
                     CourseReviewService.RatingSummary rating = ratingByCourseId.getOrDefault(

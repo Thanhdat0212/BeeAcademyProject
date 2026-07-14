@@ -269,6 +269,11 @@ export default function CoursesPage() {
         });
     };
 
+    // Hiển thị danh sách ngay, không chờ đối soát PayOS (network ngoài, có thể
+    // chậm nhiều giây). Nếu đối soát phát hiện đơn vừa PAID mới tải lại lần nữa
+    // để khóa học mới mua xuất hiện.
+    loadEnrolled();
+
     // BUG FIX: user thanh toán xong nhưng đóng tab/reload app trước khi về
     // trang payment-result → webhook không đến (local dev) và verifyPayment
     // không chạy → đơn kẹt PENDING, khóa học không mở. Đối soát với PayOS
@@ -280,15 +285,13 @@ export default function CoursesPage() {
           const paidOrders = updatedOrders.filter(order => order.status === 'PAID');
           if (paidOrders.length > 0) {
             notify.success('Đã xác nhận thanh toán — khóa học của bạn đã được mở');
+            loadEnrolled();
           }
         })
         .catch(() => {
           // Đối soát thất bại không được chặn trang; lần load sau sẽ thử lại.
           didReconcileOrders = false;
-        })
-        .finally(loadEnrolled);
-    } else {
-      loadEnrolled();
+        });
     }
     return () => { cancelled = true; };
   }, [isLoggedIn, isStudent]);
@@ -624,7 +627,7 @@ export default function CoursesPage() {
                     key={course.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.1 }}
+                    transition={{ delay: Math.min(idx, 3) * 0.1 }}
                     className="bg-surface-container-lowest rounded-3xl overflow-hidden shadow-sm border border-outline-variant/50 hover:shadow-lg hover:border-primary/30 transition-all group flex flex-col h-full"
                   >
                       <div className="relative h-40 overflow-hidden">
@@ -892,11 +895,10 @@ export default function CoursesPage() {
                 ) : courses.length > 0 ? (
                   <>
                     {availableCourses.length > 0 ? (
-                      <motion.div layout className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
+                      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
                         <AnimatePresence>
                           {availableCourses.map((course) => (
                             <motion.div
-                              layout
                               key={course.id}
                               initial={{ opacity: 0, scale: 0.9 }}
                               animate={{ opacity: 1, scale: 1 }}
@@ -971,7 +973,7 @@ export default function CoursesPage() {
                             </motion.div>
                           ))}
                         </AnimatePresence>
-                      </motion.div>
+                      </div>
                     ) : (
                       <div className="w-full py-20 flex flex-col items-center justify-center bg-surface-container-lowest rounded-[2rem] border border-outline-variant/30 border-dashed">
                         <div className="w-20 h-20 bg-surface-container rounded-full flex items-center justify-center mb-4 text-on-surface-variant">

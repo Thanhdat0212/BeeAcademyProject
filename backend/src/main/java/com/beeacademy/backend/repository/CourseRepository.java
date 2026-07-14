@@ -4,6 +4,7 @@ import com.beeacademy.backend.model.Course;
 import com.beeacademy.backend.model.CourseStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -47,6 +48,16 @@ public interface CourseRepository extends JpaRepository<Course, UUID>,
      * trả về tối đa 1 row.
      */
     Optional<Course> findBySlug(String slug);
+
+    /**
+     * Search có filter (UC06). Override để JOIN FETCH category + teacher —
+     * CourseSummaryResponse đọc cả hai, không có graph thì mỗi course trong
+     * trang kết quả lazy-load thêm 2 query lẻ tới Supabase (DB ở xa, N+1
+     * là nguồn chậm chính của GET /api/courses). Count query tự bỏ qua graph.
+     */
+    @Override
+    @EntityGraph(attributePaths = {"category", "teacher"})
+    Page<Course> findAll(Specification<Course> spec, Pageable pageable);
 
     /**
      * Lookup chi tiết khoá học kèm category + teacher (UC07).
