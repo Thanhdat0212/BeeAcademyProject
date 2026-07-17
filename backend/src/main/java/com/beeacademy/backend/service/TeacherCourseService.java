@@ -37,6 +37,7 @@ import com.beeacademy.backend.repository.CourseVersionRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
 import com.beeacademy.backend.repository.LessonRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
+import com.beeacademy.backend.repository.QuestionRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -92,6 +93,7 @@ public class TeacherCourseService {
     private final ChapterRepository         chapterRepository;
     private final LessonRepository          lessonRepository;
     private final CourseDocumentRepository  documentRepository;
+    private final QuestionRepository        questionRepository;
     private final EnrollmentRepository      enrollmentRepository;
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final CourseVersionRepository   courseVersionRepository;
@@ -266,9 +268,21 @@ public class TeacherCourseService {
             throw new BusinessException("CANNOT_DELETE",
                     "Chỉ có thể xóa khóa học ở trạng thái Bản nháp.");
         }
-        List<Lesson> lessons = loadLessonsForCourse(courseId);
+        List<Chapter> chapters = chapterRepository.findWithLessonsByCourseId(courseId);
+        List<Lesson> lessons = chapters.stream()
+                .flatMap(chapter -> chapter.getLessons().stream())
+                .toList();
         List<CourseDocument> documents = loadDocumentsForLessons(lessons);
         documentRepository.deleteAll(documents);
+
+        // Câu hỏi trong ngân hàng trỏ về chapter_id với FK RESTRICT (không ON DELETE).
+        // Phải gỡ liên kết (đưa về cấp môn học) trước khi cascade xóa chapter, nếu không
+        // việc xóa khóa học sẽ vỡ vì vi phạm khóa ngoại và toàn bộ giao dịch bị rollback.
+        List<UUID> chapterIds = chapters.stream().map(Chapter::getId).toList();
+        if (!chapterIds.isEmpty()) {
+            questionRepository.detachFromChapters(chapterIds);
+        }
+
         courseRepository.delete(course);
         contentUploadService.deleteLessonFilesAfterCommit(lessons, documents);
         log.info("GV {} xóa khóa học {}", me.userId(), courseId);
@@ -358,6 +372,10 @@ public class TeacherCourseService {
         List<Lesson> lessons = lessonRepository.findByChapterIdOrderByPositionAsc(chapterId);
         List<CourseDocument> documents = loadDocumentsForLessons(lessons);
         documentRepository.deleteAll(documents);
+
+        // Gỡ liên kết câu hỏi ngân hàng khỏi chương (FK RESTRICT trên questions.chapter_id)
+        // trước khi xóa, nếu không việc xóa chương sẽ vỡ vì vi phạm khóa ngoại.
+        questionRepository.detachFromChapters(List.of(chapterId));
 
         // CascadeType.ALL + orphanRemoval trên lessons → xóa lessons theo tự động
         chapterRepository.delete(chapter);
@@ -523,12 +541,6 @@ public class TeacherCourseService {
     // ========================================================================
     // Private helpers
     // ========================================================================
-
-    private List<Lesson> loadLessonsForCourse(UUID courseId) {
-        return chapterRepository.findWithLessonsByCourseId(courseId).stream()
-                .flatMap(chapter -> chapter.getLessons().stream())
-                .toList();
-    }
 
     private List<CourseDocument> loadDocumentsForLessons(List<Lesson> lessons) {
         if (lessons == null || lessons.isEmpty()) return List.of();
