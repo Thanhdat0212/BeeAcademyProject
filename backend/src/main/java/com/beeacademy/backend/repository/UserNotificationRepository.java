@@ -13,5 +13,7 @@ public interface UserNotificationRepository extends JpaRepository<UserNotificati
 
     List<UserNotification> findTop30ByRecipientIdAndReadAtIsNullOrderByCreatedAtDesc(UUID recipientId);
 
+    long countByRecipientIdAndReadAtIsNull(UUID recipientId);
+
     Optional<UserNotification> findByIdAndRecipientId(UUID id, UUID recipientId);
 }

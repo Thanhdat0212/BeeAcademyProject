@@ -24,6 +24,11 @@ public class UserNotificationService {
     public void notify(UUID recipientId, String type, String title, String body, String targetUrl) {
         Profile recipient = profileRepository.findById(recipientId)
                 .orElseThrow(() -> new ResourceNotFoundException("Profile", recipientId));
+        notifyProfile(recipient, type, title, body, targetUrl);
+    }
+
+    @Transactional
+    public void notifyProfile(Profile recipient, String type, String title, String body, String targetUrl) {
         notificationRepository.save(UserNotification.create(recipient, type, title, body, targetUrl));
     }
 
@@ -35,9 +40,7 @@ public class UserNotificationService {
                 .stream()
                 .map(UserNotificationResponse::fromEntity)
                 .toList();
-        long unreadCount = notificationRepository
-                .findTop30ByRecipientIdAndReadAtIsNullOrderByCreatedAtDesc(recipientId)
-                .size();
+        long unreadCount = notificationRepository.countByRecipientIdAndReadAtIsNull(recipientId);
         return new UserNotificationSummaryResponse(unreadCount, notifications);
     }
 

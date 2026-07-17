@@ -69,8 +69,8 @@ public class AdminNotificationService {
         }
 
         for (Profile recipient : recipients) {
-            userNotificationService.notify(
-                    recipient.getId(),
+            userNotificationService.notifyProfile(
+                    recipient,
                     "admin_broadcast",
                     request.title(),
                     request.body(),
