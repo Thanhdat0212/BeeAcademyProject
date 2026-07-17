@@ -1,7 +1,9 @@
 package com.beeacademy.backend.service;
 
+import com.beeacademy.backend.dto.response.CountPointResponse;
 import com.beeacademy.backend.dto.response.PayoutPeriodResponse;
 import com.beeacademy.backend.dto.response.RevenueSplitResponse;
+import com.beeacademy.backend.dto.response.RevenueTrendPointResponse;
 import com.beeacademy.backend.dto.response.TeacherStatsResponse;
 import com.beeacademy.backend.model.Course;
 import com.beeacademy.backend.model.CourseStatus;
@@ -241,6 +243,37 @@ public class TeacherRevenueService {
                 .courseEnrollmentCounts(courseEnrollmentCounts)
                 .recentSplits(recentSplits)
                 .build();
+    }
+
+    /**
+     * Doanh thu theo tháng của giáo viên — cho biểu đồ đường/vùng (UC37).
+     *
+     * <p>Chỉ đọc: dựa trên revenue_splits đã có. Dashboard/Revenue page gọi
+     * {@code getTeacherStats}/{@code getSplits} (đã backfill) cùng lúc nên
+     * dữ liệu split đã đầy đủ khi trend được vẽ.
+     */
+    @Transactional(readOnly = true)
+    public List<RevenueTrendPointResponse> getRevenueTrend(UUID teacherId) {
+        return splitRepo.findMonthlyRevenueByTeacher(teacherId).stream()
+                .map(r -> new RevenueTrendPointResponse(
+                        (String) r[0],
+                        ((Number) r[1]).longValue(),
+                        ((Number) r[2]).longValue(),
+                        ((Number) r[3]).longValue(),
+                        ((Number) r[4]).longValue()))
+                .toList();
+    }
+
+    /** Lượt đăng ký theo tháng cho các khóa của giáo viên (UC37). */
+    @Transactional(readOnly = true)
+    public List<CountPointResponse> getEnrollmentTrend(UUID teacherId) {
+        List<UUID> courseIds = courseRepo.findByTeacherId(teacherId).stream()
+                .map(Course::getId)
+                .toList();
+        if (courseIds.isEmpty()) return List.of();
+        return enrollmentRepo.enrollmentTrendByCourseIds(courseIds).stream()
+                .map(r -> new CountPointResponse((String) r[0], ((Number) r[1]).longValue()))
+                .toList();
     }
 
     /**

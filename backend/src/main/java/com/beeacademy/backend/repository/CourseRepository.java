@@ -156,4 +156,13 @@ public interface CourseRepository extends JpaRepository<Course, UUID>,
            WHERE c.id = :courseId
            """)
     long countProgressItemsByCourseId(@Param("courseId") UUID courseId);
+
+    /**
+     * Số khóa học theo danh mục cho biểu đồ phân bố (Admin Reports — UC37).
+     * Mỗi row: [String categoryName, Long count]. Chỉ tính khóa {@code status}
+     * truyền vào (thường PUBLISHED), sort giảm dần theo số lượng.
+     */
+    @Query("SELECT cat.name, COUNT(c) FROM Course c JOIN c.category cat " +
+           "WHERE c.status = :status GROUP BY cat.name ORDER BY COUNT(c) DESC")
+    List<Object[]> countByCategory(@Param("status") CourseStatus status);
 }

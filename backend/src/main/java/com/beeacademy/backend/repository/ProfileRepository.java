@@ -78,4 +78,13 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
     long countByRole(UserRole role);
 
     List<Profile> findByRole(UserRole role);
+
+    /**
+     * Số người dùng mới theo tháng (Admin Reports — UC37). Mỗi row:
+     * [String month("yyyy-MM"), Long count]. {@code to_char} bucket theo
+     * {@code created_at}; GROUP BY 1 = theo cột output đầu tiên.
+     */
+    @Query(value = "SELECT to_char(created_at, 'YYYY-MM') AS m, COUNT(*) " +
+                   "FROM public.profiles GROUP BY 1 ORDER BY 1", nativeQuery = true)
+    List<Object[]> userGrowthByMonth();
 }

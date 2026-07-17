@@ -1,8 +1,10 @@
 package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.response.ApiResponse;
+import com.beeacademy.backend.dto.response.CountPointResponse;
 import com.beeacademy.backend.dto.response.PayoutPeriodResponse;
 import com.beeacademy.backend.dto.response.RevenueSplitResponse;
+import com.beeacademy.backend.dto.response.RevenueTrendPointResponse;
 import com.beeacademy.backend.dto.response.TeacherStatsResponse;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.TeacherRevenueService;
@@ -48,5 +50,19 @@ public class TeacherRevenueController {
     public ResponseEntity<ApiResponse<List<PayoutPeriodResponse>>> getPeriods() {
         UUID teacherId = CurrentUser.required().userId();
         return ResponseEntity.ok(ApiResponse.ok(revenueService.getPeriods(teacherId)));
+    }
+
+    /** Doanh thu theo tháng — biểu đồ đường/vùng trên dashboard & trang doanh thu. */
+    @GetMapping("/trend")
+    public ResponseEntity<ApiResponse<List<RevenueTrendPointResponse>>> getRevenueTrend() {
+        UUID teacherId = CurrentUser.required().userId();
+        return ResponseEntity.ok(ApiResponse.ok(revenueService.getRevenueTrend(teacherId)));
+    }
+
+    /** Lượt đăng ký theo tháng — biểu đồ đường trên dashboard. */
+    @GetMapping("/enrollment-trend")
+    public ResponseEntity<ApiResponse<List<CountPointResponse>>> getEnrollmentTrend() {
+        UUID teacherId = CurrentUser.required().userId();
+        return ResponseEntity.ok(ApiResponse.ok(revenueService.getEnrollmentTrend(teacherId)));
     }
 }

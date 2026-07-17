@@ -62,4 +62,21 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, UUID> {
 
     /** Đếm số học sinh đã mua/ghi danh một khóa học. */
     int countByCourseId(UUID courseId);
+
+    // ── Time-series lượt đăng ký theo tháng (Reports — UC37) ────────────
+
+    /**
+     * Lượt đăng ký theo tháng của một nhóm khóa học (dùng cho GV). Mỗi row:
+     * [String month("yyyy-MM"), Long count]. {@code to_char} của Postgres
+     * bucket theo {@code enrolled_at}; GROUP BY 1 = theo cột output đầu tiên.
+     */
+    @Query(value = "SELECT to_char(enrolled_at, 'YYYY-MM') AS m, COUNT(*) " +
+                   "FROM enrollments WHERE course_id IN :courseIds " +
+                   "GROUP BY 1 ORDER BY 1", nativeQuery = true)
+    List<Object[]> enrollmentTrendByCourseIds(@Param("courseIds") List<UUID> courseIds);
+
+    /** Lượt đăng ký toàn hệ thống theo tháng (Admin) — cùng shape row. */
+    @Query(value = "SELECT to_char(enrolled_at, 'YYYY-MM') AS m, COUNT(*) " +
+                   "FROM enrollments GROUP BY 1 ORDER BY 1", nativeQuery = true)
+    List<Object[]> enrollmentTrendAll();
 }

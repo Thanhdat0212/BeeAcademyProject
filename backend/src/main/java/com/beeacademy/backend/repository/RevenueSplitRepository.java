@@ -44,4 +44,21 @@ public interface RevenueSplitRepository extends JpaRepository<RevenueSplit, UUID
     @Query("SELECT COALESCE(SUM(s.teacherAmount), 0) FROM RevenueSplit s " +
            "WHERE s.payoutPeriodId IN (SELECT p.id FROM PayoutPeriod p WHERE p.status <> :paidStatus)")
     long sumUnpaidTeacherAmount(@Param("paidStatus") PayoutStatus paidStatus);
+
+    // ── Time-series cho biểu đồ doanh thu (Reports — UC37) ──────────────
+
+    /**
+     * Doanh thu theo tháng của một giáo viên. Mỗi row:
+     * [String period("yyyy-MM"), Long gross, Long teacherAmount, Long platformFee, Long count].
+     * Group theo cột {@code period} (đã lưu sẵn "yyyy-MM") nên là JPQL thuần, portable.
+     */
+    @Query("SELECT s.period, SUM(s.grossAmount), SUM(s.teacherAmount), SUM(s.platformFee), COUNT(s) " +
+           "FROM RevenueSplit s WHERE s.teacherId = :teacherId " +
+           "GROUP BY s.period ORDER BY s.period")
+    List<Object[]> findMonthlyRevenueByTeacher(@Param("teacherId") UUID teacherId);
+
+    /** Doanh thu toàn hệ thống theo tháng (Admin) — cùng shape row với bản theo GV. */
+    @Query("SELECT s.period, SUM(s.grossAmount), SUM(s.teacherAmount), SUM(s.platformFee), COUNT(s) " +
+           "FROM RevenueSplit s GROUP BY s.period ORDER BY s.period")
+    List<Object[]> findMonthlyRevenueAll();
 }
