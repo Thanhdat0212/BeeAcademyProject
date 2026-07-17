@@ -4,10 +4,16 @@ import { motion } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
-import { getTeacherStats } from '../../api/revenueService';
+import { getTeacherStats, getRevenueTrend, getEnrollmentTrend } from '../../api/revenueService';
 import { listMyCourses } from '../../api/teacherCourseService';
-import type { TeacherStatsResponse, RevenueSplitResponse } from '../../api/revenueService';
+import type {
+  TeacherStatsResponse, RevenueSplitResponse, RevenueTrendPoint, CountPoint,
+} from '../../api/revenueService';
 import type { TeacherCourseResponse } from '../../api/teacherCourseService';
+import ChartCard from '../../components/charts/ChartCard';
+import RevenueTrendChart from '../../components/charts/RevenueTrendChart';
+import TrendLineChart from '../../components/charts/TrendLineChart';
+import { BRAND } from '../../lib/chartTheme';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
   TrendingUp, TrendingDown, DollarSign, Users,
@@ -180,6 +186,9 @@ export default function DashboardTeacher() {
   const [stats, setStats] = useState<TeacherStatsResponse | null>(null);
   // courses: vẫn cần để render bar chart với đầy đủ thông tin title/status
   const [courses, setCourses] = useState<TeacherCourseResponse[]>([]);
+  // time-series cho biểu đồ (tải song song, không chặn phần còn lại)
+  const [revenueTrend, setRevenueTrend] = useState<RevenueTrendPoint[]>([]);
+  const [enrollmentTrend, setEnrollmentTrend] = useState<CountPoint[]>([]);
 
   const didLoadRef = useRef(false);
 
@@ -218,6 +227,10 @@ export default function DashboardTeacher() {
         }
       })
       .finally(() => setLoading(false));
+
+    // Biểu đồ time-series — tải riêng, lỗi không ảnh hưởng phần còn lại
+    withTimeout(getRevenueTrend()).then(setRevenueTrend).catch(() => {});
+    withTimeout(getEnrollmentTrend()).then(setEnrollmentTrend).catch(() => {});
   }, []);
 
   // ── Stat card values (lấy trực tiếp từ server, không tính client-side) ─────
@@ -397,6 +410,34 @@ export default function DashboardTeacher() {
                   color="bg-amber-500/10"
                   iconColor="text-amber-500"
                 />
+              </div>
+
+              {/* Biểu đồ: doanh thu & lượt đăng ký theo tháng */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <ChartCard
+                  title="Doanh thu theo tháng"
+                  subtitle="Số tiền bạn nhận mỗi tháng"
+                  isEmpty={revenueTrend.length === 0}
+                  delay={0.35}
+                >
+                  <RevenueTrendChart
+                    data={revenueTrend}
+                    series={[{ key: 'teacherAmount', name: 'Bạn nhận', color: BRAND }]}
+                    height={260}
+                  />
+                </ChartCard>
+                <ChartCard
+                  title="Lượt đăng ký theo tháng"
+                  subtitle="Học viên mới đăng ký khóa của bạn"
+                  isEmpty={enrollmentTrend.length === 0}
+                  delay={0.4}
+                >
+                  <TrendLineChart
+                    data={enrollmentTrend.map(p => ({ label: p.label, value: p.count }))}
+                    name="Lượt đăng ký"
+                    height={260}
+                  />
+                </ChartCard>
               </div>
 
               {/* Recent sales + Course list */}

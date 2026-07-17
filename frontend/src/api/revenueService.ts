@@ -83,3 +83,32 @@ export async function getPayoutPeriods(): Promise<PayoutPeriodResponse[]> {
   const res = await apiClient.get('/api/teacher/revenue/periods');
   return res.data.data ?? [];
 }
+
+// ── Time-series cho biểu đồ (UC37) ──────────────────────────────────────────
+
+/** Một điểm doanh thu theo tháng — month định dạng "yyyy-MM". */
+export interface RevenueTrendPoint {
+  month: string;
+  gross: number;
+  teacherAmount: number;
+  platformFee: number;
+  count: number;
+}
+
+/** Điểm dạng (nhãn, số lượng) — dùng cho trend đăng ký / phân bố. */
+export interface CountPoint {
+  label: string;
+  count: number;
+}
+
+/** Doanh thu GV theo tháng — biểu đồ đường/vùng. */
+export async function getRevenueTrend(): Promise<RevenueTrendPoint[]> {
+  const res = await apiClient.get('/api/teacher/revenue/trend');
+  return res.data.data ?? [];
+}
+
+/** Lượt đăng ký theo tháng cho các khóa của GV. */
+export async function getEnrollmentTrend(): Promise<CountPoint[]> {
+  const res = await apiClient.get('/api/teacher/revenue/enrollment-trend');
+  return res.data.data ?? [];
+}

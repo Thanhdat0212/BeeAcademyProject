@@ -21,6 +21,7 @@ import ProgressPage from './pages/student/ProgressPage';
 import RewardsPage from './pages/student/RewardsPage';
 import StudentQuizPage from './pages/student/StudentQuizPage';
 import StudentExamPage from './pages/student/StudentExamPage';
+import ExamAiResultPage from './pages/student/ExamAiResultPage';
 import NotificationsPage from './pages/student/NotificationsPage';
 import CertificatesPage from './pages/student/CertificatesPage';
 import AiTutorPage from './pages/student/AiTutorPage';
@@ -41,6 +42,7 @@ import TeacherProfilePage from './pages/teacher/ProfilePage';
 import TeacherAccountPage from './pages/teacher/AccountPage';
 import ApprovalsPage from './pages/admin/ApprovalsPage';
 import CourseReviewPage from './pages/admin/CourseReviewPage';
+import AdminReportsPage from './pages/admin/AdminReportsPage';
 import OAuthCallbackPage from './pages/common/OAuthCallbackPage';
 import CertificateVerifyPage from './pages/common/CertificateVerifyPage';
 import ParentDashboard from './pages/parents/ParentDashboard';
@@ -76,6 +78,7 @@ export default function App() {
         <Route path="/courses/:id" element={<CourseDetailPage />} />
         <Route path="/courses/:courseId/chapters/:chapterId/quiz" element={<ProtectedRoute><StudentQuizPage /></ProtectedRoute>} />
         <Route path="/courses/:courseId/exams/:slotIndex" element={<ProtectedRoute><StudentExamPage /></ProtectedRoute>} />
+        <Route path="/courses/:courseId/exams/:slotIndex/ai-result/:attemptId" element={<ProtectedRoute><ExamAiResultPage /></ProtectedRoute>} />
         <Route path="/checkout"      element={<ProtectedRoute role="student"><CheckoutPage /></ProtectedRoute>} />
         <Route path="/payment-result" element={<ProtectedRoute role="student"><PaymentResultPage /></ProtectedRoute>} />
         <Route path="/orders"        element={<ProtectedRoute role="student"><OrdersPage /></ProtectedRoute>} />
@@ -125,7 +128,7 @@ export default function App() {
         <Route path="/admin/teachers"   element={<ProtectedRoute role="admin"><ComingSoonPage title="Quản lý giáo viên"    subtitle="Danh sách và thông tin giáo viên" /></ProtectedRoute>} />
         <Route path="/admin/accounting" element={<ProtectedRoute role="admin"><ComingSoonPage title="Kế toán"              subtitle="Quản lý thu chi và báo cáo tài chính" /></ProtectedRoute>} />
         <Route path="/admin/salary"     element={<ProtectedRoute role="admin"><ComingSoonPage title="Lương"                subtitle="Quản lý lương giáo viên và nhân sự" /></ProtectedRoute>} />
-        <Route path="/admin/reports"    element={<ProtectedRoute role="admin"><ComingSoonPage title="Báo cáo & Thống kê"   subtitle="Phân tích dữ liệu và báo cáo tổng hợp" /></ProtectedRoute>} />
+        <Route path="/admin/reports"    element={<ProtectedRoute role="admin"><AdminReportsPage /></ProtectedRoute>} />
         <Route path="/admin/settings"   element={<ProtectedRoute role="admin"><ComingSoonPage title="Cài đặt hệ thống"     subtitle="Cấu hình và tuỳ chỉnh hệ thống" /></ProtectedRoute>} />
       </Routes>
       </MaintenanceGate>

@@ -191,6 +191,68 @@ export async function getPendingBankAccounts(): Promise<AdminBankAccount[]> {
   return unwrap(res.data) ?? [];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Báo cáo & Thống kê (UC37) — biểu đồ time-series + phân bố
+//  GET /api/admin/analytics/{revenue-trend,enrollment-trend,user-growth,courses-by-category}
+//  GET /api/admin/users/stats — phân bố vai trò người dùng
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Điểm doanh thu theo tháng (toàn hệ thống) — month định dạng "yyyy-MM". */
+export interface RevenueTrendPoint {
+  month: string;
+  gross: number;
+  teacherAmount: number;
+  platformFee: number;
+  count: number;
+}
+
+/** Điểm dạng (nhãn, số lượng) — trend đăng ký/người dùng, phân bố danh mục. */
+export interface CountPoint {
+  label: string;
+  count: number;
+}
+
+/** Số lượng user theo vai trò — cho donut phân bố. */
+export interface AdminUserStats {
+  students: number;
+  teachers: number;
+  parents: number;
+  total: number;
+}
+
+export async function getAdminRevenueTrend(): Promise<RevenueTrendPoint[]> {
+  const res = await apiClient.get<ApiResponse<RevenueTrendPoint[]>>(
+    '/api/admin/analytics/revenue-trend',
+  );
+  return unwrap(res.data) ?? [];
+}
+
+export async function getAdminEnrollmentTrend(): Promise<CountPoint[]> {
+  const res = await apiClient.get<ApiResponse<CountPoint[]>>(
+    '/api/admin/analytics/enrollment-trend',
+  );
+  return unwrap(res.data) ?? [];
+}
+
+export async function getUserGrowth(): Promise<CountPoint[]> {
+  const res = await apiClient.get<ApiResponse<CountPoint[]>>(
+    '/api/admin/analytics/user-growth',
+  );
+  return unwrap(res.data) ?? [];
+}
+
+export async function getCoursesByCategory(): Promise<CountPoint[]> {
+  const res = await apiClient.get<ApiResponse<CountPoint[]>>(
+    '/api/admin/analytics/courses-by-category',
+  );
+  return unwrap(res.data) ?? [];
+}
+
+export async function getAdminUserStats(): Promise<AdminUserStats> {
+  const res = await apiClient.get<ApiResponse<AdminUserStats>>('/api/admin/users/stats');
+  return unwrap(res.data);
+}
+
 export async function reviewBankAccount(
   teacherId: string,
   approve: boolean,

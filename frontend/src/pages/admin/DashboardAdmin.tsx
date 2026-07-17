@@ -35,7 +35,8 @@ import {
   FileText, TrendingUp, TrendingDown, DollarSign,
   Star, ChevronRight, Bell, LogOut, Menu, X,
   CheckCircle2, Clock, XCircle, PlusCircle, Calculator, Wallet, BarChart2, Settings,
-  AlertTriangle, Search, Filter, Download, Send, Check, Ban, MessageSquare, AlertCircle, Calendar, Hash, Megaphone, CheckCircle, ShieldAlert, Edit2, RotateCcw
+  AlertTriangle, Search, Filter, Download, Send, Check, Ban, MessageSquare, AlertCircle, Calendar, Hash, Megaphone, CheckCircle, ShieldAlert, Edit2, RotateCcw,
+  type LucideIcon,
 } from 'lucide-react';
 import {
   getAdminOverview,
@@ -48,6 +49,8 @@ import {
   type AdminPayoutStats,
   type BroadcastTargetRole,
 } from '../../api/adminService';
+import ChartCard from '../../components/charts/ChartCard';
+import DistributionDonut from '../../components/charts/DistributionDonut';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // KIỂU DỮ LIỆU (Types & Interfaces)
@@ -684,12 +687,13 @@ export default function DashboardAdmin() {
     }
   }
 
-  // Cấu hình thanh Sidebar
-  const NAV_ITEMS = [
+  // Cấu hình thanh Sidebar. Item có `path` → điều hướng route riêng (không phải tab).
+  const NAV_ITEMS: Array<{ icon: LucideIcon; label: string; tabId: string; path?: string }> = [
     { icon: LayoutDashboard, label: 'Tổng quan', tabId: 'overview' },
     { icon: Users, label: 'Tài khoản', tabId: 'users' },
     { icon: BookOpen, label: 'Duyệt khóa học', tabId: 'courses' },
     { icon: Calculator, label: 'Kế toán & Lương', tabId: 'payouts' },
+    { icon: BarChart2, label: 'Báo cáo & Thống kê', tabId: 'reports', path: '/admin/reports' },
     { icon: FileText, label: 'Hộp thư khiếu nại', tabId: 'complaints' },
     { icon: Bell, label: 'Phát thông báo', tabId: 'announcements' },
     { icon: Settings, label: 'Cài đặt hệ thống', tabId: 'settings' }
@@ -738,6 +742,18 @@ export default function DashboardAdmin() {
         <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
           {NAV_ITEMS.map(item => {
             const isActive = activeTab === item.tabId;
+            if (item.path) {
+              return (
+                <Link
+                  key={item.tabId}
+                  to={item.path}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all text-on-surface-variant hover:bg-surface-container/60 hover:text-on-surface"
+                >
+                  <item.icon className="w-5 h-5 flex-shrink-0" />
+                  {item.label}
+                </Link>
+              );
+            }
             return (
               <button
                 key={item.tabId}
@@ -1036,6 +1052,41 @@ export default function DashboardAdmin() {
                         })}
                       </div>
                     </div>
+                  </div>
+
+                  {/* Phân bố người dùng + lối vào trang báo cáo chi tiết */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                    <ChartCard
+                      title="Phân bố người dùng"
+                      subtitle="Theo vai trò tài khoản"
+                      isEmpty={!userStats || userStats.total === 0}
+                    >
+                      <DistributionDonut
+                        data={userStats ? [
+                          { label: 'Học sinh', value: userStats.students },
+                          { label: 'Giáo viên', value: userStats.teachers },
+                          { label: 'Phụ huynh', value: userStats.parents },
+                        ] : []}
+                        height={240}
+                      />
+                    </ChartCard>
+
+                    <Link
+                      to="/admin/reports"
+                      className="lg:col-span-2 group bg-gradient-to-br from-primary/10 to-primary-container/10 border border-outline-variant/40 rounded-2xl p-6 shadow-sm flex flex-col justify-center"
+                    >
+                      <div className="flex items-center gap-2 text-primary mb-2">
+                        <BarChart2 className="w-6 h-6" />
+                        <span className="text-xs font-bold uppercase tracking-wide">Báo cáo & Thống kê</span>
+                      </div>
+                      <h3 className="text-xl font-extrabold text-on-surface">Xem biểu đồ chi tiết theo thời gian</h3>
+                      <p className="text-sm text-on-surface-variant mt-1">
+                        Doanh thu, lượt đăng ký, tăng trưởng người dùng và phân bố danh mục — tất cả trong một trang.
+                      </p>
+                      <span className="inline-flex items-center gap-1 text-sm font-bold text-primary mt-4 group-hover:gap-2 transition-all">
+                        Mở trang báo cáo <ChevronRight className="w-4 h-4" />
+                      </span>
+                    </Link>
                   </div>
 
                   {/* Lối tắt các hành động quản trị nhanh */}

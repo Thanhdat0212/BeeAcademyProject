@@ -22,6 +22,9 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { getRevenueSplits, getPayoutPeriods } from '../../api/revenueService';
 import type { RevenueSplitResponse, PayoutPeriodResponse } from '../../api/revenueService';
+import ChartCard from '../../components/charts/ChartCard';
+import RevenueTrendChart from '../../components/charts/RevenueTrendChart';
+import { BRAND, BRAND_ALT } from '../../lib/chartTheme';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
   Bell, LogOut, Menu, X,
@@ -213,6 +216,16 @@ export default function TeacherRevenuePage() {
     return map;
   }, [periods]);
 
+  // ── Dữ liệu biểu đồ doanh thu theo tháng (đảo ngược về thứ tự tăng dần) ──
+  const revenueChartData = useMemo(
+    () => [...periods].reverse().map(p => ({
+      month: p.monthYear,
+      teacherAmount: p.totalTeacherAmount,
+      platformFee: p.totalPlatformFee,
+    })),
+    [periods],
+  );
+
   // ── Handler: cross-link từ Tab 2 (kỳ X) → Tab 1 (filter theo kỳ X)
   function viewTransactionsOfPeriod(periodId: string) {
     setPeriodFilter(periodId);
@@ -377,6 +390,23 @@ export default function TeacherRevenuePage() {
               <p className="text-xs text-on-surface-variant mt-1">Trong tháng hiện tại</p>
             </div>
           </motion.div>
+
+          {/* ── BIỂU ĐỒ DOANH THU THEO THÁNG ───────────────────── */}
+          <div className="mb-6">
+            <ChartCard
+              title="Doanh thu theo tháng"
+              subtitle="Phần bạn nhận + phí nền tảng qua các kỳ"
+              isEmpty={revenueChartData.length === 0}
+            >
+              <RevenueTrendChart
+                data={revenueChartData}
+                series={[
+                  { key: 'teacherAmount', name: 'Bạn nhận', color: BRAND },
+                  { key: 'platformFee', name: 'Phí nền tảng', color: BRAND_ALT },
+                ]}
+              />
+            </ChartCard>
+          </div>
 
           {/* ── TAB SWITCHER ───────────────────────────────────── */}
           <div className="flex gap-1 bg-surface-container/50 rounded-xl p-1 mb-4 w-fit">
