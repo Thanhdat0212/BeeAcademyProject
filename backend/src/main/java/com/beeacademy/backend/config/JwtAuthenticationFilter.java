@@ -7,6 +7,7 @@ import com.auth0.jwt.exceptions.JWTVerificationException;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
+import com.beeacademy.backend.security.UserRoleCache;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
@@ -71,11 +72,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final AtomicLong lastJwksFailureMs = new AtomicLong(0);
     private final JWTVerifier      hs256Verifier;
     private final ProfileRepository profileRepository;
+    private final UserRoleCache    userRoleCache;
     private final String           supabaseUrl;
 
-    public JwtAuthenticationFilter(SupabaseProperties props, ProfileRepository profileRepository) {
+    public JwtAuthenticationFilter(SupabaseProperties props, ProfileRepository profileRepository,
+                                   UserRoleCache userRoleCache) {
         this.supabaseUrl      = props.url();
         this.profileRepository = profileRepository;
+        this.userRoleCache    = userRoleCache;
         this.hs256Verifier    = buildHs256Verifier(props.jwtSecret());
 
         // Thử build ES256 verifier ngay khi khởi động
@@ -264,20 +268,33 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      *
      * <p>Fallback về JWT metadata khi DB không truy cập được (exception) hoặc
      * profile chưa tồn tại (user Google OAuth lần đầu chưa qua /oauth/sync).
+     *
+     * <p>Role được cache in-memory TTL 60s ({@link UserRoleCache}) — DB Supabase
+     * ở region xa nên nếu query mỗi request thì mọi API call cõng thêm ~200ms.
+     * Admin đổi role sẽ evict cache nên vẫn có hiệu lực ngay trên node này;
+     * chỉ role đọc được từ DB mới được cache, fallback JWT không cache để lần
+     * request sau còn thử lại DB.
      */
     private AuthenticatedUser buildAuthenticatedUser(DecodedJWT decoded) {
         UUID userId = UUID.fromString(decoded.getSubject());
         String email = safeClaim(decoded, "email");
 
-        String role;
-        try {
-            role = profileRepository.findById(userId)
-                    .map(p -> p.getRole().toDbValue())
-                    .orElseGet(() -> extractRole(decoded));
-        } catch (Exception ex) {
-            log.error("Không thể lấy role từ DB cho user {} — fallback JWT metadata: {}",
-                    userId, ex.getMessage());
-            role = extractRole(decoded);
+        String role = userRoleCache.get(userId);
+        if (role == null) {
+            try {
+                role = profileRepository.findById(userId)
+                        .map(p -> p.getRole().toDbValue())
+                        .orElse(null);
+                if (role != null) {
+                    userRoleCache.put(userId, role);
+                }
+            } catch (Exception ex) {
+                log.error("Không thể lấy role từ DB cho user {} — fallback JWT metadata: {}",
+                        userId, ex.getMessage());
+            }
+            if (role == null) {
+                role = extractRole(decoded);
+            }
         }
 
         return new AuthenticatedUser(userId, email, role);

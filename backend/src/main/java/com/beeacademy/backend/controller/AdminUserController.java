@@ -9,6 +9,7 @@ import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.model.TeacherApprovalStatus;
 import com.beeacademy.backend.model.UserRole;
 import com.beeacademy.backend.repository.ProfileRepository;
+import com.beeacademy.backend.security.UserRoleCache;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -36,6 +37,7 @@ import java.util.UUID;
 public class AdminUserController {
 
     private final ProfileRepository profileRepository;
+    private final UserRoleCache userRoleCache;
 
     /** Danh sách tất cả user, hỗ trợ filter role + search tên/email. */
     @GetMapping
@@ -91,6 +93,9 @@ public class AdminUserController {
 
         profile.changeRole(newRole);
         profileRepository.save(profile);
+        // Xoá role cũ khỏi cache của JWT filter để quyền mới áp dụng ngay,
+        // không chờ hết TTL 60s.
+        userRoleCache.evict(userId);
         return ApiResponse.ok(null, "Đã cập nhật role thành " + role);
     }
 
