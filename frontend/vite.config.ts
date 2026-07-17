@@ -27,10 +27,12 @@ export default defineConfig(({mode}) => {
             'vendor-react': ['react', 'react-dom', 'react-router-dom'],
             'vendor-ui': ['motion/react', 'lucide-react'],
             'vendor-utils': ['axios', 'zustand'],
+            'vendor-charts': ['recharts'],
             'pages-admin': [
               './src/pages/admin/DashboardAdmin',
               './src/pages/admin/ApprovalsPage',
               './src/pages/admin/CourseReviewPage',
+              './src/pages/admin/AdminReportsPage',
             ],
             'pages-teacher': [
               './src/pages/teacher/CoursesPage',

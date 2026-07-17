@@ -123,17 +123,25 @@ function formatDate(iso: string): string {
 // Các status cho phép nộp duyệt lại
 const SUBMITTABLE: CourseStatus[] = ['draft', 'rejected', 'needs_revision'];
 const EDITABLE_STATUSES: CourseStatus[] = ['draft', 'rejected', 'needs_revision'];
+// Chỉ được xóa khi còn ở Bản nháp (backend chặn các trạng thái khác vì có thể đã có học viên)
+const DELETABLE_STATUSES: CourseStatus[] = ['draft'];
+
+function courseDeleteLockMessage(status: CourseStatus): string {
+  return status === 'draft'
+    ? 'Xóa khóa học'
+    : 'Chỉ có thể xóa khóa học ở trạng thái Bản nháp.';
+}
 
 function courseEditLockMessage(status: CourseStatus): string {
   switch (status) {
     case 'pending_review':
-      return 'Dang cho Admin duyet, khong the chinh sua.';
+      return 'Đang chờ Admin duyệt, không thể chỉnh sửa.';
     case 'approved':
-      return 'Khoa hoc da duyet, khong the chinh sua luc nay.';
+      return 'Khóa học đã duyệt, không thể chỉnh sửa lúc này.';
     case 'published':
-      return 'Khoa hoc da xuat ban, khong the chinh sua truc tiep.';
+      return 'Khóa học đã xuất bản, không thể chỉnh sửa trực tiếp.';
     default:
-      return 'Trang thai hien tai khong cho phep chinh sua.';
+      return 'Trạng thái hiện tại không cho phép chỉnh sửa.';
   }
 }
 
@@ -1107,7 +1115,7 @@ export default function TeacherCoursesPage() {
                           // Chỉ draft | rejected | needs_revision mới cho nộp duyệt
                           const canSubmit = SUBMITTABLE.includes(course.status);
                           const canEdit = EDITABLE_STATUSES.includes(course.status);
-                          const canDelete = true;
+                          const canDelete = DELETABLE_STATUSES.includes(course.status);
                           const isSubmitting = submittingId === course.id;
 
                           return (
@@ -1221,8 +1229,8 @@ export default function TeacherCoursesPage() {
                                       if (canEdit) handleEdit(course);
                                     }}
                                     disabled={!canEdit}
-                                    title={canEdit ? 'Chinh sua' : courseEditLockMessage(course.status)}
-                                    aria-label={canEdit ? 'Chinh sua khoa hoc' : courseEditLockMessage(course.status)}
+                                    title={canEdit ? 'Chỉnh sửa' : courseEditLockMessage(course.status)}
+                                    aria-label={canEdit ? 'Chỉnh sửa khóa học' : courseEditLockMessage(course.status)}
                                     className={`p-2 rounded-lg transition-colors ${
                                       canEdit
                                         ? 'text-blue-500 hover:bg-blue-500/10'
@@ -1243,7 +1251,8 @@ export default function TeacherCoursesPage() {
                                   <button
                                     onClick={() => setDeleteTarget(course)}
                                     disabled={!canDelete}
-                                    title="Xóa"
+                                    title={courseDeleteLockMessage(course.status)}
+                                    aria-label={courseDeleteLockMessage(course.status)}
                                     className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
                                     <Trash2 className="w-4 h-4" />

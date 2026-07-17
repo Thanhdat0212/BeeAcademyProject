@@ -128,6 +128,9 @@ export default function RetakeRequestsPanel() {
               >
                 <option value={1}>+1 lượt</option>
                 <option value={2}>+2 lượt</option>
+                <option value={3}>+3 lượt</option>
+                <option value={4}>+4 lượt</option>
+                <option value={5}>+5 lượt</option>
               </select>
               <button
                 onClick={() => handleDecide(request, true)}

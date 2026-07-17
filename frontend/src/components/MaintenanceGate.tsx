@@ -46,7 +46,11 @@ export default function MaintenanceGate({ children }: Props) {
     }
 
     poll();
-    const interval = setInterval(poll, POLL_INTERVAL_MS);
+    // Tab ẩn thì bỏ qua — apiClient đã tự bật maintenanceMode khi gặp 503
+    // nên user quay lại tab sẽ bị chặn ngay ở request đầu tiên.
+    const interval = setInterval(() => {
+      if (!document.hidden) poll();
+    }, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(interval);

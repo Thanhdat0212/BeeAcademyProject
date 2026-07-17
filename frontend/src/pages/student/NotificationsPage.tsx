@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
   Bell,
   CheckCircle2,
   Clock3,
   Loader2,
+  Megaphone,
   RefreshCw,
   Trash2,
   UserRound,
@@ -14,12 +16,13 @@ import DashboardHeader from '../../components/DashboardHeader';
 import PageBanner from '../../components/PageBanner';
 import { notify } from '../../lib/toast';
 import * as studentParentLinkService from '../../api/studentParentLinkService';
-import type { StudentParentLinkInvitationResponse } from '../../types/api';
+import { listUserNotifications, markUserNotificationRead } from '../../api/notificationService';
+import type { StudentParentLinkInvitationResponse, UserNotification } from '../../types/api';
 
 const relationshipLabels = {
   father: 'Cha',
-  mother: 'Me',
-  guardian: 'Nguoi giam ho',
+  mother: 'Mẹ',
+  guardian: 'Người giám hộ',
 } as const;
 
 function fallbackAvatar(name: string): string {
@@ -37,34 +40,54 @@ function formatDateTime(value: string | null): string {
 }
 
 function invitationStatusText(invitation: StudentParentLinkInvitationResponse): string {
-  if (invitation.expired) return 'Yeu cau da het han';
-  return 'Dang cho xac nhan';
+  if (invitation.expired) return 'Yêu cầu đã hết hạn';
+  return 'Đang chờ xác nhận';
 }
 
 export default function NotificationsPage() {
+  const navigate = useNavigate();
   const [invitations, setInvitations] = useState<StudentParentLinkInvitationResponse[]>([]);
   const [linkedParents, setLinkedParents] = useState<StudentParentLinkInvitationResponse[]>([]);
+  const [systemNotifications, setSystemNotifications] = useState<UserNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionKey, setActionKey] = useState<string | null>(null);
   const actionableInvitationCount = invitations.filter(invitation => !invitation.expired).length;
   const expiredInvitationCount = invitations.length - actionableInvitationCount;
   const pendingUnlinkCount = linkedParents.filter(parent => parent.unlinkRequestedByRole === 'parent').length;
+  const unreadSystemCount = systemNotifications.filter(item => !item.read).length;
 
   const loadInvitations = async (showLoading = true) => {
     if (showLoading) setLoading(true);
     try {
-      const [invitationData, parentData] = await Promise.all([
+      const [invitationData, parentData, notificationSummary] = await Promise.all([
         studentParentLinkService.getStudentParentLinkInvitations(),
         studentParentLinkService.getStudentLinkedParents(),
+        listUserNotifications(false),
       ]);
       setInvitations(invitationData);
       setLinkedParents(parentData);
+      setSystemNotifications(notificationSummary.notifications);
     } catch (error) {
       console.error('Lỗi khi tải thông báo lời mời phụ huynh:', error);
       notify.error(error instanceof Error ? error.message : 'Không thể tải thông báo.');
     } finally {
       if (showLoading) setLoading(false);
     }
+  };
+
+  const handleOpenSystemNotification = async (notification: UserNotification) => {
+    if (!notification.read) {
+      try {
+        await markUserNotificationRead(notification.id);
+        setSystemNotifications(items =>
+          items.map(item => item.id === notification.id ? { ...item, read: true } : item)
+        );
+        window.dispatchEvent(new Event('bee:user-notifications-updated'));
+      } catch (error) {
+        console.error('Không thể đánh dấu thông báo đã đọc:', error);
+      }
+    }
+    if (notification.targetUrl) navigate(notification.targetUrl);
   };
 
   useEffect(() => {
@@ -135,6 +158,75 @@ export default function NotificationsPage() {
         <motion.section
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
+          className="mb-6 bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-6 shadow-sm"
+        >
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 border-b border-outline-variant/20 pb-5">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-xs font-extrabold uppercase tracking-wide">
+                <Megaphone className="w-3.5 h-3.5" />
+                Thông báo hệ thống
+              </div>
+              <h2 className="mt-3 text-2xl font-extrabold text-on-surface">
+                Thông báo từ Bee Academy ({unreadSystemCount})
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-on-surface-variant max-w-2xl">
+                Các thông báo và cập nhật quan trọng được Bee Academy gửi tới bạn.
+              </p>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="min-h-[160px] flex items-center justify-center">
+              <div className="inline-flex items-center gap-2 text-sm font-semibold text-on-surface-variant">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                Đang tải thông báo...
+              </div>
+            </div>
+          ) : systemNotifications.length === 0 ? (
+            <div className="min-h-[160px] flex flex-col items-center justify-center text-center px-6">
+              <div className="w-14 h-14 rounded-full bg-surface-container flex items-center justify-center mb-4">
+                <Megaphone className="w-6 h-6 text-on-surface-variant/45" />
+              </div>
+              <p className="text-sm font-extrabold text-on-surface">Chưa có thông báo hệ thống nào.</p>
+            </div>
+          ) : (
+            <div className="pt-5 space-y-3">
+              {systemNotifications.map(notification => (
+                <button
+                  key={notification.id}
+                  onClick={() => handleOpenSystemNotification(notification)}
+                  className={`w-full text-left p-4 rounded-2xl border transition-colors flex gap-3 ${
+                    notification.read
+                      ? 'border-outline-variant/20 bg-surface-container-low/40 hover:bg-surface-container-low/70'
+                      : 'border-primary/30 bg-primary/5 hover:bg-primary/10'
+                  }`}
+                >
+                  <span
+                    className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${
+                      notification.read ? 'bg-outline-variant' : 'bg-red-500'
+                    }`}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-extrabold text-on-surface line-clamp-1">
+                      {notification.title}
+                    </span>
+                    <span className="block text-sm text-on-surface-variant mt-0.5 line-clamp-3">
+                      {notification.body}
+                    </span>
+                    <span className="block text-xs text-on-surface-variant/70 mt-1.5">
+                      {formatDateTime(notification.createdAt)}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </motion.section>
+
+        <motion.section
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
           className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-6 shadow-sm"
         >
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 border-b border-outline-variant/20 pb-5">
@@ -148,7 +240,7 @@ export default function NotificationsPage() {
               </h2>
               <p className="mt-2 text-sm leading-6 text-on-surface-variant max-w-2xl">
                 Quản lý lời mời liên kết và xác nhận hủy liên kết với phụ huynh trên Bee Academy.
-                {expiredInvitationCount > 0 && ` ${expiredInvitationCount} loi moi da het han.`}
+                {expiredInvitationCount > 0 && ` ${expiredInvitationCount} lời mời đã hết hạn.`}
               </p>
             </div>
 

@@ -76,7 +76,13 @@ export default function TeacherNotificationBell() {
     const reload = () => loadNotifications();
     window.addEventListener('bee:user-notifications-updated', reload);
     window.addEventListener('focus', reload);
-    const intervalId = window.setInterval(reload, 15000);
+    // 60s như DashboardHeader — poll 15s tạo request nền liên tục tranh
+    // connection pool với request chính; event bee:* + focus + mở dropdown
+    // đã lo cập nhật tức thời. Tab ẩn thì bỏ qua, listener focus sẽ
+    // refresh ngay khi user quay lại.
+    const intervalId = window.setInterval(() => {
+      if (!document.hidden) reload();
+    }, 60000);
     return () => {
       window.removeEventListener('bee:user-notifications-updated', reload);
       window.removeEventListener('focus', reload);

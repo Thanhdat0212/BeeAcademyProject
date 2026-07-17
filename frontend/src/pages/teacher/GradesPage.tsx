@@ -32,6 +32,7 @@ import {
   Trash2,
   UserCircle,
   Lock,
+  Sparkles,
   X,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -743,9 +744,17 @@ export default function TeacherGradesPage() {
                   <p className="text-sm text-on-surface-variant">Chọn một lượt làm bài kiểm tra để xem phần tự luận.</p>
                 ) : (
                   <div className="space-y-4">
-                    <div>
-                      <p className="font-extrabold">{selectedExam.studentName ?? 'Học sinh'}</p>
-                      <p className="text-sm text-on-surface-variant">{selectedExam.courseTitle} · {selectedExam.examName}</p>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-extrabold">{selectedExam.studentName ?? 'Học sinh'}</p>
+                        <p className="text-sm text-on-surface-variant">{selectedExam.courseTitle} · {selectedExam.examName}</p>
+                      </div>
+                      {selectedExam.autoScorePercent != null && (
+                        <div className="rounded-xl border border-outline-variant/40 bg-surface-container/40 px-3 py-2 text-right">
+                          <p className="text-[11px] uppercase font-bold text-on-surface-variant">Trắc nghiệm (tự động)</p>
+                          <p className="text-lg font-extrabold text-on-surface">{selectedExam.autoScorePercent}%</p>
+                        </div>
+                      )}
                     </div>
                     <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                       {selectedExam.questions.map((question, index) => (
@@ -811,10 +820,55 @@ export default function TeacherGradesPage() {
                         </div>
                       ))}
                     </div>
+                    {selectedExam.aiGradedAt && (
+                      <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-primary" />
+                          <span className="text-[11px] font-extrabold uppercase tracking-wide text-primary">
+                            Gợi ý từ AI (tham khảo)
+                          </span>
+                          {selectedExam.aiScorePercent != null && (
+                            <span className="ml-auto rounded-full bg-primary/15 px-2.5 py-1 text-xs font-extrabold text-primary">
+                              AI đề xuất: {selectedExam.aiScorePercent}%
+                            </span>
+                          )}
+                        </div>
+                        {selectedExam.aiFeedback?.overallComment && (
+                          <p className="mt-2 text-sm text-on-surface-variant">{selectedExam.aiFeedback.overallComment}</p>
+                        )}
+                        {selectedExam.aiFeedback?.questions?.length ? (
+                          <ul className="mt-2 space-y-1 text-xs text-on-surface-variant">
+                            {selectedExam.aiFeedback.questions.map((q, index) => (
+                              <li key={q.questionId}>
+                                <span className="font-bold text-on-surface">Câu tự luận {index + 1}:</span>
+                                {' '}AI {q.earnedPoints}/{q.maxPoints}đ — {q.comment}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        {selectedExam.aiFeedback?.overallComment && (
+                          <button
+                            type="button"
+                            onClick={() => setExamFeedbackInput(selectedExam.aiFeedback?.overallComment ?? '')}
+                            className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-primary/40 px-3 py-1 text-xs font-bold text-primary hover:bg-primary/10"
+                          >
+                            Chép nhận xét AI vào ô bên dưới
+                          </button>
+                        )}
+                        <p className="mt-3 text-[11px] italic text-on-surface-variant">
+                          Đây là gợi ý sơ bộ của AI. Điểm và nhận xét chính thức do thầy/cô quyết định.
+                        </p>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-[140px_1fr_auto] gap-3 items-end border-t border-outline-variant/20 pt-4">
                       <label className="block">
                         <span className="text-xs uppercase font-extrabold text-on-surface-variant mb-1.5 block">Điểm %</span>
                         <input value={examScoreInput} onChange={event => setExamScoreInput(event.target.value)} type="number" min={0} max={100} className="w-full px-3 py-2.5 bg-surface-container border border-outline-variant rounded-xl text-sm outline-none focus:border-primary" />
+                        {selectedExam.autoScorePercent != null && (
+                          <span className="mt-1 block text-[11px] text-on-surface-variant">
+                            Tham khảo trắc nghiệm: {selectedExam.autoScorePercent}%
+                          </span>
+                        )}
                       </label>
                       <label className="block">
                         <span className="text-xs uppercase font-extrabold text-on-surface-variant mb-1.5 block">Nhận xét</span>
