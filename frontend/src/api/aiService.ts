@@ -40,6 +40,76 @@ export async function getAiRoadmap(): Promise<string> {
   return unwrap(response.data);
 }
 
+// ── AI chấm/nhận xét sơ bộ bài làm ───────────────────────────────────────────
+
+export interface AiExamQuestionGrade {
+  questionId: string;
+  questionText: string;
+  type: string;
+  earnedPoints: number;
+  maxPoints: number;
+  studentAnswer: string | null;
+  imageUrls: string[];
+  comment: string;
+  suggestions: string[];
+}
+
+export interface AiExamGrade {
+  attemptId: string;
+  aiScorePercent: number;
+  overallComment: string;
+  strengths: string[];
+  improvements: string[];
+  questions: AiExamQuestionGrade[];
+  aiGradedAt: string;
+  disclaimer: string;
+}
+
+export interface AiQuizAnalysis {
+  attemptId: string;
+  overallComment: string;
+  strengths: string[];
+  improvements: string[];
+  studySuggestions: string[];
+  aiGradedAt: string;
+  disclaimer: string;
+}
+
+// Chấm tự luận + đọc ảnh viết tay qua Gemini có thể lâu — nới timeout rộng hơn chat.
+const GRADE_CONFIG = { timeout: 90_000 };
+
+export async function gradeExamWithAi(attemptId: string): Promise<AiExamGrade> {
+  const response = await apiClient.post<ApiResponse<AiExamGrade>>(
+    `/api/student/exam-attempts/${attemptId}/ai-grade`,
+    undefined,
+    GRADE_CONFIG,
+  );
+  return unwrap(response.data);
+}
+
+export async function getExamAiGrade(attemptId: string): Promise<AiExamGrade | null> {
+  const response = await apiClient.get<ApiResponse<AiExamGrade | null>>(
+    `/api/student/exam-attempts/${attemptId}/ai-grade`,
+  );
+  return unwrap(response.data);
+}
+
+export async function analyzeQuizWithAi(attemptId: string): Promise<AiQuizAnalysis> {
+  const response = await apiClient.post<ApiResponse<AiQuizAnalysis>>(
+    `/api/student/quiz/${attemptId}/ai-analysis`,
+    undefined,
+    GRADE_CONFIG,
+  );
+  return unwrap(response.data);
+}
+
+export async function getQuizAiAnalysis(attemptId: string): Promise<AiQuizAnalysis | null> {
+  const response = await apiClient.get<ApiResponse<AiQuizAnalysis | null>>(
+    `/api/student/quiz/${attemptId}/ai-analysis`,
+  );
+  return unwrap(response.data);
+}
+
 // Gemini có thể bọc JSON trong ```json ...``` hoặc kèm text thừa —
 // cắt đúng phần object đầu tiên rồi parse, hỏng thì trả null để UI hiện raw text.
 export function parseRoadmap(rawText: string): AiRoadmap | null {

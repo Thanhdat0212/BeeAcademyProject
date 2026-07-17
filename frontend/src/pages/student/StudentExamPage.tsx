@@ -3,12 +3,14 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
+  ArrowRight,
   CheckSquare,
   Clock,
   FileText,
   ImagePlus,
   Loader2,
   Send,
+  Sparkles,
   Square,
   X,
 } from 'lucide-react';
@@ -19,6 +21,7 @@ import { notify } from '../../lib/toast';
 import {
   getLatestExamRetakeRequest,
   getStudentExam,
+  getStudentExamResult,
   requestExamRetake,
   saveStudentExamDraft,
   submitStudentExam,
@@ -31,6 +34,7 @@ import {
   uploadStudentExamAnswerImage,
 } from '../../api/studentExamService';
 import type { MatchingPair } from '../../api/questionService';
+import { gradeExamWithAi, type AiExamGrade } from '../../api/aiService';
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F'];
 const MAX_ANSWER_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -45,18 +49,18 @@ function formatPoints(value: number | null | undefined) {
 
 function questionTypeLabel(type: string) {
   switch (type) {
-    case 'multiple_choice': return 'Trac nghiem';
-    case 'true_false': return 'Dung sai';
-    case 'fill_in_blank': return 'Dien cho trong';
-    case 'matching': return 'Noi cot';
+    case 'multiple_choice': return 'Trắc nghiệm';
+    case 'true_false': return 'Đúng/Sai';
+    case 'fill_in_blank': return 'Điền chỗ trống';
+    case 'matching': return 'Nối cột';
     case 'essay':
     case 'essay_short':
-    case 'essay_long': return 'Tu luan';
-    case 'image_question': return 'Cau hoi hinh anh';
-    case 'formula_question': return 'Cau hoi cong thuc';
-    case 'audio_question': return 'Cau hoi audio';
-    case 'file_upload': return 'Nop file / anh';
-    default: return 'Cau hoi';
+    case 'essay_long': return 'Tự luận';
+    case 'image_question': return 'Câu hỏi hình ảnh';
+    case 'formula_question': return 'Câu hỏi công thức';
+    case 'audio_question': return 'Câu hỏi âm thanh';
+    case 'file_upload': return 'Nộp file / ảnh';
+    default: return 'Câu hỏi';
   }
 }
 
@@ -190,6 +194,9 @@ export default function StudentExamPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [submission, setSubmission] = useState<StudentExamSubmissionResponse | null>(null);
+  const [pastResult, setPastResult] = useState<StudentExamSubmissionResponse | null>(null);
+  const [aiGrade, setAiGrade] = useState<AiExamGrade | null>(null);
+  const [aiGrading, setAiGrading] = useState(false);
   const [retakeLocked, setRetakeLocked] = useState(false);
   const [retakeRequest, setRetakeRequest] = useState<ExamRetakeRequest | null>(null);
   const [retakeReason, setRetakeReason] = useState('');
@@ -208,7 +215,7 @@ export default function StudentExamPage() {
 
   useEffect(() => {
     if (!courseId || !Number.isInteger(parsedSlotIndex)) {
-      setErrorMsg('Duong dan bai kiem tra khong hop le.');
+      setErrorMsg('Đường dẫn bài kiểm tra không hợp lệ.');
       setLoading(false);
       return;
     }
@@ -236,7 +243,7 @@ export default function StudentExamPage() {
       })
       .catch(err => {
         if (cancelled) return;
-        setErrorMsg(err instanceof Error ? err.message : 'Khong tai duoc bai kiem tra.');
+        setErrorMsg(err instanceof Error ? err.message : 'Không tải được bài kiểm tra.');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -246,6 +253,22 @@ export default function StudentExamPage() {
       cancelled = true;
     };
   }, [courseId, draftKey, parsedSlotIndex]);
+
+  useEffect(() => {
+    if (!courseId || !Number.isInteger(parsedSlotIndex)) return;
+    let cancelled = false;
+    setPastResult(null);
+    getStudentExamResult(courseId, parsedSlotIndex)
+      .then(result => {
+        if (!cancelled) setPastResult(result);
+      })
+      .catch(() => {
+        // Không có kết quả trước đó hoặc lỗi tải — bỏ qua, không chặn làm bài mới.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId, parsedSlotIndex]);
 
   const answeredCount = useMemo(() => {
     if (!exam) return 0;
@@ -277,7 +300,7 @@ export default function StudentExamPage() {
   useEffect(() => {
     if (!exam?.requireFullscreen || submission || document.fullscreenElement) return;
     document.documentElement.requestFullscreen?.().catch(() => {
-      notify.error('Trinh duyet khong cho tu dong bat fullscreen. Vui long bat fullscreen truoc khi lam bai.');
+      notify.error('Trình duyệt không cho tự động bật fullscreen. Vui lòng bật fullscreen trước khi làm bài.');
     });
   }, [exam?.requireFullscreen, submission]);
 
@@ -306,17 +329,17 @@ export default function StudentExamPage() {
     const allowedTypes = acceptedUploadTypes(question);
     const currentCount = essayImages[questionId]?.length ?? 0;
     if (currentCount + selectedFiles.length > MAX_ANSWER_IMAGE_COUNT) {
-      notify.error(`Moi cau toi da ${MAX_ANSWER_IMAGE_COUNT} tep dinh kem.`);
+      notify.error(`Mỗi câu tối đa ${MAX_ANSWER_IMAGE_COUNT} tệp đính kèm.`);
       return;
     }
 
     for (const file of selectedFiles) {
       if (!allowedTypes.includes(file.type)) {
-        notify.error(`Loai file khong duoc ho tro. Cho phep: ${allowedTypes.join(', ')}`);
+        notify.error(`Loại file không được hỗ trợ. Cho phép: ${allowedTypes.join(', ')}`);
         return;
       }
       if (file.size > MAX_ANSWER_IMAGE_BYTES) {
-        notify.error('Moi tep dinh kem toi da 5 MB.');
+        notify.error('Mỗi tệp đính kèm tối đa 5 MB.');
         return;
       }
     }
@@ -332,9 +355,9 @@ export default function StudentExamPage() {
         [questionId]: [...(prev[questionId] ?? []), ...uploadedImages],
       }));
       setSubmitError('');
-      notify.success(`Da tai len ${uploadedImages.length} tep dinh kem.`);
+      notify.success(`Đã tải lên ${uploadedImages.length} tệp đính kèm.`);
     } catch (err) {
-      notify.error(isApiError(err) ? err.message : 'Khong the tai tep dinh kem.');
+      notify.error(isApiError(err) ? err.message : 'Không thể tải tệp đính kèm.');
     } finally {
       setUploadingImages(prev => ({ ...prev, [questionId]: false }));
     }
@@ -388,11 +411,11 @@ export default function StudentExamPage() {
   async function handleSubmitExam(forceSubmit = false) {
     if (!courseId || !exam || submitting || submission) return;
     if (hasUploadingImages) {
-      setSubmitError('Vui long doi tai anh dap an xong roi nop bai.');
+      setSubmitError('Vui lòng đợi tải ảnh đáp án xong rồi nộp bài.');
       return;
     }
     if (!forceSubmit && answeredCount < exam.questionCount) {
-      setSubmitError('Vui long tra loi day du cac cau truoc khi nop bai.');
+      setSubmitError('Vui lòng trả lời đầy đủ các câu trước khi nộp bài.');
       return;
     }
 
@@ -414,9 +437,22 @@ export default function StudentExamPage() {
           .then(setRetakeRequest)
           .catch(() => {});
       }
-      setSubmitError(err instanceof Error ? err.message : 'Khong the nop bai kiem tra.');
+      setSubmitError(err instanceof Error ? err.message : 'Không thể nộp bài kiểm tra.');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleAiGrade() {
+    if (!submission || aiGrading) return;
+    setAiGrading(true);
+    try {
+      const result = await gradeExamWithAi(submission.attemptId);
+      setAiGrade(result);
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'Không thể nhờ AI chấm bài.');
+    } finally {
+      setAiGrading(false);
     }
   }
 
@@ -575,7 +611,7 @@ export default function StudentExamPage() {
             className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold text-on-surface-variant hover:bg-surface hover:text-primary"
           >
             <ArrowLeft className="h-4 w-4" />
-            Quay lai chuong trinh hoc
+            Quay lại chương trình học
           </button>
           {exam && (
             <div className={`hidden items-center gap-2 text-xs font-bold sm:flex ${
@@ -593,7 +629,7 @@ export default function StudentExamPage() {
           <div className="flex min-h-[50vh] items-center justify-center">
             <div className="text-center">
               <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-primary" />
-              <p className="font-semibold text-on-surface-variant">Dang tai bai kiem tra...</p>
+              <p className="font-semibold text-on-surface-variant">Đang tải bài kiểm tra...</p>
             </div>
           </div>
         )}
@@ -603,14 +639,45 @@ export default function StudentExamPage() {
             <div className="flex items-start gap-3">
               <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
               <div>
-                <h1 className="font-extrabold">Khong the mo bai kiem tra</h1>
+                <h1 className="font-extrabold">Không thể mở bài kiểm tra</h1>
                 <p className="mt-1 text-sm font-medium">{errorMsg}</p>
                 <Link
                   to={returnTo}
                   className="mt-4 inline-flex rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700"
                 >
-                  Ve chuong trinh hoc
+                  Về chương trình học
                 </Link>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!loading && exam && !submission && pastResult && (
+          <div className="mb-6 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-extrabold text-on-surface">
+                  Kết quả lần làm gần nhất (Lần {pastResult.attemptNumber})
+                </p>
+                {pastResult.status === 'graded' ? (
+                  <p className="mt-1 text-xs font-semibold text-on-surface-variant">
+                    Điểm: {pastResult.effectiveScorePercent}%
+                    {pastResult.passed != null && (
+                      <span className={pastResult.passed ? 'text-green-600' : 'text-red-500'}>
+                        {' '}- {pastResult.passed ? 'Đạt' : 'Chưa đạt'}
+                      </span>
+                    )}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs font-semibold text-amber-600">
+                    Đang chờ giáo viên chấm phần tự luận.
+                  </p>
+                )}
+                {pastResult.teacherFeedback && (
+                  <p className="mt-1 text-xs italic text-on-surface-variant">
+                    Nhận xét giáo viên: {pastResult.teacherFeedback}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -627,7 +694,7 @@ export default function StudentExamPage() {
             <section className="min-w-0 space-y-5">
               <div>
                 <p className="text-sm font-bold uppercase text-primary">
-                  Bai kiem tra sau {exam.placementChapterTitle ?? 'chuong da chon'}
+                  Bài kiểm tra sau {exam.placementChapterTitle ?? 'chương đã chọn'}
                 </p>
                 <h1 className="mt-1 text-3xl font-extrabold text-on-surface">{exam.name}</h1>
                 {exam.description && (
@@ -640,17 +707,17 @@ export default function StudentExamPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4">
                   <Clock className={`mb-2 h-5 w-5 ${isTimeUrgent ? 'text-red-500' : 'text-primary'}`} />
-                  <p className="text-xs font-bold uppercase text-on-surface-variant">Thoi gian</p>
+                  <p className="text-xs font-bold uppercase text-on-surface-variant">Thời gian</p>
                   <p className={`mt-1 text-xl font-extrabold ${isTimeUrgent ? 'text-red-500' : 'text-on-surface'}`}>
                     {displayTime}
                   </p>
                   <p className="mt-1 text-xs font-medium text-on-surface-variant">
-                    Thoi luong tong: {exam.durationMinutes} phut
+                    Thời lượng tổng: {exam.durationMinutes} phút
                   </p>
                 </div>
                 <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4">
                   <FileText className="mb-2 h-5 w-5 text-primary" />
-                  <p className="text-xs font-bold uppercase text-on-surface-variant">So cau</p>
+                  <p className="text-xs font-bold uppercase text-on-surface-variant">Số câu</p>
                   <p className="mt-1 text-xl font-extrabold text-on-surface">{exam.questionCount}</p>
                 </div>
               </div>
@@ -728,7 +795,7 @@ export default function StudentExamPage() {
                           )}
                         </div>
                         <span className="flex-shrink-0 rounded-xl bg-amber-500/10 px-3 py-1.5 text-xs font-extrabold text-amber-600">
-                          {formatPoints(question.points)} diem
+                          {formatPoints(question.points)} điểm
                         </span>
                       </div>
 
@@ -742,7 +809,7 @@ export default function StudentExamPage() {
                             }))}
                             disabled={Boolean(submission)}
                             rows={5}
-                            placeholder="Nhap cau tra loi tu luan..."
+                            placeholder="Nhập câu trả lời tự luận..."
                             className="w-full resize-y rounded-2xl border border-outline-variant bg-surface-container-lowest px-4 py-3 text-sm text-on-surface outline-none focus:border-primary"
                           />
 
@@ -750,10 +817,10 @@ export default function StudentExamPage() {
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                               <div>
                                 <p className="text-sm font-bold text-on-surface">
-                                  {question.type === 'file_upload' ? 'Tep dinh kem' : 'Anh dap an'}
+                                  {question.type === 'file_upload' ? 'Tệp đính kèm' : 'Ảnh đáp án'}
                                 </p>
                                 <p className="text-xs text-on-surface-variant">
-                                  {acceptedUploadTypes(question).join(', ')} - toi da 5 MB moi tep - toi da {MAX_ANSWER_IMAGE_COUNT} tep
+                                  {acceptedUploadTypes(question).join(', ')} - tối đa 5 MB mỗi tệp - tối đa {MAX_ANSWER_IMAGE_COUNT} tệp
                                 </p>
                               </div>
                               <label className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold transition-colors ${
@@ -766,7 +833,7 @@ export default function StudentExamPage() {
                                 ) : (
                                   <ImagePlus className="h-4 w-4" />
                                 )}
-                                {isUploading ? 'Dang tai...' : 'Tai tep len'}
+                                {isUploading ? 'Đang tải...' : 'Tải tệp lên'}
                                 <input
                                   type="file"
                                   accept={acceptedUploadTypes(question).join(',')}
@@ -803,13 +870,13 @@ export default function StudentExamPage() {
                                         rel="noreferrer"
                                         className="flex h-36 w-full items-center justify-center bg-surface-container text-sm font-bold text-primary"
                                       >
-                                        Mo tep dinh kem
+                                        Mở tệp đính kèm
                                       </a>
                                     )}
                                     <div className="flex items-start justify-between gap-2 px-3 py-2">
                                       <div className="min-w-0">
                                         <p className="truncate text-xs font-bold text-on-surface">
-                                          {question.type === 'file_upload' ? `Tep ${imageIndex + 1}` : `Anh ${imageIndex + 1}`}
+                                          {question.type === 'file_upload' ? `Tệp ${imageIndex + 1}` : `Ảnh ${imageIndex + 1}`}
                                         </p>
                                         <p className="truncate text-[11px] text-on-surface-variant">
                                           {image.name}
@@ -820,7 +887,7 @@ export default function StudentExamPage() {
                                           type="button"
                                           onClick={() => removeEssayImage(question.id, image.url)}
                                           className="rounded-lg p-1 text-on-surface-variant hover:bg-surface-container hover:text-red-500"
-                                          title="Xoa anh"
+                                          title="Xóa ảnh"
                                         >
                                           <X className="h-4 w-4" />
                                         </button>
@@ -841,7 +908,7 @@ export default function StudentExamPage() {
                             [question.id]: event.target.value,
                           }))}
                           disabled={Boolean(submission)}
-                          placeholder="Nhap dap an..."
+                          placeholder="Nhập đáp án..."
                           className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest px-4 py-3 text-sm text-on-surface outline-none focus:border-primary"
                         />
                       ) : question.type === 'matching' ? (
@@ -866,7 +933,7 @@ export default function StudentExamPage() {
                                     };
                                   })}
                                   disabled={Boolean(submission)}
-                                  placeholder="Nhap ve ghep tuong ung..."
+                                  placeholder="Nhập vế ghép tương ứng..."
                                   className="rounded-2xl border border-outline-variant bg-surface-container-lowest px-4 py-3 text-sm text-on-surface outline-none focus:border-primary"
                                 />
                               </div>
@@ -917,7 +984,7 @@ export default function StudentExamPage() {
 
             <aside className="lg:sticky lg:top-6 lg:self-start">
               <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-5">
-                <p className="text-sm font-extrabold text-on-surface">Tien do lam bai</p>
+                <p className="text-sm font-extrabold text-on-surface">Tiến độ làm bài</p>
                 <div className="mt-4 h-2 rounded-full bg-surface-container">
                   <div
                     className="h-full rounded-full bg-primary"
@@ -925,14 +992,14 @@ export default function StudentExamPage() {
                   />
                 </div>
                 <p className="mt-2 text-xs font-bold text-on-surface-variant">
-                  Da tra loi {answeredCount}/{exam.questionCount} cau
+                  Đã trả lời {answeredCount}/{exam.questionCount} câu
                 </p>
                 <div className="mt-4 space-y-2 text-xs font-medium text-on-surface-variant">
-                  <p>Pham vi: {exam.scopeStartChapterTitle ?? 'Chuong dau'} - {exam.placementChapterTitle ?? 'chuong dat bai kiem tra'}</p>
-                  <p>Tong diem: {formatPoints(exam.totalPoints)}</p>
-                  <p>So lan lam toi da: {exam.maxAttempts}</p>
+                  <p>Phạm vi: {exam.scopeStartChapterTitle ?? 'Chương đầu'} - {exam.placementChapterTitle ?? 'chương đặt bài kiểm tra'}</p>
+                  <p>Tổng điểm: {formatPoints(exam.totalPoints)}</p>
+                  <p>Số lần làm tối đa: {exam.maxAttempts}</p>
                   <p className={isTimeUrgent ? 'font-bold text-red-500' : ''}>
-                    Con lai: {displayTime}
+                    Còn lại: {displayTime}
                   </p>
                   {exam.requireFullscreen && (
                     <p className={integrityViolations > 0 ? 'font-bold text-red-500' : ''}>
@@ -940,7 +1007,7 @@ export default function StudentExamPage() {
                     </p>
                   )}
                   {hasUploadingImages && (
-                    <p className="font-bold text-amber-600">Dang tai anh dap an, vui long doi mot chut.</p>
+                    <p className="font-bold text-amber-600">Đang tải ảnh đáp án, vui lòng đợi một chút.</p>
                   )}
                 </div>
                 {submitError && (
@@ -991,22 +1058,65 @@ export default function StudentExamPage() {
                   </div>
                 )}
                 {submission ? (
-                  <div className="mt-5 rounded-2xl border border-green-200 bg-green-50 p-4 text-green-800">
-                    <p className="text-sm font-extrabold">Da nop bai kiem tra</p>
-                    <p className="mt-1 text-xs font-semibold">
-                      Trac nghiem dung {submission.correctObjectiveCount}/{submission.totalObjectiveCount} cau.
-                    </p>
-                    {submission.status === 'pending' ? (
+                  <>
+                    <div className="mt-5 rounded-2xl border border-green-200 bg-green-50 p-4 text-green-800">
+                      <p className="text-sm font-extrabold">Đã nộp bài kiểm tra</p>
                       <p className="mt-1 text-xs font-semibold">
-                        Diem trac nghiem da duoc cham may: {submission.autoScorePercent}%.
-                        Phan tu luan da duoc gui sang giao vien de cham tiep.
+                        Trắc nghiệm đúng {submission.correctObjectiveCount}/{submission.totalObjectiveCount} câu.
                       </p>
-                    ) : (
-                      <p className="mt-1 text-xs font-semibold">
-                        Diem tu dong: {submission.autoScorePercent}% - Bai da duoc cham xong.
-                      </p>
+                      {submission.status === 'pending' ? (
+                        <p className="mt-1 text-xs font-semibold">
+                          Điểm trắc nghiệm đã được chấm máy: {submission.autoScorePercent}%.
+                          Phần tự luận đã được gửi sang giáo viên để chấm tiếp.
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs font-semibold">
+                          Điểm tự động: {submission.autoScorePercent}% - Bài đã được chấm xong.
+                        </p>
+                      )}
+                    </div>
+
+                    {submission.status === 'pending' && !aiGrade && (
+                      <button
+                        type="button"
+                        onClick={handleAiGrade}
+                        disabled={aiGrading}
+                        className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary bg-primary/10 px-4 py-2.5 text-sm font-bold text-primary hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {aiGrading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        {aiGrading ? 'AI đang chấm sơ bộ...' : 'Nhờ AI chấm sơ bộ'}
+                      </button>
                     )}
-                  </div>
+
+                    {aiGrade && (
+                      <div className="mt-4 rounded-2xl border border-outline-variant bg-surface-container-lowest p-4">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 text-primary" />
+                          <span className="text-[11px] font-extrabold uppercase tracking-wide text-primary">
+                            Kết quả sơ bộ (AI)
+                          </span>
+                        </div>
+                        <div className="mt-3 flex items-baseline gap-2">
+                          <span className="text-3xl font-extrabold text-on-surface">
+                            {(aiGrade.aiScorePercent / 10).toFixed(1).replace('.', ',')}
+                          </span>
+                          <span className="text-sm font-semibold text-on-surface-variant">/ 10</span>
+                        </div>
+                        {/* Nhận xét chi tiết dễ bị cắt trong sidebar khi cuộn (aside sticky trong grid
+                            cột hẹp) — chuyển sang trang riêng để luôn xem được đầy đủ. */}
+                        <button
+                          type="button"
+                          onClick={() => navigate(
+                            `/courses/${courseId}/exams/${parsedSlotIndex}/ai-result/${submission.attemptId}?returnTo=${encodeURIComponent(returnTo)}`,
+                          )}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-on-primary hover:bg-primary/90"
+                        >
+                          Xem nhận xét chi tiết
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <button
                     type="button"
@@ -1015,7 +1125,7 @@ export default function StudentExamPage() {
                     className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-on-primary hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    {submitting ? 'Dang nop bai...' : 'Nop bai kiem tra'}
+                    {submitting ? 'Đang nộp bài...' : 'Nộp bài kiểm tra'}
                   </button>
                 )}
                 <button
@@ -1023,7 +1133,7 @@ export default function StudentExamPage() {
                   onClick={() => navigate(returnTo)}
                   className="mt-5 w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-on-primary hover:bg-primary/90"
                 >
-                  Quay lai hoc tiep
+                  Quay lại học tiếp
                 </button>
               </div>
             </aside>

@@ -123,6 +123,25 @@ export interface TeacherExamQuestionReview {
   explanation: string | null;
 }
 
+export interface AiExamQuestionGrade {
+  questionId: string;
+  questionText: string;
+  type: string;
+  earnedPoints: number;
+  maxPoints: number;
+  studentAnswer: string | null;
+  imageUrls: string[];
+  comment: string;
+  suggestions: string[];
+}
+
+export interface AiExamFeedback {
+  overallComment: string;
+  strengths: string[];
+  improvements: string[];
+  questions: AiExamQuestionGrade[];
+}
+
 export interface TeacherExamAttemptResponse {
   id: string;
   studentId: string;
@@ -142,6 +161,9 @@ export interface TeacherExamAttemptResponse {
   passed: boolean | null;
   feedback: string | null;
   gradedAt: string | null;
+  aiScorePercent: number | null;
+  aiFeedback: AiExamFeedback | null;
+  aiGradedAt: string | null;
   status: 'pending' | 'graded';
   questions: TeacherExamQuestionReview[];
 }

@@ -13,11 +13,12 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Trophy, Award,
   CheckCircle2, XCircle, Clock, Loader2, RotateCcw,
-  BookOpen, AlertCircle,
+  BookOpen, AlertCircle, Sparkles, Lightbulb,
 } from 'lucide-react';
 import { notify } from '../../lib/toast';
 import LatexText from '../../components/LatexText';
 import * as quizSvc from '../../api/quizService';
+import { analyzeQuizWithAi, type AiQuizAnalysis } from '../../api/aiService';
 import { getCourseDetail } from '../../api/courseService';
 import { completeCourseProgressItem, getCourseProgress } from '../../api/courseProgressService';
 import { useCourseStore } from '../../store/useCourseStore';
@@ -214,6 +215,8 @@ export default function StudentQuizPage() {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [attempt, setAttempt] = useState<QuizAttemptStartResponse | null>(null);
   const [result, setResult] = useState<QuizResultResponse | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<AiQuizAnalysis | null>(null);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const submittingRef = useRef(false);
 
   // answers: questionId ? choiceId
@@ -325,12 +328,26 @@ export default function StudentQuizPage() {
     handleSubmit();
   }, [handleSubmit]);
 
+  async function handleAiAnalyze() {
+    if (!result || aiAnalyzing) return;
+    setAiAnalyzing(true);
+    try {
+      const analysis = await analyzeQuizWithAi(result.attemptId);
+      setAiAnalysis(analysis);
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'Không thể nhờ AI phân tích bài làm.');
+    } finally {
+      setAiAnalyzing(false);
+    }
+  }
+
   // Làm lại - gọi lại startQuiz
   async function handleRetry() {
     if (!courseId || !chapterId) return;
     setPhase('loading');
     setCurrentIdx(0);
     setResult(null);
+    setAiAnalysis(null);
     try {
       const detail = await getCourseDetail(courseId);
       const chapter = detail.chapters.find(item => item.id === chapterId);
@@ -520,6 +537,65 @@ export default function StudentQuizPage() {
                   : <><XCircle className="w-4 h-4" /> Chưa đạt - cần ôn lại</>
                 }
               </motion.div>
+            </div>
+
+            {/* AI phân tích bài làm */}
+            <div className="px-6 pt-6">
+              {!aiAnalysis ? (
+                <button
+                  onClick={handleAiAnalyze}
+                  disabled={aiAnalyzing}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary bg-primary/10 px-4 py-2.5 text-sm font-bold text-primary hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {aiAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  {aiAnalyzing ? 'AI đang phân tích...' : 'Nhờ AI phân tích bài làm'}
+                </button>
+              ) : (
+                <div className="rounded-2xl border border-outline-variant/60 bg-surface-container/50 p-5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    <span className="text-[11px] font-extrabold uppercase tracking-wide text-primary">
+                      Phân tích từ AI
+                    </span>
+                  </div>
+                  {aiAnalysis.overallComment && (
+                    <p className="mt-3 text-sm font-medium text-on-surface-variant">{aiAnalysis.overallComment}</p>
+                  )}
+                  {aiAnalysis.strengths.length > 0 && (
+                    <div className="mt-4">
+                      <p className="flex items-center gap-1.5 text-sm font-bold text-green-600">
+                        <CheckCircle2 className="w-4 h-4" /> Điểm mạnh
+                      </p>
+                      <ul className="mt-1 list-disc space-y-1 pl-6 text-sm text-on-surface-variant">
+                        {aiAnalysis.strengths.map((item, index) => <li key={index}>{item}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {aiAnalysis.improvements.length > 0 && (
+                    <div className="mt-4">
+                      <p className="flex items-center gap-1.5 text-sm font-bold text-amber-600">
+                        <Lightbulb className="w-4 h-4" /> Cần cải thiện
+                      </p>
+                      <ul className="mt-1 list-disc space-y-1 pl-6 text-sm text-on-surface-variant">
+                        {aiAnalysis.improvements.map((item, index) => <li key={index}>{item}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {aiAnalysis.studySuggestions.length > 0 && (
+                    <div className="mt-4">
+                      <p className="flex items-center gap-1.5 text-sm font-bold text-primary">
+                        <BookOpen className="w-4 h-4" /> Gợi ý ôn tập
+                      </p>
+                      <ul className="mt-1 list-disc space-y-1 pl-6 text-sm text-on-surface-variant">
+                        {aiAnalysis.studySuggestions.map((item, index) => <li key={index}>{item}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  <p className="mt-4 border-t border-outline-variant/50 pt-3 text-[11px] italic text-on-surface-variant">
+                    {aiAnalysis.disclaimer}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Chi tiết từng câu */}
