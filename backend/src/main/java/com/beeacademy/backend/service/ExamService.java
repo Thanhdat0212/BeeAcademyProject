@@ -223,7 +223,61 @@ public class ExamService {
                 scoringSummary.hasEssay() ? "pending" : "graded",
                 scoringSummary.correctObjectiveCount(),
                 scoringSummary.totalObjectiveCount(),
-                saved.getSubmittedAt());
+                saved.getSubmittedAt(),
+                null,
+                scoringSummary.hasEssay() ? null : scoringSummary.autoScorePercent(),
+                null,
+                null);
+    }
+
+    /** Lấy kết quả lần làm bài gần nhất đã nộp — cho học sinh xem lại sau khi rời trang thi,
+        kể cả sau khi giáo viên đã chấm phần tự luận. Không chặn học sinh làm lại nếu còn lượt. */
+    @Transactional(readOnly = true)
+    public StudentExamSubmissionResponse getStudentExamResult(
+            UUID courseId,
+            Integer slotIndex,
+            AuthenticatedUser me) {
+        validateSlot(slotIndex);
+        requireStudentEnrollment(courseId, me.userId());
+
+        ExamConfig config = examRepository.findStudentVisibleByCourseIdAndSlotIndex(courseId, slotIndex)
+                .orElse(null);
+        if (config == null) {
+            return null;
+        }
+
+        ExamAttempt attempt = examAttemptRepository
+                .findFirstByStudentIdAndExamConfigIdAndSubmittedAtIsNotNullOrderBySubmittedAtDesc(
+                        me.userId(), config.getId())
+                .orElse(null);
+        if (attempt == null) {
+            return null;
+        }
+
+        List<SnapshotExamQuestion> questions = readSnapshotQuestions(attempt.getQuestionsSnapshot());
+        Map<String, SubmitExamRequest.ExamAnswerRequest> answers = readAnswers(attempt.getAnswers());
+        ExamScoringSummary scoringSummary = scoreObjectiveQuestions(questions, answers);
+
+        String status = attempt.getGradedAt() != null || !scoringSummary.hasEssay()
+                ? "graded"
+                : "pending";
+
+        return new StudentExamSubmissionResponse(
+                attempt.getId(),
+                config.getId(),
+                config.getName(),
+                config.getSlotIndex(),
+                attempt.getAttemptNumber(),
+                attempt.getScorePercent() != null ? attempt.getScorePercent().doubleValue() : null,
+                attempt.getPassed(),
+                status,
+                scoringSummary.correctObjectiveCount(),
+                scoringSummary.totalObjectiveCount(),
+                attempt.getSubmittedAt(),
+                attempt.getManualScorePercent() != null ? attempt.getManualScorePercent().doubleValue() : null,
+                attempt.getEffectiveScorePercent() != null ? attempt.getEffectiveScorePercent().doubleValue() : null,
+                attempt.getTeacherFeedback(),
+                attempt.getGradedAt());
     }
 
     @Transactional
@@ -501,9 +555,31 @@ public class ExamService {
                 saved.getExamConfig().getId(),
                 request.scorePercent());
         certificateService.handleFinalExamGradeChanged(saved);
+        try {
+            notifyStudentAboutExamGraded(saved);
+        } catch (Exception ex) {
+            log.warn("Could not notify student about graded exam attempt {}", attemptId, ex);
+        }
         log.info("Teacher {} graded exam attempt {} with score={}",
                 me.userId(), attemptId, request.scorePercent());
         return toTeacherExamAttemptResponse(saved);
+    }
+
+    private void notifyStudentAboutExamGraded(ExamAttempt attempt) {
+        if (attempt.getStudent() == null || attempt.getExamConfig() == null
+                || attempt.getExamConfig().getCourse() == null) {
+            return;
+        }
+        ExamConfig config = attempt.getExamConfig();
+        userNotificationService.notify(
+                attempt.getStudent().getId(),
+                "exam_graded",
+                "Bài kiểm tra đã được chấm điểm",
+                "Bài kiểm tra \"%s\" của bạn đã được giáo viên chấm xong.".formatted(config.getName()),
+                "/courses/%s/exams/%s".formatted(config.getCourse().getId(), config.getSlotIndex())
+        );
+        log.info("Notified student {} about graded exam attempt {}",
+                attempt.getStudent().getId(), attempt.getId());
     }
 
     private TeacherExamAttemptResponse toTeacherExamAttemptResponse(ExamAttempt attempt) {
@@ -569,8 +645,24 @@ public class ExamService {
                 attempt.getPassed(),
                 attempt.getTeacherFeedback(),
                 attempt.getGradedAt(),
+                attempt.getAiScorePercent() != null ? attempt.getAiScorePercent().doubleValue() : null,
+                readAiFeedbackNode(attempt.getAiFeedback()),
+                attempt.getAiGradedAt(),
                 attempt.getGradedAt() == null ? "pending" : "graded",
                 reviews);
+    }
+
+    private JsonNode readAiFeedbackNode(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            return node.isTextual() ? objectMapper.readTree(node.asText()) : node;
+        } catch (Exception e) {
+            log.warn("Không đọc được ai_feedback của exam attempt", e);
+            return null;
+        }
     }
 
     private Map<String, SubmitExamRequest.ExamAnswerRequest> readAnswers(String json) {

@@ -56,6 +56,16 @@ public class ExamAttempt {
     @Column(name = "graded_at")
     private Instant gradedAt;
 
+    @Column(name = "ai_score_percent", precision = 5, scale = 1)
+    private BigDecimal aiScorePercent;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "ai_feedback", columnDefinition = "jsonb")
+    private String aiFeedback;
+
+    @Column(name = "ai_graded_at")
+    private Instant aiGradedAt;
+
     @Column(name = "passed")
     private Boolean passed;
 
@@ -107,5 +117,13 @@ public class ExamAttempt {
 
     public BigDecimal getEffectiveScorePercent() {
         return manualScorePercent != null ? manualScorePercent : scorePercent;
+    }
+
+    /** AI chấm sơ bộ: lưu điểm % dự kiến + nhận xét có cấu trúc (JSONB). */
+    public void applyAiGrade(double scorePercent, String feedbackJson) {
+        this.aiScorePercent = BigDecimal.valueOf(scorePercent)
+                .setScale(1, java.math.RoundingMode.HALF_UP);
+        this.aiFeedback = feedbackJson;
+        this.aiGradedAt = Instant.now();
     }
 }

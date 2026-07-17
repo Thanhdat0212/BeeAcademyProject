@@ -14,6 +14,10 @@ public record StudentExamSubmissionResponse(
         String status,
         Integer correctObjectiveCount,
         Integer totalObjectiveCount,
-        Instant submittedAt
+        Instant submittedAt,
+        Double manualScorePercent,
+        Double effectiveScorePercent,
+        String teacherFeedback,
+        Instant gradedAt
 ) {
 }

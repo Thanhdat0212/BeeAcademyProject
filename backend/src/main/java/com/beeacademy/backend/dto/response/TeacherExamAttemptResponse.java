@@ -25,6 +25,9 @@ public record TeacherExamAttemptResponse(
         Boolean passed,
         String feedback,
         Instant gradedAt,
+        Double aiScorePercent,
+        JsonNode aiFeedback,
+        Instant aiGradedAt,
         String status,
         List<QuestionReview> questions
 ) {

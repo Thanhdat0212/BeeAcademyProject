@@ -85,6 +85,14 @@ public class QuizAttempt {
     @Column(name = "submitted_at")
     private Instant submittedAt;
 
+    /** Nhận xét AI sơ bộ (JSONB). Quiz đã chấm tự động nên AI KHÔNG đưa điểm. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "ai_feedback", columnDefinition = "jsonb")
+    private String aiFeedback;
+
+    @Column(name = "ai_graded_at")
+    private Instant aiGradedAt;
+
     // ========================================================================
     // Factory + business methods
     // ========================================================================
@@ -113,5 +121,11 @@ public class QuizAttempt {
         this.score       = BigDecimal.valueOf(score).setScale(1, java.math.RoundingMode.HALF_UP);
         this.passed      = passed;
         this.submittedAt = Instant.now();
+    }
+
+    /** AI phân tích bài làm (không đổi điểm) — lưu nhận xét có cấu trúc JSONB. */
+    public void applyAiAnalysis(String feedbackJson) {
+        this.aiFeedback  = feedbackJson;
+        this.aiGradedAt  = Instant.now();
     }
 }
