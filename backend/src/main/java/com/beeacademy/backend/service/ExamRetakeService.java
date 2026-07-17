@@ -30,7 +30,7 @@ import java.util.UUID;
 /**
  * Duyệt mở thêm lượt làm bài kiểm tra (BRULE-RETAKE-001):
  * HS bị RETAKE_LOCKED gửi yêu cầu → GV sở hữu khóa hoặc Admin duyệt/từ chối.
- * Mỗi lần duyệt cộng 1-2 lượt và mở lại cửa sổ làm bài 14 ngày; tối đa
+ * Mỗi lần duyệt cộng 1-5 lượt và mở lại cửa sổ làm bài 14 ngày; tối đa
  * {@link #MAX_APPROVALS_PER_EXAM} lần duyệt cho cùng (HS, bài kiểm tra).
  */
 @Slf4j
@@ -38,8 +38,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ExamRetakeService {
 
-    private static final int MAX_APPROVALS_PER_EXAM = 2;
-    private static final int MAX_EXTRA_ATTEMPTS_PER_APPROVAL = 2;
+    private static final int MAX_APPROVALS_PER_EXAM = 5;
+    private static final int MAX_EXTRA_ATTEMPTS_PER_APPROVAL = 5;
     private static final long RETAKE_WINDOW_DAYS = 14L;
     private static final String ROLE_ADMIN = "admin";
 
