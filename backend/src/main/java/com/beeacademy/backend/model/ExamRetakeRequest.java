@@ -86,4 +86,9 @@ public class ExamRetakeRequest {
         this.decidedReason = reason;
         this.decidedAt = Instant.now();
     }
+
+    /** Lượt duyệt đã hết hạn (quá retakeExpireAt) mà học sinh chưa dùng hết/chưa PASSED. */
+    public void expire() {
+        this.status = ExamRetakeStatus.EXPIRED;
+    }
 }

@@ -30,17 +30,22 @@ import java.util.UUID;
 /**
  * Duyệt mở thêm lượt làm bài kiểm tra (BRULE-RETAKE-001):
  * HS bị RETAKE_LOCKED gửi yêu cầu → GV sở hữu khóa hoặc Admin duyệt/từ chối.
- * Mỗi lần duyệt cộng 1-5 lượt và mở lại cửa sổ làm bài 14 ngày; tối đa
- * {@link #MAX_APPROVALS_PER_EXAM} lần duyệt cho cùng (HS, bài kiểm tra).
+ * Mỗi lần duyệt cộng 1-2 lượt và mở lại cửa sổ làm bài 14 ngày; tối đa
+ * {@link #MAX_REQUESTS_PER_EXAM} yêu cầu và {@link #MAX_APPROVALS_PER_EXAM}
+ * lần duyệt cho cùng (HS, bài kiểm tra). Sau khi bị REJECTED, học sinh chỉ
+ * được gửi lại yêu cầu mới sau cooldown 12 giờ tính từ decidedAt của lần
+ * REJECTED gần nhất (tính động, không lưu cột cooldown_until riêng).
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ExamRetakeService {
 
-    private static final int MAX_APPROVALS_PER_EXAM = 5;
-    private static final int MAX_EXTRA_ATTEMPTS_PER_APPROVAL = 5;
+    private static final int MAX_REQUESTS_PER_EXAM = 3;
+    private static final int MAX_APPROVALS_PER_EXAM = 3;
+    private static final int MAX_EXTRA_ATTEMPTS_PER_APPROVAL = 2;
     private static final long RETAKE_WINDOW_DAYS = 14L;
+    private static final long REJECT_COOLDOWN_HOURS = 12L;
     private static final String ROLE_ADMIN = "admin";
 
     private final ExamRetakeRequestRepository retakeRepository;
@@ -70,6 +75,21 @@ public class ExamRetakeService {
                         && r.getRetakeExpireAt().isAfter(Instant.now()));
     }
 
+    /**
+     * Chuyển các lượt APPROVED đã quá retakeExpireAt sang EXPIRED (lazy transition,
+     * không cần cron job) — đúng SRS "quá retake_expire_at... → RetakeApproval=EXPIRED".
+     */
+    private void expireStaleApprovals(UUID studentId, UUID examConfigId) {
+        List<ExamRetakeRequest> stale = retakeRepository
+                .findByStudentIdAndExamConfigIdAndStatus(studentId, examConfigId, ExamRetakeStatus.APPROVED)
+                .stream()
+                .filter(r -> r.getRetakeExpireAt() != null && r.getRetakeExpireAt().isBefore(Instant.now()))
+                .toList();
+        if (stale.isEmpty()) return;
+        stale.forEach(ExamRetakeRequest::expire);
+        retakeRepository.saveAll(stale);
+    }
+
     @Transactional
     public ExamRetakeRequestResponse requestRetake(
             UUID courseId, Integer slotIndex, AuthenticatedUser me, ExamRetakeRequestCreate request) {
@@ -86,6 +106,27 @@ public class ExamRetakeService {
             throw new BusinessException("RETAKE_REQUEST_PENDING",
                     "Bạn đã có một yêu cầu đang chờ duyệt cho bài kiểm tra này.");
         }
+
+        expireStaleApprovals(me.userId(), config.getId());
+
+        long requestCount = retakeRepository.countByStudentIdAndExamConfigId(me.userId(), config.getId());
+        if (requestCount >= MAX_REQUESTS_PER_EXAM) {
+            throw new BusinessException("RETAKE_REQUEST_LIMIT",
+                    "Bạn đã gửi tối đa %d yêu cầu mở thêm lượt cho bài kiểm tra này."
+                            .formatted(MAX_REQUESTS_PER_EXAM));
+        }
+
+        retakeRepository.findFirstByStudentIdAndExamConfigIdOrderByCreatedAtDesc(me.userId(), config.getId())
+                .filter(r -> r.getStatus() == ExamRetakeStatus.REJECTED && r.getDecidedAt() != null)
+                .ifPresent(r -> {
+                    Instant cooldownUntil = r.getDecidedAt().plus(REJECT_COOLDOWN_HOURS, ChronoUnit.HOURS);
+                    if (Instant.now().isBefore(cooldownUntil)) {
+                        throw new BusinessException("RETAKE_COOLDOWN",
+                                "Yêu cầu trước đã bị từ chối, vui lòng thử lại sau %s."
+                                        .formatted(cooldownUntil));
+                    }
+                });
+
         long approvedCount = retakeRepository
                 .findByStudentIdAndExamConfigIdAndStatus(me.userId(), config.getId(), ExamRetakeStatus.APPROVED)
                 .size();
