@@ -6,19 +6,21 @@
  * API:
  *  - GET /api/courses/{courseId}              — chi tiết khóa học (public endpoint)
  *  - GET /api/admin/courses/{courseId}/approval-history — lịch sử duyệt
+ *  - GET /api/admin/courses/{courseId}/documents/{documentId}/download — URL xem thử tài liệu
  *  - POST /api/admin/courses/{courseId}/approve  — duyệt
  *  - POST /api/admin/courses/{courseId}/reject   — từ chối
  *  - POST /api/admin/courses/{courseId}/revise   — yêu cầu sửa
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
 import { apiClient, unwrap, isApiError } from '../../api/client';
+import { getAdminDocumentUrl } from '../../api/adminService';
 import type { ApiResponse } from '../../types/api';
-import type { CourseDetail } from '../../types/api';
+import type { CourseDetail, LessonDetail, LessonDocumentDto } from '../../types/api';
 import type { ApprovalHistoryResponse } from '../../api/teacherCourseService';
 import {
   LayoutDashboard, BookOpen, Users, FileText,
@@ -26,6 +28,7 @@ import {
   CheckCircle2, XCircle, AlertTriangle, Clock,
   ChevronDown, ChevronRight, Calculator, Megaphone, Settings,
   User, DollarSign, Layers, BookMarked,
+  ExternalLink, Loader2, RefreshCw,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -57,6 +60,12 @@ function formatDateTime(iso: string): string {
   });
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
 // Badge cho action trong approval history
 function ActionBadge({ action }: { action: ApprovalHistoryResponse['action'] }) {
   const config = {
@@ -69,6 +78,105 @@ function ActionBadge({ action }: { action: ApprovalHistoryResponse['action'] }) 
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${className}`}>
       {icon}{label}
     </span>
+  );
+}
+
+// Xem thử nội dung 1 bài học: video + tài liệu — admin kiểm chứng trước khi duyệt
+function LessonPreviewPanel({ lesson, courseId, onVideoExpired }: {
+  lesson: LessonDetail;
+  courseId: string;
+  onVideoExpired: () => void;
+}) {
+  const [videoError, setVideoError] = useState(false);
+  const [openingDocId, setOpeningDocId] = useState<string | null>(null);
+
+  async function openDocument(doc: LessonDocumentDto) {
+    // Mở cửa sổ đồng bộ ngay trong click handler — mở sau await sẽ bị popup blocker chặn
+    const win = window.open('', '_blank');
+    setOpeningDocId(doc.id);
+    try {
+      const { url } = await getAdminDocumentUrl(courseId, doc.id);
+      if (win) win.location.href = url;
+      else window.open(url, '_blank', 'noopener');
+    } catch (err: unknown) {
+      win?.close();
+      notify.error(isApiError(err) ? err.message : 'Không mở được tài liệu');
+    } finally {
+      setOpeningDocId(null);
+    }
+  }
+
+  const documents = [...lesson.documents].sort((a, b) => a.position - b.position);
+
+  return (
+    <div className="ml-7 mb-2 rounded-xl border border-outline-variant/30 bg-surface-container/40 p-3 space-y-3">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wide text-on-surface-variant mb-1.5">Video bài học</p>
+        {lesson.videoEmbedUrl ? (
+          <iframe
+            src={lesson.videoEmbedUrl}
+            title={lesson.title}
+            allowFullScreen
+            allow="autoplay; encrypted-media; picture-in-picture"
+            className="w-full aspect-video rounded-lg border-0 bg-black"
+          />
+        ) : lesson.videoUrl && videoError ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-container px-3 py-2.5">
+            <span className="text-sm text-on-surface-variant">Link video đã hết hạn hoặc không phát được.</span>
+            <button
+              onClick={() => { setVideoError(false); onVideoExpired(); }}
+              className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 text-primary text-xs font-bold px-3 py-1.5 hover:bg-primary/20 transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Tải lại nội dung
+            </button>
+          </div>
+        ) : lesson.videoUrl ? (
+          <video
+            src={lesson.videoUrl}
+            controls
+            preload="metadata"
+            className="w-full rounded-lg bg-black"
+            onError={() => setVideoError(true)}
+          />
+        ) : (
+          <p className="text-sm text-on-surface-variant italic">Bài học chưa có video.</p>
+        )}
+      </div>
+
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wide text-on-surface-variant mb-1.5">
+          Tài liệu đính kèm {documents.length > 0 && `(${documents.length})`}
+        </p>
+        {documents.length === 0 ? (
+          <p className="text-sm text-on-surface-variant italic">Không có tài liệu đính kèm.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {documents.map(doc => (
+              <li
+                key={doc.id}
+                className="flex items-center gap-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/30 px-3 py-2"
+              >
+                <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                <span className="flex-1 min-w-0 text-sm text-on-surface truncate">{doc.name}</span>
+                <span className="text-xs font-bold text-on-surface-variant uppercase flex-shrink-0">{doc.fileType}</span>
+                <span className="text-xs text-on-surface-variant flex-shrink-0">{formatFileSize(doc.fileSizeBytes)}</span>
+                <button
+                  onClick={() => openDocument(doc)}
+                  disabled={openingDocId === doc.id}
+                  className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary text-xs font-bold px-3 py-1.5 hover:bg-primary/20 transition-colors disabled:opacity-50 flex-shrink-0"
+                >
+                  {openingDocId === doc.id
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <ExternalLink className="w-3.5 h-3.5" />}
+                  Mở
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -94,19 +202,28 @@ export default function CourseReviewPage() {
   // Accordion chapters — Set of expanded chapter IDs
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
 
+  // Bài học đang xem thử — chỉ mount 1 player mỗi lúc để tránh load N video song song
+  const [previewLessonId, setPreviewLessonId] = useState<string | null>(null);
+
   // Action panel
   const [comment, setComment] = useState('');
   const [actionLoading, setActionLoading] = useState<'approve' | 'reject' | 'revise' | null>(null);
 
   // ── Load dữ liệu ────────────────────────────────────────────────
-  useEffect(() => {
+  // Tách riêng để gọi lại được khi signed URL video hết hạn (phiên review > 1h).
+  // Không set loading=true khi refresh — tránh unmount cả trang về spinner.
+  const loadCourse = useCallback(() => {
     if (!courseId) return;
-
-    // Load chi tiết khóa học (public endpoint)
     apiClient.get<ApiResponse<CourseDetail>>(`/api/courses/${courseId}`)
       .then(res => setCourse(unwrap(res.data)))
       .catch(() => notify.error('Không tải được thông tin khóa học'))
       .finally(() => setLoadingCourse(false));
+  }, [courseId]);
+
+  useEffect(() => {
+    if (!courseId) return;
+
+    loadCourse();
 
     // Load lịch sử duyệt
     apiClient.get<ApiResponse<ApprovalHistoryResponse[]>>(
@@ -115,7 +232,7 @@ export default function CourseReviewPage() {
       .then(res => setHistory(unwrap(res.data)))
       .catch(() => setHistory([]))
       .finally(() => setLoadingHistory(false));
-  }, [courseId]);
+  }, [courseId, loadCourse]);
 
   // ── Action handlers ────────────────────────────────────────────
   async function doAction(type: 'approve' | 'reject' | 'revise') {
@@ -448,22 +565,54 @@ export default function CourseReviewPage() {
                                   className="overflow-hidden"
                                 >
                                   <ul className="px-5 pb-3 space-y-1 bg-surface-container/20">
-                                    {chapter.lessons.map((lesson, lIdx) => (
-                                      <li key={lesson.id} className="flex items-center gap-2.5 py-2">
-                                        <span className="w-5 h-5 rounded-full bg-surface-container border border-outline-variant text-xs font-bold text-on-surface-variant flex items-center justify-center flex-shrink-0">
-                                          {lIdx + 1}
-                                        </span>
-                                        <span className="text-sm text-on-surface">{lesson.title}</span>
-                                        {lesson.isFree && (
-                                          <span className="text-xs font-bold text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded">Miễn phí</span>
-                                        )}
-                                        {lesson.durationSec > 0 && (
-                                          <span className="ml-auto text-xs text-on-surface-variant">
-                                            {Math.round(lesson.durationSec / 60)} phút
-                                          </span>
-                                        )}
-                                      </li>
-                                    ))}
+                                    {chapter.lessons.map((lesson, lIdx) => {
+                                      const isPreviewing = previewLessonId === lesson.id;
+                                      return (
+                                        <li key={lesson.id}>
+                                          <button
+                                            onClick={() => setPreviewLessonId(isPreviewing ? null : lesson.id)}
+                                            className="w-full flex items-center gap-2.5 py-2 px-1.5 -mx-1.5 rounded-lg hover:bg-surface-container/40 transition-colors text-left"
+                                          >
+                                            <span className="w-5 h-5 rounded-full bg-surface-container border border-outline-variant text-xs font-bold text-on-surface-variant flex items-center justify-center flex-shrink-0">
+                                              {lIdx + 1}
+                                            </span>
+                                            <span className="text-sm text-on-surface">{lesson.title}</span>
+                                            {lesson.isFree && (
+                                              <span className="text-xs font-bold text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded">Miễn phí</span>
+                                            )}
+                                            <span className="ml-auto flex items-center gap-2 flex-shrink-0">
+                                              {lesson.durationSec > 0 && (
+                                                <span className="text-xs text-on-surface-variant">
+                                                  {Math.round(lesson.durationSec / 60)} phút
+                                                </span>
+                                              )}
+                                              {isPreviewing
+                                                ? <ChevronDown className="w-4 h-4 text-on-surface-variant" />
+                                                : <ChevronRight className="w-4 h-4 text-on-surface-variant" />
+                                              }
+                                            </span>
+                                          </button>
+
+                                          <AnimatePresence>
+                                            {isPreviewing && (
+                                              <motion.div
+                                                initial={{ height: 0, opacity: 0 }}
+                                                animate={{ height: 'auto', opacity: 1 }}
+                                                exit={{ height: 0, opacity: 0 }}
+                                                transition={{ duration: 0.2 }}
+                                                className="overflow-hidden"
+                                              >
+                                                <LessonPreviewPanel
+                                                  lesson={lesson}
+                                                  courseId={courseId ?? ''}
+                                                  onVideoExpired={loadCourse}
+                                                />
+                                              </motion.div>
+                                            )}
+                                          </AnimatePresence>
+                                        </li>
+                                      );
+                                    })}
                                   </ul>
                                 </motion.div>
                               )}

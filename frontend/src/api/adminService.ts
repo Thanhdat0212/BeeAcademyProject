@@ -264,3 +264,24 @@ export async function reviewBankAccount(
   );
   return unwrap(res.data);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Duyệt khóa học (UC36) — admin xem thử tài liệu bài học trước khi duyệt
+//  GET /api/admin/courses/{courseId}/documents/{documentId}/download
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Signed URL ngắn hạn (10 phút) — expiresAt null nếu là public URL legacy. */
+export interface AdminDocumentUrl {
+  url: string;
+  expiresAt: string | null;
+}
+
+export async function getAdminDocumentUrl(
+  courseId: string,
+  documentId: string,
+): Promise<AdminDocumentUrl> {
+  const res = await apiClient.get<ApiResponse<AdminDocumentUrl>>(
+    `/api/admin/courses/${courseId}/documents/${documentId}/download`,
+  );
+  return unwrap(res.data);
+}

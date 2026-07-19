@@ -1,6 +1,7 @@
 package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.request.ApprovalActionRequest;
+import com.beeacademy.backend.dto.response.AdminDocumentUrlResponse;
 import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.ApprovalHistoryResponse;
 import com.beeacademy.backend.dto.response.PageResponse;
@@ -48,6 +49,14 @@ public class AdminApprovalController {
     public ApiResponse<List<ApprovalHistoryResponse>> getHistory(
             @PathVariable UUID courseId) {
         return ApiResponse.ok(approvalService.getHistory(courseId));
+    }
+
+    /** URL xem thử tài liệu bài học — admin kiểm chứng nội dung trước khi duyệt. */
+    @GetMapping("/courses/{courseId}/documents/{documentId}/download")
+    public ApiResponse<AdminDocumentUrlResponse> getDocumentPreviewUrl(
+            @PathVariable UUID courseId,
+            @PathVariable UUID documentId) {
+        return ApiResponse.ok(approvalService.getDocumentPreviewUrl(courseId, documentId));
     }
 
     /** Admin duyệt → khóa học được PUBLISHED. */

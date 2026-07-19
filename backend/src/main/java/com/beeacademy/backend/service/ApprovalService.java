@@ -1,5 +1,7 @@
 package com.beeacademy.backend.service;
 
+import com.beeacademy.backend.client.SupabaseStorageClient;
+import com.beeacademy.backend.dto.response.AdminDocumentUrlResponse;
 import com.beeacademy.backend.dto.response.ApprovalHistoryResponse;
 import com.beeacademy.backend.dto.response.PendingCourseResponse;
 import com.beeacademy.backend.dto.response.PageResponse;
@@ -7,9 +9,11 @@ import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.ApprovalHistory;
 import com.beeacademy.backend.model.Course;
+import com.beeacademy.backend.model.CourseDocument;
 import com.beeacademy.backend.model.CourseStatus;
 import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.repository.ApprovalHistoryRepository;
+import com.beeacademy.backend.repository.CourseDocumentRepository;
 import com.beeacademy.backend.repository.CourseRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
@@ -21,6 +25,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -42,10 +47,18 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ApprovalService {
 
+    /** Bucket private mặc định chứa tài liệu bài học (xem ContentUploadService). */
+    private static final String DOCUMENT_BUCKET = "course-documents";
+
+    /** TTL signed URL xem thử tài liệu — admin mở ngay sau khi bấm nên 10 phút là đủ. */
+    private static final int PREVIEW_URL_TTL_SECONDS = 600;
+
     private final CourseRepository          courseRepository;
     private final ProfileRepository         profileRepository;
     private final ApprovalHistoryRepository historyRepository;
     private final UserNotificationService   notificationService;
+    private final CourseDocumentRepository  documentRepository;
+    private final SupabaseStorageClient     storageClient;
 
     // ========================================================================
     // Admin views
@@ -63,6 +76,39 @@ public class ApprovalService {
     public List<ApprovalHistoryResponse> getHistory(UUID courseId) {
         return historyRepository.findByCourseIdOrderByCreatedAtAsc(courseId)
                 .stream().map(ApprovalHistoryResponse::fromEntity).toList();
+    }
+
+    /**
+     * URL xem thử tài liệu bài học cho Admin (UC36) — không watermark, không one-time token.
+     *
+     * <p>Cố ý KHÔNG kiểm tra trạng thái PENDING_REVIEW: admin còn cần xem nội dung
+     * khi xử lý khiếu nại của khóa đã publish (UC38).
+     */
+    @Transactional(readOnly = true)
+    public AdminDocumentUrlResponse getDocumentPreviewUrl(UUID courseId, UUID documentId) {
+        CourseDocument document = documentRepository.findById(documentId)
+                .orElseThrow(() -> new ResourceNotFoundException("CourseDocument", documentId));
+
+        // Chống lộ chéo: document phải thuộc đúng course trên URL
+        if (!document.getLesson().getChapter().getCourse().getId().equals(courseId)) {
+            throw new ResourceNotFoundException("CourseDocument", documentId);
+        }
+
+        String path = document.getStoragePath();
+        if (path != null && !path.isBlank()) {
+            // Bản ghi legacy có thể còn nằm ở bucket cũ "course-docs" — sign theo bucket trong row
+            String bucket = (document.getStorageBucket() == null || document.getStorageBucket().isBlank())
+                    ? DOCUMENT_BUCKET : document.getStorageBucket();
+            String url = storageClient.generateSignedUrl(bucket, path, PREVIEW_URL_TTL_SECONDS);
+            return new AdminDocumentUrlResponse(url, Instant.now().plusSeconds(PREVIEW_URL_TTL_SECONDS));
+        }
+
+        if (document.getFileUrl() != null && !document.getFileUrl().isBlank()) {
+            return new AdminDocumentUrlResponse(document.getFileUrl(), null);
+        }
+
+        throw new BusinessException("DOCUMENT_UNAVAILABLE",
+                "Tài liệu hiện chưa sẵn sàng để xem.", HttpStatus.NOT_FOUND);
     }
 
     // ========================================================================
