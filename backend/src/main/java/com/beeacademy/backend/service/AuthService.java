@@ -173,13 +173,38 @@ public class AuthService {
     /**
      * Đăng nhập, nhận access_token + refresh_token.
      *
-     * <p>Proxy đơn thuần - mọi luật (sai password, chưa xác thực email)
-     * do Supabase quyết định. Client đã map các lỗi đó thành
-     * {@code INVALID_CREDENTIALS}.
+     * <p>Mật khẩu/email đúng-sai do Supabase quyết định (client map lỗi đó
+     * thành {@code INVALID_CREDENTIALS}); khóa tạm sau 5 lần sai liên tiếp
+     * trong 15 phút (REQ-AUTH-002) là luật riêng của Bee Academy, xử lý ở
+     * đây vì Supabase không có khái niệm này.
      */
     public AuthTokenResponse login(LoginRequest request) {
-        ProviderTokenResponse tokens = authProviderClient.signInWithPassword(
-                request.email(), request.password());
+        Profile profile = profileRepository.findUserIdByEmail(request.email())
+                .flatMap(profileRepository::findById)
+                .orElse(null);
+
+        if (profile != null && profile.isTemporarilyLocked()) {
+            throw new BusinessException("ACCOUNT_TEMP_LOCKED",
+                    "Tài khoản tạm khóa do đăng nhập sai nhiều lần, vui lòng thử lại sau.",
+                    HttpStatus.FORBIDDEN);
+        }
+
+        ProviderTokenResponse tokens;
+        try {
+            tokens = authProviderClient.signInWithPassword(request.email(), request.password());
+        } catch (BusinessException ex) {
+            if (profile != null && "INVALID_CREDENTIALS".equals(ex.getCode())) {
+                profile.registerFailedLogin();
+                profileRepository.save(profile);
+            }
+            throw ex;
+        }
+
+        if (profile != null && profile.getFailedLoginAttempts() > 0) {
+            profile.resetFailedLogin();
+            profileRepository.save(profile);
+        }
+
         log.info("User {} đăng nhập thành công", request.email());
         return enrichAuthTokenResponse(tokens);
     }

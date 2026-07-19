@@ -15,6 +15,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 /**
@@ -94,6 +95,20 @@ public class Profile {
     @Column(name = "teacher_approval_status", nullable = false, length = 24)
     private String teacherApprovalStatus = TeacherApprovalStatus.APPROVED.toDbValue();
 
+    /**
+     * Khóa tạm do đăng nhập sai liên tiếp (REQ-AUTH-002) — tách biệt hoàn toàn
+     * với {@link #isBlocked} (khóa vĩnh viễn do Admin thao tác).
+     */
+    @Builder.Default
+    @Column(name = "failed_login_attempts", nullable = false)
+    private int failedLoginAttempts = 0;
+
+    @Column(name = "last_failed_login_at")
+    private Instant lastFailedLoginAt;
+
+    @Column(name = "failed_login_lock_until")
+    private Instant failedLoginLockUntil;
+
     /** Hibernate tự set khi INSERT - KHÔNG override. */
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -165,11 +180,38 @@ public class Profile {
 
     public void block()   { this.isBlocked = true; }
     public void unblock() { this.isBlocked = false; }
-    public void changeRole(UserRole newRole) {
-        this.role = newRole;
-        if (newRole == UserRole.TEACHER) {
-            approveTeacher();
+
+    private static final int MAX_FAILED_LOGIN_ATTEMPTS = 5;
+    private static final long FAILED_LOGIN_WINDOW_MINUTES = 15L;
+    private static final long FAILED_LOGIN_LOCK_MINUTES = 15L;
+
+    public boolean isTemporarilyLocked() {
+        return failedLoginLockUntil != null && Instant.now().isBefore(failedLoginLockUntil);
+    }
+
+    /**
+     * Ghi nhận 1 lần đăng nhập sai. Nếu lần sai gần nhất đã quá
+     * {@link #FAILED_LOGIN_WINDOW_MINUTES} phút thì không còn tính là
+     * "liên tiếp" — đếm lại từ 1. Đạt {@link #MAX_FAILED_LOGIN_ATTEMPTS}
+     * lần trong cửa sổ đó thì khóa tạm {@link #FAILED_LOGIN_LOCK_MINUTES} phút.
+     */
+    public void registerFailedLogin() {
+        Instant now = Instant.now();
+        if (lastFailedLoginAt == null
+                || lastFailedLoginAt.isBefore(now.minus(FAILED_LOGIN_WINDOW_MINUTES, ChronoUnit.MINUTES))) {
+            this.failedLoginAttempts = 1;
+        } else {
+            this.failedLoginAttempts++;
         }
+        this.lastFailedLoginAt = now;
+        if (this.failedLoginAttempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
+            this.failedLoginLockUntil = now.plus(FAILED_LOGIN_LOCK_MINUTES, ChronoUnit.MINUTES);
+        }
+    }
+
+    public void resetFailedLogin() {
+        this.failedLoginAttempts = 0;
+        this.failedLoginLockUntil = null;
     }
 
     public boolean isApprovedTeacher() {
