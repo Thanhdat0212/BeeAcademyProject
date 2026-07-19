@@ -103,7 +103,7 @@ export default function DashboardSidebar({
   }
 
   const asideClass = floating
-    ? 'w-[264px] flex-shrink-0 bg-surface-container-lowest rounded-2xl shadow-2xl shadow-black/12 border border-outline-variant/30 overflow-hidden'
+    ? 'w-[264px] max-h-[calc(100dvh-5.5rem)] flex-shrink-0 overflow-y-auto overscroll-contain bg-surface-container-lowest rounded-2xl shadow-2xl shadow-black/12 border border-outline-variant/30'
     : 'w-[264px] flex-shrink-0 bg-surface-container-lowest rounded-2xl shadow-sm border border-outline-variant/30 overflow-hidden sticky top-[calc(5rem+1px)] self-start';
 
   const menuItems = user?.role === 'teacher'
