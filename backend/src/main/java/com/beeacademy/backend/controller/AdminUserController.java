@@ -9,7 +9,6 @@ import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.model.TeacherApprovalStatus;
 import com.beeacademy.backend.model.UserRole;
 import com.beeacademy.backend.repository.ProfileRepository;
-import com.beeacademy.backend.security.UserRoleCache;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -37,7 +36,6 @@ import java.util.UUID;
 public class AdminUserController {
 
     private final ProfileRepository profileRepository;
-    private final UserRoleCache userRoleCache;
 
     /** Danh sách tất cả user, hỗ trợ filter role + search tên/email. */
     @GetMapping
@@ -74,29 +72,6 @@ public class AdminUserController {
         if (blocked) profile.block(); else profile.unblock();
         profileRepository.save(profile);
         return ApiResponse.ok(null, blocked ? "Đã khóa tài khoản" : "Đã mở khóa tài khoản");
-    }
-
-    /** Đổi role người dùng. */
-    @PatchMapping("/{userId}/role")
-    public ApiResponse<Void> changeRole(@PathVariable UUID userId,
-                                         @RequestParam String role) {
-        Profile profile = profileRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("Profile", userId));
-
-        UserRole newRole;
-        try {
-            newRole = UserRole.valueOf(role.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new BusinessException("INVALID_ROLE",
-                    "Role không hợp lệ: " + role, HttpStatus.BAD_REQUEST);
-        }
-
-        profile.changeRole(newRole);
-        profileRepository.save(profile);
-        // Xoá role cũ khỏi cache của JWT filter để quyền mới áp dụng ngay,
-        // không chờ hết TTL 60s.
-        userRoleCache.evict(userId);
-        return ApiResponse.ok(null, "Đã cập nhật role thành " + role);
     }
 
     /** Duyệt hoặc từ chối vai trò giáo viên sau khi đăng ký. */

@@ -429,19 +429,6 @@ export default function DashboardAdmin() {
     }
   }
 
-  async function handleChangeRole(userId: string, newRole: AdminUser['role']) {
-    const target = apiUsers.find(u => u.id === userId);
-    if (!target || target.role === newRole) return;
-    try {
-      await apiClient.patch(`/api/admin/users/${userId}/role?role=${newRole}`);
-      setApiUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
-      const roleLabel: Record<AdminUser['role'], string> = { student: 'Học sinh', teacher: 'Giáo viên', parent: 'Phụ huynh', admin: 'Admin' };
-      notify.success(`Đã đổi vai trò ${target.fullName ?? target.email} → ${roleLabel[newRole]}`);
-    } catch (err: unknown) {
-      notify.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Không đổi được vai trò');
-    }
-  }
-
   // ───────────────────────────────────────────────────────────────────────────
   // WORKFLOW 2: DUYỆT KHÓA HỌC (UC36)
   // ───────────────────────────────────────────────────────────────────────────
@@ -1145,7 +1132,7 @@ export default function DashboardAdmin() {
                 <div className="bg-surface-container-lowest border border-outline-variant/40 rounded-2xl p-6 shadow-sm space-y-6">
                   <div>
                     <h2 className="text-lg font-bold">Danh sách thành viên trên hệ thống</h2>
-                    <p className="text-xs text-on-surface-variant mt-0.5">Admin quản lý thông tin, chặn/mở chặn và đổi vai trò tài khoản.</p>
+                    <p className="text-xs text-on-surface-variant mt-0.5">Admin quản lý thông tin và chặn/mở chặn tài khoản.</p>
                     {userStats && (
                       <div className="flex flex-wrap gap-2 mt-3">
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold">
@@ -1256,16 +1243,7 @@ export default function DashboardAdmin() {
                               </td>
                               <td className="px-6 py-3.5">
                                 {user.role !== 'admin' ? (
-                                  <div className="flex items-center justify-end gap-2">
-                                    <select
-                                      value={user.role}
-                                      onChange={(e) => handleChangeRole(user.id, e.target.value as AdminUser['role'])}
-                                      className="text-xs border border-outline-variant/30 rounded-lg px-2 py-1 bg-surface-container-low focus:outline-none focus:border-primary cursor-pointer"
-                                    >
-                                      <option value="student">Học sinh</option>
-                                      <option value="teacher">Giáo viên</option>
-                                      <option value="parent">Phụ huynh</option>
-                                    </select>
+                                  <div className="flex items-center justify-end">
                                     <button
                                       onClick={() => handleToggleBlockUser(user.id)}
                                       className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
