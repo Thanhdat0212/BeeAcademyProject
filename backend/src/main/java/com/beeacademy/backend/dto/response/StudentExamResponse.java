@@ -38,6 +38,8 @@ public record StudentExamResponse(
         List<StudentExamQuestionResponse> questions,
         Instant updatedAt
 ) {
+    private static final int REQUIRED_EXAM_MAX_ATTEMPTS = 3;
+
     public record StudentExamQuestionResponse(
             String id,
             String text,
@@ -50,6 +52,7 @@ public record StudentExamResponse(
 
     private record StoredExamQuestion(
             String id,
+            UUID questionVersionId,
             String text,
             String type,
             List<String> options,
@@ -87,12 +90,12 @@ public record StudentExamResponse(
                 config.getDescription(),
                 config.getDurationMinutes(),
                 config.getPassScorePercent(),
-                config.getMaxAttempts(),
+                REQUIRED_EXAM_MAX_ATTEMPTS,
                 config.getShuffleQuestions(),
                 config.getShuffleOptions(),
                 config.getShowAnswerAfterSubmit(),
-                config.getRequireFullscreen(),
-                config.getBlockCopyPaste(),
+                true,
+                true,
                 questions.size(),
                 totalPoints,
                 questions,

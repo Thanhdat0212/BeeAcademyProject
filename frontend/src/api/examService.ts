@@ -8,6 +8,7 @@ export type ExamType = 'quiz' | 'chapter_test' | 'final_exam';
 
 export interface ExamQuestionPayload {
   id: string;
+  questionVersionId?: string | null;
   text: string;
   type: ExamQuestionType;
   options: string[];
@@ -251,10 +252,11 @@ export async function gradeTeacherExamAttempt(
   attemptId: string,
   scorePercent: number,
   feedback: string,
+  revisionReason?: string,
 ): Promise<TeacherExamAttemptResponse> {
   const res = await apiClient.put<ApiResponse<TeacherExamAttemptResponse>>(
     `/api/teacher/exam-attempts/${attemptId}/grade`,
-    { scorePercent, feedback },
+    { scorePercent, feedback, revisionReason },
   );
   return unwrap(res.data);
 }
@@ -269,10 +271,15 @@ export interface TeacherRetakeRequest {
   studentId: string;
   studentName: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  examEnrollmentStatus: 'AVAILABLE' | 'RETAKE_LOCKED' | 'RETAKE_APPROVED';
   requestedReason: string;
   extraAttempts: number | null;
   decidedReason: string | null;
   retakeExpireAt: string | null;
+  requestCount: number;
+  approvalCount: number;
+  rejectedAt: string | null;
+  cooldownUntil: string | null;
   createdAt: string;
   decidedAt: string | null;
   attemptsUsed: number;

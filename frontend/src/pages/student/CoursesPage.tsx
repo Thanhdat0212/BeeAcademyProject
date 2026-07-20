@@ -18,7 +18,7 @@ import {
 import { Link, useSearchParams } from 'react-router-dom';
 import DashboardHeader from '../../components/DashboardHeader';
 import PageBanner from '../../components/PageBanner';
-import type { Course as UiCourse } from '../../data/mockCourses';
+import type { Course as UiCourse } from '../../types/course';
 import { useCourseStore } from '../../store/useCourseStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import {

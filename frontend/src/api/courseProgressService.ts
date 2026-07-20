@@ -35,10 +35,13 @@ export interface StudentLearningProgress {
   completedQuizzes: number;
   totalQuizzes: number;
   courses: LearningCourseProgress[];
+  averageScorePercent: number | null;
+  totalStudyTimeSec: number;
 }
 
 export interface LearningCourseProgress {
   courseId: string;
+  courseVersionId: string | null;
   slug: string;
   title: string;
   thumbnailUrl: string | null;
@@ -51,8 +54,30 @@ export interface LearningCourseProgress {
   totalQuizzes: number;
   latestQuizScore: number | null;
   finalExamPassed: boolean | null;
+  allRequiredExamsPassed: boolean | null;
+  passedRequiredExams: number;
+  requiredExams: RequiredExamProgress[];
   enrolledAt: string | null;
   chapters: LearningChapterProgress[];
+  averageScorePercent: number | null;
+  studyTimeSec: number;
+  assignments: AssignmentProgress[];
+}
+
+export interface RequiredExamProgress {
+  slotIndex: number;
+  label: string;
+  status: 'not_configured' | 'not_submitted' | 'in_progress' | 'pending_grading' | 'passed' | 'failed';
+  examConfigId: string | null;
+  examCourseVersionId: string | null;
+  courseVersionMatched: boolean | null;
+  scorePercent: number | null;
+  passed: boolean | null;
+  submittedAt: string | null;
+  scopeStartChapterId: string | null;
+  scopeStartChapterTitle: string | null;
+  placementChapterId: string | null;
+  placementChapterTitle: string | null;
 }
 
 export interface LearningChapterProgress {
@@ -68,6 +93,22 @@ export interface LearningChapterProgress {
   latestQuizPassed: boolean | null;
   latestQuizSubmittedAt: string | null;
   lessons: LearningLessonProgress[];
+  progressPct: number;
+}
+
+export interface AssignmentProgress {
+  submissionId: string;
+  assignmentId: string | null;
+  title: string;
+  chapterId: string | null;
+  chapterTitle: string | null;
+  status: string;
+  score: number | null;
+  maxScore: number | null;
+  normalizedScorePercent: number | null;
+  late: boolean;
+  submittedAt: string | null;
+  gradedAt: string | null;
 }
 
 export interface LearningLessonProgress {
@@ -91,6 +132,25 @@ export async function getStudentLearningProgress(): Promise<StudentLearningProgr
     console.warn('Falling back to client-side progress aggregation:', error);
     return getStudentLearningProgressFallback();
   }
+}
+
+export async function downloadStudentLearningProgressPdf(): Promise<void> {
+  const response = await apiClient.get<Blob>('/api/student/progress/pdf', {
+    responseType: 'blob',
+    timeout: 30000,
+    headers: { Accept: 'application/pdf' },
+  });
+  const disposition = String(response.headers['content-disposition'] ?? '');
+  const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = filenameMatch?.[1] ?? 'BAO-CAO-TIEN-DO.pdf';
+  const url = URL.createObjectURL(response.data);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 function enrichWithLocalQuizScores(progress: StudentLearningProgress): StudentLearningProgress {
@@ -161,11 +221,14 @@ async function getStudentLearningProgressFallback(): Promise<StudentLearningProg
         }));
         const quizCompleted = completedQuizSet.has(chapter.id);
         const localQuizScore = storeState.quizScores[courseId]?.[chapter.id] ?? null;
+        const chapterCompletedLessons = lessons.filter(lesson => lesson.completed).length;
+        const chapterTotalItems = lessons.length + (chapter.hasQuizConfig ? 1 : 0);
+        const chapterCompletedItems = chapterCompletedLessons + (quizCompleted ? 1 : 0);
         return {
           chapterId: chapter.id,
           title: chapter.title,
           position: chapter.position,
-          completedLessons: lessons.filter(lesson => lesson.completed).length,
+          completedLessons: chapterCompletedLessons,
           totalLessons: lessons.length,
           quizConfigured: Boolean(chapter.hasQuizConfig),
           quizCompleted,
@@ -174,6 +237,9 @@ async function getStudentLearningProgressFallback(): Promise<StudentLearningProg
           latestQuizPassed: quizCompleted ? true : null,
           latestQuizSubmittedAt: null,
           lessons,
+          progressPct: chapterTotalItems > 0
+            ? Math.round((chapterCompletedItems * 100) / chapterTotalItems)
+            : 0,
         };
       });
       const totalLessons = chapters.reduce((sum, chapter) => sum + chapter.totalLessons, 0);
@@ -189,6 +255,7 @@ async function getStudentLearningProgressFallback(): Promise<StudentLearningProg
 
       return {
         courseId: course.id,
+        courseVersionId: null,
         slug: course.slug,
         title: course.title,
         thumbnailUrl: course.thumbnailUrl ?? null,
@@ -201,8 +268,14 @@ async function getStudentLearningProgressFallback(): Promise<StudentLearningProg
         totalQuizzes,
         latestQuizScore: null,
         finalExamPassed: null,
+        allRequiredExamsPassed: null,
+        passedRequiredExams: 0,
+        requiredExams: emptyRequiredExams(),
         enrolledAt: null,
         chapters,
+        averageScorePercent: null,
+        studyTimeSec: 0,
+        assignments: [],
       };
     } catch (error) {
       console.warn('Skipping detailed progress for course:', courseId, error);
@@ -228,6 +301,8 @@ async function getStudentLearningProgressFallback(): Promise<StudentLearningProg
     completedQuizzes,
     totalQuizzes,
     courses: visibleDetails,
+    averageScorePercent: null,
+    totalStudyTimeSec: 0,
   };
 }
 
@@ -244,6 +319,7 @@ function localProgress(courseId: string): CourseProgress {
 function emptyCourseProgress(course: CourseSummary): LearningCourseProgress {
   return {
     courseId: course.id,
+    courseVersionId: null,
     slug: course.slug,
     title: course.title,
     thumbnailUrl: course.thumbnailUrl ?? null,
@@ -256,9 +332,33 @@ function emptyCourseProgress(course: CourseSummary): LearningCourseProgress {
     totalQuizzes: 0,
     latestQuizScore: null,
     finalExamPassed: null,
+    allRequiredExamsPassed: null,
+    passedRequiredExams: 0,
+    requiredExams: emptyRequiredExams(),
     enrolledAt: null,
     chapters: [],
+    averageScorePercent: null,
+    studyTimeSec: 0,
+    assignments: [],
   };
+}
+
+function emptyRequiredExams(): RequiredExamProgress[] {
+  return ['Giữa kỳ 1', 'Cuối kỳ 1', 'Giữa kỳ 2', 'Cuối kỳ 2'].map((label, slotIndex) => ({
+    slotIndex,
+    label,
+    status: 'not_configured',
+    examConfigId: null,
+    examCourseVersionId: null,
+    courseVersionMatched: null,
+    scorePercent: null,
+    passed: null,
+    submittedAt: null,
+    scopeStartChapterId: null,
+    scopeStartChapterTitle: null,
+    placementChapterId: null,
+    placementChapterTitle: null,
+  }));
 }
 
 function detailToSummary(detail: CourseDetail): CourseSummary {

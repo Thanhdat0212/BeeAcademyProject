@@ -1,6 +1,7 @@
 package com.beeacademy.backend.service;
 
 import com.beeacademy.backend.dto.request.UpsertCourseReviewRequest;
+import com.beeacademy.backend.dto.request.ModerateCourseReviewRequest;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.model.Course;
 import com.beeacademy.backend.model.CourseReview;
@@ -91,6 +92,94 @@ class CourseReviewServiceTest {
         verify(userNotificationService).notify(
                 eq(teacherId), eq("course_review_received"), any(), any(),
                 eq("/teacher/courses/" + courseId + "/reviews"));
+    }
+
+    @Test
+    void updatesExistingReviewAndRoutesFlaggedContentToModeration() {
+        UUID courseId = UUID.randomUUID();
+        UUID studentId = UUID.randomUUID();
+        UUID teacherId = UUID.randomUUID();
+        Profile student = Profile.createNew(studentId, UserRole.STUDENT, "Student One");
+        Profile teacher = Profile.createNew(teacherId, UserRole.TEACHER, "Teacher One");
+        Course course = org.mockito.Mockito.mock(Course.class);
+        when(course.getId()).thenReturn(courseId);
+        when(course.getTeacher()).thenReturn(teacher);
+        CourseReview existing = CourseReview.create(
+                course, student, 3, "Noi dung danh gia cu da du hai muoi ky tu.",
+                CourseReviewModerationStatus.PUBLISHED);
+
+        when(enrollmentRepository.existsByStudentIdAndCourseId(studentId, courseId)).thenReturn(true);
+        when(courseProgressService.calculateLessonProgressForCourses(studentId, List.of(courseId)))
+                .thenReturn(Map.of(courseId, 75));
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(profileRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(courseReviewRepository.findByCourse_IdAndStudent_Id(courseId, studentId))
+                .thenReturn(Optional.of(existing));
+        when(reviewContentModerationService.requiresModeration(any())).thenReturn(true);
+        when(courseReviewRepository.save(any(CourseReview.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.upsertCourseReview(
+                courseId, student(studentId), new UpsertCourseReviewRequest(
+                        4, "Noi dung moi bi bo loc danh dau can kiem duyet."));
+
+        assertThat(response.id()).isEqualTo(existing.getId());
+        assertThat(response.rating()).isEqualTo(4);
+        assertThat(response.moderationStatus())
+                .isEqualTo(CourseReviewModerationStatus.PENDING_MODERATION);
+        verify(userNotificationService).notify(
+                eq(teacherId), eq("course_review_pending_moderation"), any(), any(), any());
+    }
+
+    @Test
+    void adminCanApprovePendingReviewAndStudentIsNotified() {
+        UUID courseId = UUID.randomUUID();
+        UUID studentId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+        Profile student = Profile.createNew(studentId, UserRole.STUDENT, "Student One");
+        Course course = org.mockito.Mockito.mock(Course.class);
+        when(course.getId()).thenReturn(courseId);
+        CourseReview pending = CourseReview.create(
+                course, student, 5, "Noi dung danh gia dang cho quan tri vien duyet.",
+                CourseReviewModerationStatus.PENDING_MODERATION);
+        when(courseReviewRepository.findWithCourseAndStudentById(pending.getId()))
+                .thenReturn(Optional.of(pending));
+        when(courseReviewRepository.save(any(CourseReview.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.moderateReview(
+                pending.getId(), new AuthenticatedUser(adminId, "admin@example.com", "admin"),
+                new ModerateCourseReviewRequest(
+                        ModerateCourseReviewRequest.ModerationDecision.APPROVE,
+                        "Noi dung phu hop."));
+
+        assertThat(response.moderationStatus()).isEqualTo(CourseReviewModerationStatus.PUBLISHED);
+        assertThat(response.moderatedBy()).isEqualTo(adminId);
+        verify(userNotificationService).notify(
+                eq(studentId), eq("course_review_moderated"), any(), any(),
+                eq("/courses/" + courseId));
+    }
+
+    @Test
+    void adminMustProvideReasonWhenRejectingReview() {
+        UUID courseId = UUID.randomUUID();
+        UUID studentId = UUID.randomUUID();
+        Profile student = Profile.createNew(studentId, UserRole.STUDENT, "Student One");
+        Course course = org.mockito.Mockito.mock(Course.class);
+        CourseReview pending = CourseReview.create(
+                course, student, 2, "Noi dung danh gia dang cho quan tri vien duyet.",
+                CourseReviewModerationStatus.PENDING_MODERATION);
+        when(courseReviewRepository.findWithCourseAndStudentById(pending.getId()))
+                .thenReturn(Optional.of(pending));
+
+        assertThatThrownBy(() -> service.moderateReview(
+                pending.getId(), new AuthenticatedUser(UUID.randomUUID(), "admin@example.com", "admin"),
+                new ModerateCourseReviewRequest(
+                        ModerateCourseReviewRequest.ModerationDecision.REJECT, " ")))
+                .isInstanceOfSatisfying(BusinessException.class, ex ->
+                        assertThat(ex.getCode())
+                                .isEqualTo("COURSE_REVIEW_REJECTION_REASON_REQUIRED"));
+
+        verify(courseReviewRepository, never()).save(any());
     }
 
     private AuthenticatedUser student(UUID studentId) {

@@ -16,6 +16,8 @@ export interface AssignmentSubmissionResponse {
   files: Array<{
     name: string | null;
     url: string;
+    previewUrl: string | null;
+    previewSupported: boolean;
     type: string | null;
     sizeBytes: number | null;
   }>;
@@ -25,9 +27,12 @@ export interface AssignmentSubmissionResponse {
   maxScore: number;
   feedback: string | null;
   submittedAt: string;
+  expectedGradedBy: string;
   gradedAt: string | null;
   dueAt: string | null;
   late: boolean;
+  appliedLatePenaltyPercent: number;
+  rawScore: number | null;
 }
 
 export async function listTeacherAssignmentSubmissions():
@@ -42,10 +47,11 @@ export async function gradeAssignmentSubmission(
   submissionId: string,
   score: number,
   feedback: string,
+  revisionReason?: string,
 ): Promise<AssignmentSubmissionResponse> {
   const response = await apiClient.put<ApiResponse<AssignmentSubmissionResponse>>(
     `/api/teacher/assignment-submissions/${submissionId}/grade`,
-    { score, feedback },
+    { score, feedback, revisionReason },
   );
   return unwrap(response.data);
 }
@@ -53,6 +59,8 @@ export async function gradeAssignmentSubmission(
 export interface SubmissionFile {
   name: string | null;
   url: string;
+  previewUrl?: string | null;
+  previewSupported?: boolean;
   type: string | null;
   sizeBytes: number | null;
 }
@@ -63,6 +71,10 @@ export interface TeacherAssignmentResponse {
   description: string | null;
   maxScore: number;
   dueAt: string | null;
+  maxAttempts: number;
+  allowLateSubmission: boolean;
+  latePenaltyPercent: number;
+  acceptingSubmissions: boolean;
   courseId: string | null;
   courseTitle: string | null;
   chapterId: string | null;
@@ -79,7 +91,27 @@ export interface CreateAssignmentPayload {
   description?: string;
   maxScore: number;
   dueAt?: string;
+  maxAttempts?: number;
+  allowLateSubmission?: boolean;
+  latePenaltyPercent?: number;
+  acceptingSubmissions?: boolean;
 }
+
+export interface UpdateAssignmentPolicyPayload {
+  dueAt?: string;
+  maxAttempts?: number;
+  allowLateSubmission?: boolean;
+  latePenaltyPercent?: number;
+  acceptingSubmissions?: boolean;
+}
+
+export type SubmissionAvailability =
+  | 'open'
+  | 'late_allowed'
+  | 'overdue'
+  | 'closed'
+  | 'attempts_exhausted'
+  | 'graded';
 
 export interface StudentAssignmentResponse {
   id: string;
@@ -87,6 +119,13 @@ export interface StudentAssignmentResponse {
   description: string | null;
   maxScore: number;
   dueAt: string | null;
+  maxAttempts: number;
+  allowLateSubmission: boolean;
+  latePenaltyPercent: number;
+  acceptingSubmissions: boolean;
+  submissionAvailability: SubmissionAvailability;
+  canSubmit: boolean;
+  remainingAttempts: number;
   chapterId: string | null;
   chapterTitle: string | null;
   lessonId: string | null;
@@ -99,8 +138,12 @@ export interface StudentAssignmentResponse {
     score: number | null;
     feedback: string | null;
     submittedAt: string;
+    expectedGradedBy: string;
     gradedAt: string | null;
     late: boolean;
+    attemptNumber: number;
+    appliedLatePenaltyPercent: number;
+    rawScore: number | null;
   } | null;
 }
 
@@ -130,6 +173,17 @@ export async function createAssignment(
 
 export async function deleteAssignment(assignmentId: string): Promise<void> {
   await apiClient.delete(`/api/teacher/assignments/${assignmentId}`);
+}
+
+export async function updateAssignmentSubmissionPolicy(
+  assignmentId: string,
+  payload: UpdateAssignmentPolicyPayload,
+): Promise<TeacherAssignmentResponse> {
+  const response = await apiClient.patch<ApiResponse<TeacherAssignmentResponse>>(
+    `/api/teacher/assignments/${assignmentId}/submission-policy`,
+    payload,
+  );
+  return unwrap(response.data);
 }
 
 export async function listCourseAssignments(

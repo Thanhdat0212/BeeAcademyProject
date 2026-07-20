@@ -20,10 +20,16 @@ public interface QuestionBankRepository extends JpaRepository<QuestionBank, UUID
             SELECT COUNT(qb) > 0
             FROM QuestionBank qb
             WHERE qb.teacher.id = :teacherId
+              AND (:excludeId IS NULL OR qb.id <> :excludeId)
               AND LOWER(TRIM(qb.title)) = LOWER(TRIM(:title))
             """)
     boolean existsByTeacherIdAndTitleIgnoreCase(@Param("teacherId") UUID teacherId,
-                                                @Param("title") String title);
+                                                @Param("title") String title,
+                                                @Param("excludeId") UUID excludeId);
+
+    default boolean existsByTeacherIdAndTitleIgnoreCase(UUID teacherId, String title) {
+        return existsByTeacherIdAndTitleIgnoreCase(teacherId, title, null);
+    }
 
     @Query("""
             SELECT qb.id AS id,

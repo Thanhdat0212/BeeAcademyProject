@@ -24,32 +24,64 @@ import TeacherNotificationBell from '../../components/TeacherNotificationBell';
  *   5. "Lưu bài kiểm tra" → commit; "Hủy" → đóng form không lưu
  */
 
-import { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { useAuthStore } from '../../store/useAuthStore';
-import { notify } from '../../lib/toast';
-import { getCourseDetail, listMyCourses } from '../../api/teacherCourseService';
-import type { TeacherCourseDetailResponse } from '../../api/teacherCourseService';
-import * as examService from '../../api/examService';
-import * as questionService from '../../api/questionService';
-import type {
-  ExamConfigRequest,
-  ExamConfigResponse,
-  ExamDifficulty,
-  ExamType,
-  ExamQuestionPayload,
-} from '../../api/examService';
-import type { QuestionMetadata, QuestionType } from '../../api/questionService';
 import {
-  LayoutDashboard, BookOpen, FileText, HelpCircle,
-  Bell, LogOut, Menu, X, Trash2,
-  PenSquare, Landmark, BarChart2, ClipboardList,
-  GraduationCap, Save, CheckCircle2, Circle,
-  ChevronDown, ChevronRight, Shuffle, Eye, Repeat,
-  Megaphone, Database, Loader2, AlertTriangle,
-  Plus, UserCircle, Lock, Star,
+  AlertTriangle,
+  Eye,
+  GraduationCap,
+  Loader2,
+  Lock,
+  LogOut, Menu,
+  Plus,
+  Repeat,
+  Save,
+  Shuffle,
+  Trash2,
+  X
 } from 'lucide-react';
+import { motion } from 'motion/react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import type {
+  ExamDifficulty,
+  ExamType
+} from '../../api/examService';
+import * as examService from '../../api/examService';
+import type { QuestionMetadata } from '../../api/questionService';
+import * as questionService from '../../api/questionService';
+import { notify } from '../../lib/toast';
+import { useAuthStore } from '../../store/useAuthStore';
+import type {
+  ChapterQuestionCount,
+  ChapterRandomConfig,
+  ExamQuestion,
+  ExamSlot
+} from './exam/examTypes';
+import {
+  chapterObjectiveCount,
+  chaptersForExamSlot,
+  chapterTotalCount,
+  computeSlots,
+  countExamQuestionsByType,
+  createDirectExamQuestion,
+  defaultChapterRandomConfig,
+  defaultExamType,
+  defaultMidtermPlacementIndex,
+  examFromResponse,
+  examToRequest,
+  examTypeDisplayLabel,
+  formatPoints,
+  isManualExamType,
+  isObjectiveExamType,
+  NAV_ITEMS,
+  orderExamQuestionsObjectiveFirst,
+  questionFromPayload,
+  questionSelectionLabel,
+  questionTypeLabel,
+  redistributeQuestionPoints,
+  resolveExamType,
+  syncExamTypeWithPlacement
+} from './exam/examUtils';
+import { useTeacherExamCourses } from './exam/hooks/useTeacherExamCourses';
 
 // ═══════════════════════════════════════════════════════════════════
 //  PHẦN 1 — TYPES
@@ -58,1016 +90,23 @@ import {
 // Mức độ khó của câu hỏi — đặc thù của Exam
 // Lý do thêm: bài kiểm tra cần phân bố câu Dễ/TB/Khó hợp lý
 // để đánh giá đúng năng lực HS, không phải tất cả cùng mức.
-type Difficulty = 'easy' | 'medium' | 'hard';
-
-interface ExamQuestion {
-  id: string;
-  text: string;
-  type: QuestionType;
-  options: string[];
-  correctIndices: number[];
-  metadata?: QuestionMetadata | null;
-  explanation?: string;
-  points: number;
-  difficulty: Difficulty;  // ← thêm so với Quiz
-}
-
-// Cài đặt 1 bài kiểm tra
-interface Exam {
-  name: string;
-  scopeStartChapterId?: string;
-  placementChapterId?: string;
-  examType: ExamType;
-  description?: string;        // Hướng dẫn / mô tả cho HS đọc trước khi làm
-  durationMinutes: number;
-  passScorePercent: number;
-  objectiveSectionPoints: number;
-  essaySectionPoints: number;
-
-  // ── Cài đặt làm bài (đặc thù Exam) ──
-  maxAttempts: number;         // Số lần làm tối đa (vd 1, 2)
-  shuffleQuestions: boolean;   // Xáo trộn thứ tự câu hỏi cho mỗi HS
-  shuffleOptions: boolean;     // Xáo trộn thứ tự lựa chọn A/B/C/D
-  showAnswerAfterSubmit: boolean; // Có cho HS xem đáp án sau khi nộp không
-  requireFullscreen: boolean;
-  blockCopyPaste: boolean;
-
-  questions: ExamQuestion[];
-}
-
-// Ref nhẹ đến chương — chỉ cần id/title/order để hiển thị
-interface ChapterRef {
-  id: string;
-  title: string;
-  order: number;
-}
-
-// 1 khóa học chứa nhiều chương + map exam theo slot
-interface CourseInfo {
-  id: string;
-  title: string;
-  chapters: ChapterRef[];
-  // Dùng Record<slotIndex, Exam> thay vì array để dễ tra theo slot
-  // (slot 0 → exams[0], slot 1 → exams[1]...)
-  // Slot nào chưa có exam thì key đó không tồn tại.
-  exams: Record<number, Exam>;
-}
-
-// Slot đã được tính từ chapters — không lưu trong state, derive khi render
-interface ExamSlot {
-  slotIndex: number;
-  label: string;
-  defaultName: string;
-  chapters: ChapterRef[];
-  scopeStartChapter?: ChapterRef;
-  placementChapter?: ChapterRef;
-  exam?: Exam;                 // undefined = chưa tạo
-}
-
-interface ChapterRandomConfig {
-  multipleChoiceCount: number;
-  trueFalseCount: number;
-  fillInBlankCount: number;
-  essayCount: number;
-}
-
-interface ChapterQuestionCount {
-  totalActive: number;
-  multipleChoiceCount: number;
-  trueFalseCount: number;
-  fillInBlankCount: number;
-  essayCount: number;
-}
-
-function defaultChapterRandomConfig(totalCount = 10): ChapterRandomConfig {
-  const essayCount = Math.min(2, totalCount);
-  const fillInBlankCount = totalCount >= 4 ? 1 : 0;
-  const trueFalseCount = totalCount >= 3 ? Math.min(2, totalCount - essayCount - fillInBlankCount) : 0;
-  const multipleChoiceCount = Math.max(0, totalCount - essayCount - fillInBlankCount - trueFalseCount);
-  return {
-    multipleChoiceCount,
-    trueFalseCount,
-    fillInBlankCount,
-    essayCount,
-  };
-}
-
-const FIXED_EXAM_TYPES = [
-  { slotIndex: 0, label: 'Giữa kỳ 1', defaultName: 'Bài kiểm tra giữa kỳ 1' },
-  { slotIndex: 1, label: 'Cuối kỳ 1', defaultName: 'Bài kiểm tra cuối kỳ 1' },
-  { slotIndex: 2, label: 'Giữa kỳ 2', defaultName: 'Bài kiểm tra giữa kỳ 2' },
-  { slotIndex: 3, label: 'Cuối kỳ 2', defaultName: 'Bài kiểm tra cuối kỳ 2' },
-] as const;
-
-function defaultExamType(slotIndex: number): ExamType {
-  return slotIndex === 3 ? 'final_exam' : 'chapter_test';
-}
-
-function resolveExamType(
-    chapters: ChapterRef[],
-    placementChapterId?: string,
-    slotIndex = 0,
-): ExamType {
-  if (chapters.length === 0) return defaultExamType(slotIndex);
-  const placementIndex = findPlacementIndex(chapters, placementChapterId, slotIndex);
-  return placementIndex === chapters.length - 1 ? 'final_exam' : 'chapter_test';
-}
-
-function defaultMidtermPlacementIndex(slotIndex: number, chapterCount: number): number {
-  if (chapterCount <= 1) return 0;
-  return Math.min(defaultPlacementIndex(slotIndex, chapterCount), chapterCount - 2);
-}
-
-function examTypeDisplayLabel(examType: ExamType): string {
-  if (examType === 'final_exam') return 'Bài cuối kỳ';
-  if (examType === 'chapter_test') return 'Bài giữa kỳ';
-  return 'Quiz';
-}
-
-function syncExamTypeWithPlacement(
-    exam: Exam,
-    chapters: ChapterRef[],
-    slotIndex: number,
-): Exam {
-  const resolvedType = resolveExamType(chapters, exam.placementChapterId, slotIndex);
-  const firstChapterId = chapters[0]?.id;
-  return {
-    ...exam,
-    examType: resolvedType,
-    scopeStartChapterId: resolvedType === 'final_exam' && firstChapterId
-      ? firstChapterId
-      : exam.scopeStartChapterId,
-  };
-}
-
-function formatPoints(points: number): string {
-  if (Number.isInteger(points)) return String(points);
-  return points.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
-}
-
-const OBJECTIVE_EXAM_TYPES: QuestionType[] = [
-  'multiple_choice',
-  'true_false',
-  'image_question',
-  'formula_question',
-  'audio_question',
-];
-
-const TEXT_ANSWER_EXAM_TYPES: QuestionType[] = [
-  'fill_in_blank',
-  'matching',
-];
-
-const MANUAL_EXAM_TYPES: QuestionType[] = [
-  'essay',
-  'essay_short',
-  'essay_long',
-  'file_upload',
-];
-
-const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
-  multiple_choice: 'Trắc nghiệm',
-  true_false: 'Đúng / Sai',
-  fill_in_blank: 'Điền chỗ trống',
-  matching: 'Nối cột',
-  essay: 'Tự luận',
-  essay_short: 'Tự luận ngắn',
-  essay_long: 'Tự luận dài',
-  image_question: 'Câu hỏi hình ảnh',
-  formula_question: 'Câu hỏi công thức',
-  audio_question: 'Câu hỏi audio',
-  file_upload: 'Nộp file / ảnh',
-};
-
-function isObjectiveExamType(type: QuestionType) {
-  return OBJECTIVE_EXAM_TYPES.includes(type);
-}
-
-function isTextAnswerExamType(type: QuestionType) {
-  return TEXT_ANSWER_EXAM_TYPES.includes(type);
-}
-
-function isManualExamType(type: QuestionType) {
-  return MANUAL_EXAM_TYPES.includes(type);
-}
-
-function isDirectExamQuestion(question: ExamQuestion) {
-  return question.id.startsWith('manual-')
-    || question.metadata?.sourceType === 'direct_exam'
-    || question.metadata?.createdInExam === true;
-}
-
-function makeLocalQuestionId(prefix: string) {
-  const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return `${prefix}-${random}`;
-}
-
-function createDirectExamQuestion(points: number): ExamQuestion {
-  return {
-    id: makeLocalQuestionId('manual'),
-    text: '',
-    type: 'multiple_choice',
-    options: ['', '', '', ''],
-    correctIndices: [0],
-    metadata: {
-      sourceType: 'direct_exam',
-      createdInExam: true,
-    },
-    explanation: '',
-    points,
-    difficulty: 'medium',
-  };
-}
-
-function countExamQuestionsByType(questions: ExamQuestion[]) {
-  return {
-    multipleChoice: questions.filter(q => q.type === 'multiple_choice').length,
-    trueFalse: questions.filter(q => q.type === 'true_false').length,
-    fillInBlank: questions.filter(q => q.type === 'fill_in_blank').length,
-    essay: questions.filter(q => isManualExamType(q.type)).length,
-  };
-}
-
-function chapterObjectiveCount(config: ChapterRandomConfig) {
-  return config.multipleChoiceCount + config.trueFalseCount + config.fillInBlankCount;
-}
-
-function chapterTotalCount(config: ChapterRandomConfig) {
-  return chapterObjectiveCount(config) + config.essayCount;
-}
-
-function questionTypeLabel(type: QuestionType, correctCount = 0) {
-  if (type === 'multiple_choice') {
-    return correctCount > 1 ? 'Trắc nghiệm nhiều đáp án' : 'Trắc nghiệm 1 đáp án';
-  }
-  return QUESTION_TYPE_LABELS[type];
-}
-
-function questionSelectionLabel(question: ExamQuestion, index: number) {
-  const preview = question.text.trim() || 'Chưa có nội dung';
-  return `Câu ${index + 1} - ${preview}`;
-}
-
-function orderExamQuestionsObjectiveFirst(questions: ExamQuestion[]): ExamQuestion[] {
-  return [
-    ...questions.filter(question => !isManualExamType(question.type)),
-    ...questions.filter(question => isManualExamType(question.type)),
-  ];
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  PHẦN 2 — NAV_ITEMS (đồng bộ sidebar teacher)
-// ═══════════════════════════════════════════════════════════════════
-const NAV_ITEMS = [
-  { icon: LayoutDashboard, label: 'Tổng quan',         path: '/teacher',          },
-  { icon: BookOpen,        label: 'Khóa học của tôi',  path: '/teacher/courses',  },
-  { icon: Star,            label: 'Đánh giá khóa học', path: '/teacher/reviews',  },
-  { icon: FileText,        label: 'Bài giảng',          path: '/teacher/content',  },
-  { icon: PenSquare,       label: 'Quiz chương',        path: '/teacher/quiz',     },
-  { icon: Database,        label: 'Ngân hàng câu hỏi',  path: '/teacher/questions',},
-  { icon: GraduationCap,   label: 'Bài kiểm tra',       path: '/teacher/exam',     },
-  { icon: ClipboardList,   label: 'Chấm điểm',          path: '/teacher/grades',   },
-  { icon: HelpCircle,      label: 'Hỏi & Đáp',          path: '/teacher/qa',       },
-  { icon: Megaphone,       label: 'Khiếu nại',          path: '/teacher/complaints',},
-  { icon: BarChart2,       label: 'Doanh thu',          path: '/teacher/revenue',  },
-  { icon: Landmark,        label: 'TK ngân hàng',       path: '/teacher/bank',     },
-  { icon: UserCircle,      label: 'Hồ sơ',              path: '/teacher/profile',  },
-  { icon: Lock,            label: 'Tài khoản',           path: '/teacher/account',  },
-];
-
-// ═══════════════════════════════════════════════════════════════════
-//  PHẦN 3 — HELPER: 4 mốc kiểm tra cố định do giáo viên đặt vị trí
-// ═══════════════════════════════════════════════════════════════════
-function computeSlots(chapters: ChapterRef[], exams: Record<number, Exam>): ExamSlot[] {
-  if (chapters.length === 0) return [];
-  return FIXED_EXAM_TYPES.map(type => {
-    const exam = exams[type.slotIndex];
-    const placementChapter = getPlacementChapter(chapters, exam, type.slotIndex);
-    const scopeStartChapter = getScopeStartChapter(chapters, exams, exam, type.slotIndex, placementChapter?.id);
-    return {
-      slotIndex: type.slotIndex,
-      label: type.label,
-      defaultName: type.defaultName,
-      scopeStartChapter,
-      placementChapter,
-      chapters: chaptersForExamSlot(
-        chapters,
-        exams,
-        type.slotIndex,
-        scopeStartChapter?.id,
-        placementChapter?.id,
-      ),
-      exam,
-    };
-  });
-}
-
-function getPlacementChapter(
-    chapters: ChapterRef[],
-    exam: Exam | undefined,
-    slotIndex: number,
-): ChapterRef | undefined {
-  const bySavedPlacement = exam?.placementChapterId
-      ? chapters.find(chapter => chapter.id === exam.placementChapterId)
-      : undefined;
-  return bySavedPlacement ?? chapters[defaultPlacementIndex(slotIndex, chapters.length)];
-}
-
-function getScopeStartChapter(
-    chapters: ChapterRef[],
-    exams: Record<number, Exam>,
-    exam: Exam | undefined,
-    slotIndex: number,
-    placementChapterId?: string,
-): ChapterRef | undefined {
-  const bySavedStart = exam?.scopeStartChapterId
-      ? chapters.find(chapter => chapter.id === exam.scopeStartChapterId)
-      : undefined;
-  if (bySavedStart) return bySavedStart;
-
-  const currentIndex = findPlacementIndex(chapters, placementChapterId, slotIndex);
-  const previousIndex = FIXED_EXAM_TYPES
-    .filter(type => type.slotIndex < slotIndex)
-    .map(type => findPlacementIndex(chapters, exams[type.slotIndex]?.placementChapterId, type.slotIndex))
-    .filter(index => index >= 0 && index < currentIndex)
-    .reduce((max, index) => Math.max(max, index), -1);
-  return chapters[Math.max(0, Math.min(currentIndex, previousIndex + 1))];
-}
-
-function chaptersForExamSlot(
-    chapters: ChapterRef[],
-    exams: Record<number, Exam>,
-    slotIndex: number,
-    scopeStartChapterId?: string,
-    placementChapterId?: string,
-): ChapterRef[] {
-  if (chapters.length === 0) return [];
-  const currentIndex = findPlacementIndex(chapters, placementChapterId, slotIndex);
-  const savedStartIndex = scopeStartChapterId
-    ? chapters.findIndex(chapter => chapter.id === scopeStartChapterId)
-    : -1;
-  const fallbackStart = getScopeStartChapter(
-    chapters,
-    exams,
-    exams[slotIndex],
-    slotIndex,
-    placementChapterId,
-  );
-  const fromIndex = savedStartIndex >= 0 && savedStartIndex <= currentIndex
-    ? savedStartIndex
-    : findPlacementIndex(chapters, fallbackStart?.id, slotIndex);
-  return chapters.slice(fromIndex, currentIndex + 1);
-}
-
-function findPlacementIndex(
-    chapters: ChapterRef[],
-    placementChapterId: string | undefined,
-    slotIndex: number,
-): number {
-  const savedIndex = placementChapterId
-      ? chapters.findIndex(chapter => chapter.id === placementChapterId)
-      : -1;
-  return savedIndex >= 0 ? savedIndex : defaultPlacementIndex(slotIndex, chapters.length);
-}
-
-function defaultPlacementIndex(slotIndex: number, chapterCount: number): number {
-  if (chapterCount <= 0) return -1;
-  const index = slotIndex === 0
-      ? Math.ceil(chapterCount * 0.25) - 1
-      : slotIndex === 1
-      ? Math.ceil(chapterCount * 0.50) - 1
-      : slotIndex === 2
-      ? Math.ceil(chapterCount * 0.75) - 1
-      : chapterCount - 1;
-  return Math.max(0, Math.min(chapterCount - 1, index));
-}
-
-function examFromResponse(response: ExamConfigResponse): Exam {
-  const questions = response.questions.map(questionFromPayload);
-  const objectiveSectionPoints = questions
-    .filter(question => !isManualExamType(question.type))
-    .reduce((sum, question) => sum + question.points, 0);
-  const essaySectionPoints = questions
-    .filter(question => isManualExamType(question.type))
-    .reduce((sum, question) => sum + question.points, 0);
-  return redistributeQuestionPoints({
-    name: response.name,
-    scopeStartChapterId: response.scopeStartChapterId,
-    placementChapterId: response.placementChapterId,
-    examType: response.examType ?? defaultExamType(response.slotIndex),
-    description: response.description ?? '',
-    durationMinutes: response.durationMinutes,
-    passScorePercent: response.passScorePercent,
-    objectiveSectionPoints: objectiveSectionPoints > 0 ? objectiveSectionPoints : 6,
-    essaySectionPoints: essaySectionPoints > 0 ? essaySectionPoints : 4,
-    maxAttempts: response.maxAttempts,
-    shuffleQuestions: response.shuffleQuestions,
-    shuffleOptions: response.shuffleOptions,
-    showAnswerAfterSubmit: response.showAnswerAfterSubmit,
-    requireFullscreen: response.requireFullscreen ?? false,
-    blockCopyPaste: response.blockCopyPaste ?? false,
-    questions: orderExamQuestionsObjectiveFirst(questions),
-  });
-}
-
-function questionFromPayload(payload: ExamQuestionPayload): ExamQuestion {
-  return {
-    id: payload.id,
-    text: payload.text,
-    type: payload.type,
-    options: [...(payload.options ?? [])],
-    correctIndices: [...(payload.correctIndices ?? [])],
-    metadata: payload.metadata ?? null,
-    explanation: payload.explanation ?? '',
-    points: payload.points,
-    difficulty: payload.difficulty,
-  };
-}
-
-function redistributeQuestionPoints(exam: Exam): Exam {
-  const objectiveCount = exam.questions.filter(question => !isManualExamType(question.type)).length;
-  const essayCount = exam.questions.filter(question => isManualExamType(question.type)).length;
-  const objectivePoint = objectiveCount > 0 ? exam.objectiveSectionPoints / objectiveCount : 0;
-  const essayPoint = essayCount > 0 ? exam.essaySectionPoints / essayCount : 0;
-
-  return {
-    ...exam,
-    questions: exam.questions.map(question => ({
-      ...question,
-      points: isManualExamType(question.type) ? essayPoint : objectivePoint,
-    })),
-  };
-}
-
-function examToRequest(exam: Exam, confirmUnderTenQuestions = false): ExamConfigRequest {
-  return {
-    name: exam.name.trim(),
-    scopeStartChapterId: exam.scopeStartChapterId ?? '',
-    placementChapterId: exam.placementChapterId ?? '',
-    examType: exam.examType,
-    description: exam.description?.trim() || null,
-    durationMinutes: exam.durationMinutes,
-    passScorePercent: exam.passScorePercent,
-    maxAttempts: exam.maxAttempts,
-    shuffleQuestions: exam.shuffleQuestions,
-    shuffleOptions: exam.shuffleOptions,
-    showAnswerAfterSubmit: exam.showAnswerAfterSubmit,
-    requireFullscreen: exam.requireFullscreen,
-    blockCopyPaste: exam.blockCopyPaste,
-    confirmUnderTenQuestions,
-    questions: orderExamQuestionsObjectiveFirst(exam.questions).map(q => ({
-      id: q.id,
-      text: q.text.trim(),
-      type: q.type,
-      options: isObjectiveExamType(q.type) ? q.options.map(opt => opt.trim()) : [],
-      correctIndices: isObjectiveExamType(q.type) ? q.correctIndices : [],
-      metadata: q.metadata ?? null,
-      explanation: q.explanation?.trim() || null,
-      points: q.points,
-      difficulty: q.difficulty,
-    })),
-  };
-}
-
-function courseInfoFromDetail(
-    detail: TeacherCourseDetailResponse,
-    exams: ExamConfigResponse[],
-): CourseInfo {
-  return {
-    id: detail.id,
-    title: detail.title,
-    chapters: detail.chapters
-      .map(chapter => ({
-        id: chapter.id,
-        title: chapter.title,
-        order: chapter.position,
-      }))
-      .sort((a, b) => a.order - b.order),
-    exams: exams.reduce<Record<number, Exam>>((acc, exam) => {
-      acc[exam.slotIndex] = examFromResponse(exam);
-      return acc;
-    }, {}),
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  PHẦN 4 — SUB-COMPONENT: ExamQuestionCard
-// ═══════════════════════════════════════════════════════════════════
-/**
- * ExamQuestionCard — Card chứa 1 câu hỏi của bài kiểm tra.
- * Khác QuestionCard của Quiz: có thêm trường "Mức độ khó".
- * Tách thành component vì lặp lại N lần và có state gập/mở riêng.
- *
- * Props:
- *   - question: dữ liệu câu hỏi exam
- *   - index: thứ tự câu trong list (để label "Câu 1", "Câu 2"...)
- *   - onChange: callback khi user sửa bất kỳ field nào
- *   - onDelete: callback khi xóa câu hỏi
- */
-interface ExamQuestionCardProps {
-  question: ExamQuestion;
-  index: number;
-  onChange: (q: ExamQuestion) => void;
-  onDelete: () => void;
-  onApproveAi?: () => void;
-  onRejectAi?: () => void;
-  hideHeader?: boolean;
-}
-function ExamQuestionCard({ question, index, onChange, onDelete, onApproveAi, onRejectAi, hideHeader = false }: ExamQuestionCardProps) {
-  // Mặc định mở khi câu hỏi còn rỗng (mới tạo) để GV nhập luôn
-  const [internalExpanded, setInternalExpanded] = useState(question.text === '');
-  const isExpanded = hideHeader ? true : internalExpanded;
-
-  // Config màu sắc cho difficulty — gói lại để dễ tra trong JSX
-  const difficultyConfig: Record<Difficulty, { label: string; className: string }> = {
-    easy:   { label: 'Dễ',         className: 'bg-green-500/10 text-green-600'   },
-    medium: { label: 'Trung bình', className: 'bg-amber-500/10 text-amber-600'   },
-    hard:   { label: 'Khó',        className: 'bg-red-500/10 text-red-600'       },
-  };
-
-  // ── Thêm 1 lựa chọn rỗng ────────────────────────────────────
-  const aiStatus = question.metadata?.aiStatus;
-
-  function addOption() {
-    if (!isObjectiveExamType(question.type)) return;
-    onChange({ ...question, options: [...question.options, ''] });
-  }
-
-  // ── Sửa nội dung 1 option ───────────────────────────────────
-  function updateOption(optionIdx: number, value: string) {
-    if (!isObjectiveExamType(question.type)) return;
-    onChange({
-      ...question,
-      options: question.options.map((opt, i) => i === optionIdx ? value : opt),
-    });
-  }
-
-  // ── Xóa 1 option ───────────────────────────────────────────
-  // Ràng buộc: phải còn ≥ 2 lựa chọn
-  // Sau khi xóa, các correctIndices phải được điều chỉnh:
-  //   - bỏ index vừa xóa
-  //   - giảm các index lớn hơn xuống 1 (vì array thu nhỏ)
-  function removeOption(optionIdx: number) {
-    if (!isObjectiveExamType(question.type)) return;
-    if (question.options.length <= 2) {
-      notify.error('Câu hỏi phải có ít nhất 2 lựa chọn');
-      return;
-    }
-    const newOptions = question.options.filter((_, i) => i !== optionIdx);
-    const newCorrect = question.correctIndices
-      .filter(i => i !== optionIdx)
-      .map(i => i > optionIdx ? i - 1 : i);
-    onChange({ ...question, options: newOptions, correctIndices: newCorrect });
-  }
-
-  // ── Toggle đáp án đúng ─────────────────────────────────────
-  // single: chỉ giữ 1 index → set [optionIdx]
-  // multiple: toggle thêm/bỏ index
-  function toggleCorrect(optionIdx: number) {
-    if (!isObjectiveExamType(question.type)) return;
-    if (question.type === 'true_false') {
-      onChange({ ...question, correctIndices: [optionIdx] });
-    } else {
-      const isCorrect = question.correctIndices.includes(optionIdx);
-      const newCorrect = isCorrect
-        ? question.correctIndices.filter(i => i !== optionIdx)
-        : [...question.correctIndices, optionIdx];
-      onChange({ ...question, correctIndices: newCorrect });
-    }
-  }
-
-  // ── Đổi loại câu hỏi ───────────────────────────────────────
-  // Multiple → single: chỉ giữ đáp án đúng đầu tiên
-  function changeDirectQuestionType(nextType: 'multiple_choice' | 'true_false' | 'essay') {
-    const directMetadata: QuestionMetadata = {
-      ...(question.metadata ?? {}),
-      sourceType: 'direct_exam',
-      createdInExam: true,
-    };
-    if (nextType === 'true_false') {
-      onChange({
-        ...question,
-        type: nextType,
-        options: ['Đúng', 'Sai'],
-        correctIndices: [0],
-        metadata: directMetadata,
-      });
-      return;
-    }
-    if (nextType === 'essay') {
-      onChange({
-        ...question,
-        type: nextType,
-        options: [],
-        correctIndices: [],
-        metadata: directMetadata,
-      });
-      return;
-    }
-    onChange({
-      ...question,
-      type: nextType,
-      options: question.options.length >= 2 ? question.options : ['', '', '', ''],
-      correctIndices: question.correctIndices.length > 0 ? question.correctIndices : [0],
-      metadata: directMetadata,
-    });
-  }
-
-  const canEditType = isDirectExamQuestion(question) && !question.metadata?.aiPromptId;
-
-  return (
-    <div className="border border-outline-variant/40 rounded-xl bg-surface-container/30 overflow-hidden">
-
-      {/* Header card */}
-      {!hideHeader && (
-      <div className="flex items-center gap-2 px-4 py-3 bg-surface-container/50">
-        <button
-          onClick={() => setInternalExpanded(!isExpanded)}
-          className="flex items-center gap-2 flex-1 text-left min-w-0"
-        >
-          {isExpanded ? <ChevronDown className="w-4 h-4 flex-shrink-0" /> : <ChevronRight className="w-4 h-4 flex-shrink-0" />}
-          <span className="font-bold text-on-surface text-sm flex-shrink-0">Câu {index + 1}</span>
-          {!isExpanded && question.text && (
-            <span className="text-sm text-on-surface-variant line-clamp-1">
-              — {question.text}
-            </span>
-          )}
-        </button>
-
-        {/* Badge mức độ khó */}
-        <span className={`text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${difficultyConfig[question.difficulty].className}`}>
-          {difficultyConfig[question.difficulty].label}
-        </span>
-
-        {/* Badge loại */}
-        <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full whitespace-nowrap">
-          {questionTypeLabel(question.type, question.correctIndices.length)}
-        </span>
-
-        <span className="text-xs font-bold text-on-surface-variant">{formatPoints(question.points)}đ</span>
-
-        {aiStatus && (
-          <span className={`text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
-            aiStatus === 'approved'
-              ? 'bg-green-500/10 text-green-600'
-              : aiStatus === 'rejected'
-              ? 'bg-red-500/10 text-red-600'
-              : 'bg-amber-500/10 text-amber-600'
-          }`}>
-            AI {aiStatus.toUpperCase()}
-          </span>
-        )}
-
-        <button
-          onClick={onDelete}
-          title="Xóa câu hỏi"
-          className="p-1.5 text-red-500 hover:bg-red-500/10 rounded transition-colors"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </div>
-      )}
-
-      {/* Body — chỉ render khi mở */}
-      <AnimatePresence>
-        {isExpanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <div className="p-4 space-y-4">
-              {aiStatus && (
-                <div className={`rounded-xl border p-3 text-sm ${
-                  aiStatus === 'approved'
-                    ? 'border-green-200 bg-green-50 text-green-800'
-                    : aiStatus === 'rejected'
-                    ? 'border-red-200 bg-red-50 text-red-800'
-                    : 'border-amber-200 bg-amber-50 text-amber-800'
-                }`}>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="font-extrabold">
-                        {aiStatus === 'approved'
-                          ? 'Câu AI đã được duyệt'
-                          : aiStatus === 'rejected'
-                          ? 'Câu AI đã bị từ chối'
-                          : 'Câu AI đang chờ review'}
-                      </p>
-                      {question.metadata?.rejectionReason && (
-                        <p className="mt-1 text-xs font-semibold">{question.metadata.rejectionReason}</p>
-                      )}
-                      {question.metadata?.sourceRefs?.length ? (
-                        <p className="mt-1 text-xs font-semibold">
-                          Nguồn: {question.metadata.sourceRefs.join(', ')}
-                        </p>
-                      ) : null}
-                    </div>
-                    {aiStatus === 'draft' && (
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={onApproveAi}
-                          className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-700"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          onClick={onRejectAi}
-                          className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Nội dung câu hỏi */}
-              {question.type === 'fill_in_blank' && (
-                <div className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-on-surface-variant">
-                    Đáp án chấp nhận
-                  </p>
-                  <p className="mt-2 text-sm text-on-surface">
-                    {(question.metadata?.acceptedAnswers ?? []).join(', ') || 'Chưa có dữ liệu'}
-                  </p>
-                </div>
-              )}
-
-              {question.type === 'matching' && (
-                <div className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-on-surface-variant">
-                    Cặp nối
-                  </p>
-                  <div className="mt-2 space-y-2">
-                    {(question.metadata?.matchingPairs ?? []).map((pair, pairIndex) => (
-                      <div key={pairIndex} className="grid grid-cols-2 gap-2 rounded-lg border border-outline-variant/30 bg-surface px-3 py-2 text-sm text-on-surface">
-                        <span>{pair.left}</span>
-                        <span>{pair.right}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {question.metadata?.readingSetId && question.metadata?.sharedPrompt && (
-                <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-wide text-primary">
-                    Bài đọc chung
-                  </p>
-                  <p className="text-sm text-on-surface">
-                    Mã nhóm: {question.metadata.readingSetId}
-                  </p>
-                  {question.metadata.sharedPromptTitle && (
-                    <p className="text-sm text-on-surface">
-                      Tiêu đề: {question.metadata.sharedPromptTitle}
-                    </p>
-                  )}
-                  {question.metadata.questionOrderInSet != null && (
-                    <p className="text-sm text-on-surface">
-                      Thứ tự câu: {question.metadata.questionOrderInSet}
-                    </p>
-                  )}
-                  <p className="text-sm whitespace-pre-wrap text-on-surface">
-                    {question.metadata.sharedPrompt}
-                  </p>
-                </div>
-              )}
-
-              {(question.type === 'essay'
-                || question.type === 'essay_short'
-                || question.type === 'essay_long'
-                || question.type === 'file_upload') && (
-                <div className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3 space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-wide text-on-surface-variant">
-                    Thông tin chấm bài
-                  </p>
-                  {question.metadata?.sampleAnswer && (
-                    <p className="text-sm text-on-surface whitespace-pre-wrap">
-                      Đáp án mẫu: {question.metadata.sampleAnswer}
-                    </p>
-                  )}
-                  {question.metadata?.wordLimit != null && (
-                    <p className="text-sm text-on-surface">Giới hạn từ: {question.metadata.wordLimit}</p>
-                  )}
-                  {question.metadata?.gradingRubric && (
-                    <p className="text-sm text-on-surface whitespace-pre-wrap">
-                      Rubric: {question.metadata.gradingRubric}
-                    </p>
-                  )}
-                  {question.metadata?.allowedUploadTypes?.length ? (
-                    <p className="text-sm text-on-surface">
-                      Loại file: {question.metadata.allowedUploadTypes.join(', ')}
-                    </p>
-                  ) : null}
-                  {question.metadata?.maxFiles != null && (
-                    <p className="text-sm text-on-surface">Số file tối đa: {question.metadata.maxFiles}</p>
-                  )}
-                </div>
-              )}
-
-              {(question.type === 'image_question' || question.type === 'audio_question') && question.metadata?.promptAssetUrl && (
-                <div className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-on-surface-variant">
-                    Tài nguyên đính kèm
-                  </p>
-                  <p className="mt-2 text-sm break-all text-on-surface">{question.metadata.promptAssetUrl}</p>
-                  {question.type === 'audio_question' && question.metadata?.transcript && (
-                    <p className="mt-2 text-sm whitespace-pre-wrap text-on-surface">{question.metadata.transcript}</p>
-                  )}
-                </div>
-              )}
-
-              {question.type === 'formula_question' && question.metadata?.formulaLatex && (
-                <div className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-on-surface-variant">
-                    Công thức
-                  </p>
-                  <p className="mt-2 text-sm break-all text-on-surface">{question.metadata.formulaLatex}</p>
-                </div>
-              )}
-
-              <label className="block">
-                <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5 block">
-                  Nội dung câu hỏi <span className="text-red-500">*</span>
-                </span>
-                <textarea
-                  value={question.text}
-                  onChange={e => onChange({ ...question, text: e.target.value })}
-                  placeholder="Nhập nội dung câu hỏi..."
-                  rows={2}
-                  className="w-full px-3 py-2 text-sm bg-surface-container-lowest border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant resize-none"
-                />
-              </label>
-
-              {/* Loại + Mức độ + Điểm (3 cột) */}
-              <div className="grid grid-cols-3 gap-3">
-                <label className="block">
-                  <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5 block">
-                    Loại câu hỏi
-                  </span>
-                  <select
-                    value={question.type}
-                    disabled={!canEditType}
-                    onChange={e => changeDirectQuestionType(e.target.value as 'multiple_choice' | 'true_false' | 'essay')}
-                    className="w-full px-3 py-2 text-sm bg-surface-container-lowest border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface"
-                  >
-                    {canEditType ? (
-                      <>
-                        <option value="multiple_choice">Trắc nghiệm</option>
-                        <option value="true_false">Đúng / Sai</option>
-                        <option value="essay">Tự luận</option>
-                      </>
-                    ) : (
-                      <option value={question.type}>{questionTypeLabel(question.type, question.correctIndices.length)}</option>
-                    )}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5 block">
-                    Mức độ
-                  </span>
-                  <select
-                    value={question.difficulty}
-                    onChange={e => onChange({ ...question, difficulty: e.target.value as Difficulty })}
-                    className="w-full px-3 py-2 text-sm bg-surface-container-lowest border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface"
-                  >
-                    <option value="easy">Dễ</option>
-                    <option value="medium">Trung bình</option>
-                    <option value="hard">Khó</option>
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5 block">
-                    Điểm
-                  </span>
-                  <input
-                    type="number"
-                    min={0.01}
-                    step={0.01}
-                    value={question.points}
-                    onChange={e => onChange({ ...question, points: parseFloat(e.target.value) || 0.01 })}
-                    className="w-full px-3 py-2 text-sm bg-surface-container-lowest border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface"
-                  />
-                </label>
-              </div>
-
-              {/* Lựa chọn + Đáp án đúng */}
-              {isObjectiveExamType(question.type) && (
-              <div>
-                <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5 block">
-                  Lựa chọn & đáp án đúng
-                  <span className="text-on-surface-variant/70 font-normal normal-case ml-2">
-                    (click vào ô tròn/vuông để chọn đáp án đúng)
-                  </span>
-                </span>
-                <div className="space-y-2">
-                  {question.options.map((opt, optIdx) => {
-                    const isCorrect = question.correctIndices.includes(optIdx);
-                    return (
-                      <div key={optIdx} className="flex items-center gap-2">
-                        {/* Nút chọn đáp án đúng — radio (single) hoặc checkbox (multiple) */}
-                        <button
-                          onClick={() => toggleCorrect(optIdx)}
-                          title={isCorrect ? 'Đáp án đúng' : 'Click để chọn làm đáp án đúng'}
-                          className={`flex-shrink-0 w-7 h-7 ${question.type === 'multiple_choice' ? 'rounded-md' : 'rounded-full'} flex items-center justify-center transition-colors ${
-                            isCorrect
-                              ? 'bg-green-500 text-white'
-                              : 'bg-surface-container-lowest border border-outline-variant hover:border-green-500'
-                          }`}
-                        >
-                          {isCorrect
-                            ? <CheckCircle2 className="w-4 h-4" />
-                            : <Circle className="w-4 h-4 opacity-30" />}
-                        </button>
-
-                        <span className="text-sm font-bold text-on-surface-variant w-5 flex-shrink-0">
-                          {String.fromCharCode(65 + optIdx)}.
-                        </span>
-
-                        <input
-                          type="text"
-                          value={opt}
-                          onChange={e => updateOption(optIdx, e.target.value)}
-                          placeholder={`Lựa chọn ${String.fromCharCode(65 + optIdx)}`}
-                          className="flex-1 px-3 py-2 text-sm bg-surface-container-lowest border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant"
-                        />
-
-                        {question.options.length > 2 && (
-                          <button
-                            onClick={() => removeOption(optIdx)}
-                            title="Xóa lựa chọn"
-                            className="p-1.5 text-red-500 hover:bg-red-500/10 rounded transition-colors flex-shrink-0"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {question.options.length < 6 && (
-                  <button
-                    onClick={addOption}
-                    className="mt-2 flex items-center gap-1.5 text-xs font-bold text-primary hover:underline"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Thêm lựa chọn
-                  </button>
-                )}
-              </div>
-              )}
-
-              {/* Giải thích / barem */}
-              <label className="block">
-                <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5 block">
-                  {isManualExamType(question.type) ? 'Barem chấm' : 'Lời giải thích'}
-                  <span className={`font-normal normal-case ml-1 ${isManualExamType(question.type) ? 'text-red-500' : 'text-on-surface-variant/70'}`}>
-                    {isManualExamType(question.type) ? '*' : '(tùy chọn)'}
-                  </span>
-                </span>
-                <textarea
-                  value={question.explanation ?? ''}
-                  onChange={e => onChange({ ...question, explanation: e.target.value })}
-                  placeholder={isManualExamType(question.type) ? 'Nhập tiêu chí chấm hoặc đáp án mẫu...' : 'VD: Đáp án B vì...'}
-                  rows={2}
-                  className="w-full px-3 py-2 text-sm bg-surface-container-lowest border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant resize-none"
-                />
-              </label>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  PHẦN 5 — MAIN COMPONENT
-// ═══════════════════════════════════════════════════════════════════
+const ExamQuestionCard = lazy(() => import('./exam/ExamQuestionCard'));
 
 export default function TeacherExamPage() {
   // ── State chính ─────────────────────────────────────────────────
   // data: nguồn sự thật về khóa/chương/exam đã commit
-  const [data, setData] = useState<CourseInfo[]>([]);
-  // Khóa đang chọn
-  const [selectedCourseId, setSelectedCourseId] = useState<string>('');
-  // Slot đang chọn để chỉnh sửa (null = chưa chọn)
-  const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
-
-  // form: bản copy của exam đang sửa.
-  // Tách ra khỏi data để "Hủy" không ảnh hưởng — chỉ commit khi "Lưu".
-  const [form, setForm] = useState<Exam | null>(null);
+  const {
+    data,
+    setData,
+    selectedCourseId,
+    setSelectedCourseId,
+    selectedSlotIndex,
+    setSelectedSlotIndex,
+    form,
+    setForm,
+    loading,
+  } = useTeacherExamCourses();
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [randomizing, setRandomizing] = useState(false);
   const [chapterRandomConfigs, setChapterRandomConfigs] =
@@ -1090,53 +129,6 @@ export default function TeacherExamPage() {
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadCoursesAndExams() {
-      setLoading(true);
-      try {
-        const page = await listMyCourses(0, 100);
-        const courses = await Promise.all(
-          page.items.map(async course => {
-            const [detail, exams] = await Promise.all([
-              getCourseDetail(course.id),
-              examService.listCourseExams(course.id),
-            ]);
-            return courseInfoFromDetail(detail, exams);
-          }),
-        );
-
-        if (cancelled) return;
-
-        setData(courses);
-        setSelectedCourseId(prev => {
-          if (prev && courses.some(course => course.id === prev)) return prev;
-          return courses[0]?.id ?? '';
-        });
-        setSelectedSlotIndex(null);
-        setForm(null);
-      } catch (error) {
-        if (!cancelled) {
-          setData([]);
-          setSelectedCourseId('');
-          notify.error(error instanceof Error
-            ? error.message
-            : 'Không tải được danh sách bài kiểm tra');
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void loadCoursesAndExams();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // ── Derived ─────────────────────────────────────────────────────
   const currentCourse = data.find(c => c.id === selectedCourseId);
@@ -1322,6 +314,9 @@ export default function TeacherExamPage() {
     if (slot.exam) {
       setForm(syncExamTypeWithPlacement({
         ...slot.exam,
+        maxAttempts: 3,
+        requireFullscreen: true,
+        blockCopyPaste: true,
         scopeStartChapterId: slot.exam.scopeStartChapterId ?? slot.scopeStartChapter?.id,
         placementChapterId: slot.exam.placementChapterId ?? slot.placementChapter?.id,
         examType: slot.exam.examType ?? defaultExamType(slot.slotIndex),
@@ -1338,12 +333,12 @@ export default function TeacherExamPage() {
         passScorePercent: 60,   // Exam thường khó hơn → ngưỡng pass thấp hơn
         objectiveSectionPoints: 6,
         essaySectionPoints: 4,
-        maxAttempts: 1,         // Default 1 lần — exam chỉ làm 1 lần
+        maxAttempts: 3,         // 1 lượt chính + tối đa 2 lượt thi lại theo SRS
         shuffleQuestions: true, // Default ON — chống gian lận
         shuffleOptions: true,   // Default ON — chống gian lận
         showAnswerAfterSubmit: false, // Default OFF — không lộ đề cho khóa sau
-        requireFullscreen: false,
-        blockCopyPaste: false,
+        requireFullscreen: true,
+        blockCopyPaste: true,
         questions: [],
       }, currentCourse?.chapters ?? slot.chapters, slot.slotIndex));
     }
@@ -1566,7 +561,13 @@ export default function TeacherExamPage() {
     if (!form || selectedSlotIndex === null || !selectedCourseId || saving) return;
     const resolvedExamType = resolveExamType(currentCourse?.chapters ?? [], form.placementChapterId, selectedSlotIndex);
     const normalizedForm = redistributeQuestionPoints(syncExamTypeWithPlacement(
-      { ...form, examType: resolvedExamType },
+      {
+        ...form,
+        examType: resolvedExamType,
+        maxAttempts: 3,
+        requireFullscreen: true,
+        blockCopyPaste: true,
+      },
       currentCourse?.chapters ?? [],
       selectedSlotIndex,
     ));
@@ -1587,11 +588,6 @@ export default function TeacherExamPage() {
     const endIndex = currentCourse?.chapters.findIndex(chapter => chapter.id === normalizedForm.placementChapterId) ?? -1;
     if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
       notify.error('Chương bắt đầu phải đứng trước hoặc bằng chương kết thúc');
-      return;
-    }
-    if (resolvedExamType === 'final_exam'
-      && (startIndex !== 0 || endIndex !== (currentCourse?.chapters.length ?? 0) - 1)) {
-      notify.error('Bài cuối kỳ phải áp dụng cho toàn bộ khóa học');
       return;
     }
     if (normalizedForm.durationMinutes < 1) {
@@ -1977,10 +973,15 @@ export default function TeacherExamPage() {
                           if (chapters.length === 0) return;
 
                           if (nextType === 'final_exam') {
+                            const lastChapterIndex = chapters.length - 1;
+                            const currentStartIndex = chapters.findIndex(ch => ch.id === form.scopeStartChapterId);
+                            const nextStartId = currentStartIndex >= 0 && currentStartIndex <= lastChapterIndex
+                              ? form.scopeStartChapterId
+                              : chapters[0]?.id ?? form.scopeStartChapterId;
                             setForm(syncExamTypeWithPlacement({
                               ...form,
                               examType: nextType,
-                              scopeStartChapterId: chapters[0]?.id ?? form.scopeStartChapterId,
+                              scopeStartChapterId: nextStartId,
                               placementChapterId: chapters[chapters.length - 1]?.id ?? form.placementChapterId,
                             }, chapters, currentSlot.slotIndex));
                             return;
@@ -2030,7 +1031,6 @@ export default function TeacherExamPage() {
                               : form.placementChapterId,
                           }, currentCourse?.chapters ?? [], currentSlot.slotIndex));
                         }}
-                        disabled={resolvedFormExamType === 'final_exam'}
                         className="w-full px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface"
                       >
                         <option value="">Chọn chương</option>
@@ -2073,7 +1073,7 @@ export default function TeacherExamPage() {
                         Bài kiểm tra sẽ xuất hiện trong mục lục ngay sau chương đã chọn.
                       </p>
                       <p className="mt-1 text-xs text-on-surface-variant">
-                        Nếu chọn chương cuối cùng, hệ thống sẽ tự xem đây là bài cuối kỳ và lấy phạm vi từ đầu khóa học.
+                        Nếu chọn chương cuối cùng, hệ thống sẽ tự xem đây là bài cuối kỳ theo phạm vi bạn đã chọn.
                       </p>
                     </label>
 
@@ -2193,19 +1193,19 @@ export default function TeacherExamPage() {
                     {/* Số lần làm lại */}
                     <label className="flex items-center gap-3 rounded-xl border border-outline-variant/25 bg-surface-container-lowest px-4 py-3">
                       <Repeat className="w-4 h-4 text-on-surface-variant flex-shrink-0" />
-                      <span className="text-sm text-on-surface flex-1">Số lần làm tối đa</span>
+                      <span className="text-sm text-on-surface flex-1">Số lần làm tối đa (1 chính + 2 thi lại)</span>
                       <input
                         type="number"
-                        min={1}
-                        max={5}
+                        min={3}
+                        max={3}
                         value={form.maxAttempts}
-                        onChange={e => setForm({ ...form, maxAttempts: parseInt(e.target.value) || 1 })}
+                        disabled
                         className="w-20 px-3 py-1.5 text-sm bg-surface-container border border-outline-variant rounded-lg focus:outline-none focus:border-primary text-on-surface text-center"
                       />
                     </label>
 
                     {/* Toggle: xáo trộn câu hỏi */}
-                    <label className="flex items-center gap-3 cursor-pointer rounded-xl border border-outline-variant/25 bg-surface-container-lowest px-4 py-3">
+                    <label className="flex items-center gap-3 rounded-xl border border-outline-variant/25 bg-surface-container-lowest px-4 py-3">
                       <Shuffle className="w-4 h-4 text-on-surface-variant flex-shrink-0" />
                       <span className="text-sm text-on-surface flex-1">
                         Xáo trộn thứ tự câu hỏi
@@ -2250,22 +1250,22 @@ export default function TeacherExamPage() {
 
                     <label className="flex items-center gap-3 cursor-pointer rounded-xl border border-outline-variant/25 bg-surface-container-lowest px-4 py-3">
                       <Eye className="w-4 h-4 text-on-surface-variant flex-shrink-0" />
-                      <span className="text-sm text-on-surface flex-1">Yêu cầu fullscreen khi làm bài</span>
+                      <span className="text-sm text-on-surface flex-1">Yêu cầu fullscreen khi làm bài (bắt buộc)</span>
                       <input
                         type="checkbox"
-                        checked={form.requireFullscreen}
-                        onChange={e => setForm({ ...form, requireFullscreen: e.target.checked })}
+                        checked
+                        disabled
                         className="w-5 h-5 accent-primary"
                       />
                     </label>
 
-                    <label className="flex items-center gap-3 cursor-pointer rounded-xl border border-outline-variant/25 bg-surface-container-lowest px-4 py-3">
+                    <label className="flex items-center gap-3 rounded-xl border border-outline-variant/25 bg-surface-container-lowest px-4 py-3">
                       <Lock className="w-4 h-4 text-on-surface-variant flex-shrink-0" />
-                      <span className="text-sm text-on-surface flex-1">Chặn copy/paste trong lúc làm bài</span>
+                      <span className="text-sm text-on-surface flex-1">Chặn copy/paste trong lúc làm bài (bắt buộc)</span>
                       <input
                         type="checkbox"
-                        checked={form.blockCopyPaste}
-                        onChange={e => setForm({ ...form, blockCopyPaste: e.target.checked })}
+                        checked
+                        disabled
                         className="w-5 h-5 accent-primary"
                       />
                     </label>
@@ -2684,16 +1684,20 @@ export default function TeacherExamPage() {
                           </div>
 
                           {selectedQuestion ? (
-                            <ExamQuestionCard
-                              key={selectedQuestion.id}
-                              question={selectedQuestion}
-                              index={selectedQuestionIndex}
-                              onChange={updated => updateQuestion(selectedQuestionIndex, updated)}
-                              onDelete={() => deleteQuestion(selectedQuestionIndex)}
-                              onApproveAi={() => reviewAiQuestion(selectedQuestionIndex, 'APPROVED_AI_QUESTION')}
-                              onRejectAi={() => reviewAiQuestion(selectedQuestionIndex, 'REJECTED_AI_QUESTION')}
-                              hideHeader
-                            />
+                            <Suspense
+                              fallback={<div className="h-48 animate-pulse rounded-xl bg-surface-container" />}
+                            >
+                              <ExamQuestionCard
+                                key={selectedQuestion.id}
+                                question={selectedQuestion}
+                                index={selectedQuestionIndex}
+                                onChange={updated => updateQuestion(selectedQuestionIndex, updated)}
+                                onDelete={() => deleteQuestion(selectedQuestionIndex)}
+                                onApproveAi={() => reviewAiQuestion(selectedQuestionIndex, 'APPROVED_AI_QUESTION')}
+                                onRejectAi={() => reviewAiQuestion(selectedQuestionIndex, 'REJECTED_AI_QUESTION')}
+                                hideHeader
+                              />
+                            </Suspense>
                           ) : null}
                         </div>
                       )}

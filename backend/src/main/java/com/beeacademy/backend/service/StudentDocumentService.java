@@ -66,7 +66,7 @@ public class StudentDocumentService {
             throw new ResourceNotFoundException("CourseDocument", documentId);
         }
 
-        String storagePath = ensurePrivateStorage(document);
+        String storagePath = resolveStoragePath(document);
         if (storagePath == null || storagePath.isBlank()) {
             throw new BusinessException("DOCUMENT_UNAVAILABLE",
                     "Tai lieu hien chua san sang de tai.", HttpStatus.NOT_FOUND);
@@ -80,6 +80,15 @@ public class StudentDocumentService {
             throw new BusinessException("DOCUMENT_DOWNLOAD_RATE_LIMIT",
                     "Ban da tai tai lieu qua 10 lan trong mot gio. Vui long thu lai sau.",
                     HttpStatus.TOO_MANY_REQUESTS);
+        }
+
+        // Every format is served by our atomic, one-time token endpoint. Legacy
+        // objects are moved out of the public bucket before a link is issued so
+        // the original public URL cannot bypass the five-minute access policy.
+        storagePath = ensurePrivateStorage(document);
+        if (storagePath == null || storagePath.isBlank()) {
+            throw new BusinessException("DOCUMENT_UNAVAILABLE",
+                    "Tai lieu hien chua san sang de tai.", HttpStatus.NOT_FOUND);
         }
 
         boolean watermarked = isPdf(document.getFileType());
@@ -97,7 +106,12 @@ public class StudentDocumentService {
         downloadRepository.save(StudentDocumentDownload.create(
                 me.userId(), documentId, now, expiresAt, temporaryPath, hashToken(token)));
 
-        return new DocumentDownloadResponse(DOWNLOAD_ENDPOINT + token, expiresAt, watermarked, true);
+        return new DocumentDownloadResponse(
+                DOWNLOAD_ENDPOINT + token,
+                expiresAt,
+                watermarked,
+                true
+        );
     }
 
     /** Consume token atomically before streaming bytes; replay cannot reach Supabase. */
@@ -117,14 +131,17 @@ public class StudentDocumentService {
         CourseDocument document = documentRepository.findById(download.getDocumentId())
                 .orElseThrow(() -> new BusinessException("DOCUMENT_UNAVAILABLE",
                         "Tai lieu khong con kha dung.", HttpStatus.NOT_FOUND));
+        String bucket = download.getTemporaryStoragePath() != null
+                ? DOCUMENT_BUCKET
+                : resolveStorageBucket(document);
         String objectPath = download.getTemporaryStoragePath() != null
                 ? download.getTemporaryStoragePath()
-                : document.getStoragePath();
+                : resolveStoragePath(document);
         if (objectPath == null || objectPath.isBlank()) {
             throw new BusinessException("DOCUMENT_UNAVAILABLE",
                     "Tai lieu hien chua san sang de tai.", HttpStatus.NOT_FOUND);
         }
-        byte[] bytes = storageClient.download(DOCUMENT_BUCKET, objectPath);
+        byte[] bytes = storageClient.download(bucket, objectPath);
         return new DownloadedDocument(bytes, filename(document), contentType(document));
     }
 
@@ -175,6 +192,11 @@ public class StudentDocumentService {
         String marker = "/storage/v1/object/public/" + bucket + "/";
         int markerIndex = publicUrl.indexOf(marker);
         return markerIndex >= 0 ? publicUrl.substring(markerIndex + marker.length()) : null;
+    }
+
+    private String resolveStorageBucket(CourseDocument document) {
+        String bucket = document.getStorageBucket();
+        return bucket == null || bucket.isBlank() ? LEGACY_DOCUMENT_BUCKET : bucket;
     }
 
     private String ensurePrivateStorage(CourseDocument document) {

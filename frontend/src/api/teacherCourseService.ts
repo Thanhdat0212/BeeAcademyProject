@@ -42,6 +42,9 @@ export interface TeacherLessonResponse {
   videoStoragePath: string | null;
   videoUrl: string | null;
   videoFallbackUrl: string | null;
+  hlsPlaylistUrl: string | null;
+  videoProcessingStatus: 'NOT_REQUIRED' | 'EMBED' | 'HLS_QUEUED' | 'HLS_READY' | 'HLS_FAILED';
+  originalVideoRetentionUntil: string | null;
   durationSec: number;
   hasVideo: boolean;
   completionRule: 'DOCUMENT_OPENED' | 'MARK_AS_COMPLETE' | 'ASSIGNMENT_SUBMITTED' | 'ASSIGNMENT_PASSED' | null;
@@ -88,6 +91,25 @@ export interface CourseVersionResponse {
   title: string;
   submittedByName: string | null;
   submittedAt: string;
+  approved: boolean;
+  approvedAt: string | null;
+}
+
+export interface CourseVersionMigrationRequest {
+  targetCourseVersionId: string;
+  studentIds: string[];
+  progressItemMapping: Record<string, string>;
+  finalExamMapping: Record<string, string>;
+  certificateMapping: 'MARK_NEEDS_REVIEW' | string;
+  reason: string;
+}
+
+export interface CourseVersionMigrationResponse {
+  courseId: string;
+  targetCourseVersionId: string;
+  targetVersionNo: number;
+  migratedEnrollmentCount: number;
+  migratedStudentIds: string[];
 }
 
 export interface CreateCourseRequest {
@@ -135,6 +157,15 @@ export async function listMyCourses(page = 0, size = 10):
     Promise<PageResponse<TeacherCourseResponse>> {
   const res = await apiClient.get<ApiResponse<PageResponse<TeacherCourseResponse>>>(
     '/api/teacher/courses', { params: { page, size, sort: 'updatedAt,desc' } });
+  return unwrap(res.data);
+}
+
+export async function migrateCourseEnrollments(
+  courseId: string,
+  req: CourseVersionMigrationRequest,
+): Promise<CourseVersionMigrationResponse> {
+  const res = await apiClient.post<ApiResponse<CourseVersionMigrationResponse>>(
+    `/api/teacher/courses/${courseId}/versions/migrate-enrollments`, req);
   return unwrap(res.data);
 }
 

@@ -68,4 +68,21 @@ public class QuestionBank {
         bank.status = "active";
         return bank;
     }
+
+    public void update(Category category, Integer grade, String title, String description) {
+        this.category = category;
+        this.grade = grade;
+        this.title = title.trim();
+        this.description = description != null && !description.isBlank()
+                ? description.trim()
+                : null;
+    }
+
+    public void activate() {
+        this.status = "active";
+    }
+
+    public void deactivate() {
+        this.status = "inactive";
+    }
 }

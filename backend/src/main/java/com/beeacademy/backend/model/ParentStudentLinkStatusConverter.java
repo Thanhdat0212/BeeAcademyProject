@@ -7,7 +7,7 @@ import jakarta.persistence.Converter;
 public class ParentStudentLinkStatusConverter implements AttributeConverter<ParentStudentLinkStatus, String> {
     @Override
     public String convertToDatabaseColumn(ParentStudentLinkStatus attribute) {
-        return attribute == null ? ParentStudentLinkStatus.ACCEPTED.toDbValue() : attribute.toDbValue();
+        return attribute == null ? ParentStudentLinkStatus.ACTIVE.toDbValue() : attribute.toDbValue();
     }
 
     @Override

@@ -22,6 +22,19 @@ public interface QaThreadRepository extends JpaRepository<QaThread, UUID> {
 
     @EntityGraph(attributePaths = {"student", "course", "lesson", "messages", "messages.author"})
     @Query("SELECT DISTINCT t FROM QaThread t " +
+           "WHERE t.course.id = :courseId " +
+           "AND t.visibility = 'public' " +
+           "ORDER BY t.lastActivityAt DESC")
+    List<QaThread> findPublicThreadsByCourseId(@Param("courseId") UUID courseId);
+
+    @EntityGraph(attributePaths = {"student", "course", "lesson", "messages", "messages.author"})
+    @Query("SELECT DISTINCT t FROM QaThread t " +
+           "WHERE (:courseId IS NULL OR t.course.id = :courseId) " +
+           "ORDER BY t.lastActivityAt DESC")
+    List<QaThread> findAdminThreads(@Param("courseId") UUID courseId);
+
+    @EntityGraph(attributePaths = {"student", "course", "lesson", "messages", "messages.author"})
+    @Query("SELECT DISTINCT t FROM QaThread t " +
            "WHERE t.course.teacher.id = :teacherId " +
            "ORDER BY t.lastActivityAt DESC")
     List<QaThread> findTeacherThreads(@Param("teacherId") UUID teacherId);

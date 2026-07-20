@@ -8,13 +8,12 @@ import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Certificate;
 import com.beeacademy.backend.model.CertificateStatus;
 import com.beeacademy.backend.model.Course;
+import com.beeacademy.backend.model.Enrollment;
 import com.beeacademy.backend.model.ExamAttempt;
 import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.repository.CertificateRepository;
-import com.beeacademy.backend.repository.CourseProgressItemRepository;
 import com.beeacademy.backend.repository.CourseRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
-import com.beeacademy.backend.repository.ExamAttemptRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import com.google.zxing.BarcodeFormat;
@@ -29,6 +28,7 @@ import com.lowagie.text.Image;
 import com.lowagie.text.PageSize;
 import com.lowagie.text.Paragraph;
 import com.lowagie.text.Rectangle;
+import com.lowagie.text.pdf.BaseFont;
 import com.lowagie.text.pdf.PdfWriter;
 import com.lowagie.text.pdf.ColumnText;
 import com.lowagie.text.pdf.PdfContentByte;
@@ -44,6 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.time.ZoneId;
@@ -56,16 +57,18 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CertificateService {
 
-    private static final int FINAL_EXAM_SLOT_INDEX = 3;
     private static final String CERTIFICATE_BUCKET = "certificates";
     private static final int CERTIFICATE_SIGNED_URL_TTL_SECONDS = 600;
+    private static final List<String> FONT_CANDIDATES = List.of(
+            "C:/Windows/Fonts/arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf");
 
     private final CertificateRepository certificateRepository;
     private final EnrollmentRepository enrollmentRepository;
     private final CourseRepository courseRepository;
     private final ProfileRepository profileRepository;
-    private final ExamAttemptRepository examAttemptRepository;
-    private final CourseProgressItemRepository progressItemRepository;
+    private final CertificateEligibilityService certificateEligibilityService;
     private final SupabaseStorageClient storageClient;
 
     @Value("${app.frontend-url:http://localhost:3000}")
@@ -84,7 +87,7 @@ public class CertificateService {
         Certificate certificate = issueIfEligible(me.userId(), courseId)
                 .orElseThrow(() -> new BusinessException(
                         "CERTIFICATE_NOT_ELIGIBLE",
-                        "Ban can hoan thanh 100% khoa hoc va dat bai kiem tra cuoi ky 2 de nhan chung chi.",
+                        "Bạn cần hoàn thành 100% khóa học và đạt đủ 4 bài kiểm tra bắt buộc để nhận chứng chỉ.",
                         HttpStatus.BAD_REQUEST));
         return certificateResponseWithUrls(certificate);
     }
@@ -110,11 +113,22 @@ public class CertificateService {
     }
 
     @Transactional
-    public void handleFinalExamGradeChanged(ExamAttempt attempt) {
-        if (!isFinalExamAttempt(attempt)) return;
+    public void handleRequiredExamGradeChanged(ExamAttempt attempt) {
+        if (attempt == null || attempt.getStudent() == null
+                || attempt.getExamConfig() == null
+                || attempt.getExamConfig().getCourse() == null) {
+            return;
+        }
 
         UUID studentId = attempt.getStudent().getId();
         UUID courseId = attempt.getExamConfig().getCourse().getId();
+        Enrollment enrollment = enrollmentRepository
+                .findByStudentIdAndCourseId(studentId, courseId)
+                .orElse(null);
+        if (enrollment == null
+                || !certificateEligibilityService.isRequiredExamAttempt(enrollment, attempt)) {
+            return;
+        }
         Certificate certificate = certificateRepository
                 .findByStudentIdAndCourseId(studentId, courseId)
                 .orElse(null);
@@ -122,20 +136,27 @@ public class CertificateService {
         if (certificate != null
                 && (certificate.getStatus() == CertificateStatus.ISSUED
                 || certificate.getStatus() == CertificateStatus.REISSUED)) {
-            certificate.markNeedsReview("Final exam score was changed by teacher.");
+            certificate.markNeedsReview("A required exam score was changed by teacher.");
             certificateRepository.save(certificate);
         }
 
-        if (isEligible(studentId, courseId)) {
+        if (certificateEligibilityService.evaluate(enrollment).eligible()) {
             issueIfEligible(studentId, courseId);
         } else if (certificate != null && certificate.hasBeenIssuedBefore()) {
-            certificate.revoke("Final exam no longer satisfies certificate requirements.");
+            certificate.revoke("One or more required exams no longer satisfy certificate requirements.");
             certificateRepository.save(certificate);
         }
     }
 
     private java.util.Optional<Certificate> issueIfEligible(UUID studentId, UUID courseId) {
-        if (!isEligible(studentId, courseId)) {
+        Enrollment enrollment = enrollmentRepository.findByStudentIdAndCourseId(studentId, courseId)
+                .orElse(null);
+        if (enrollment == null) {
+            return java.util.Optional.empty();
+        }
+        CertificateEligibilityService.Eligibility eligibility =
+                certificateEligibilityService.evaluate(enrollment);
+        if (!eligibility.eligible()) {
             return java.util.Optional.empty();
         }
 
@@ -143,7 +164,13 @@ public class CertificateService {
                 .orElseThrow(() -> new ResourceNotFoundException("Profile", studentId));
         Course course = courseRepository.findWithCategoryAndTeacherById(courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Course", courseId));
-        ExamAttempt finalAttempt = bestPassedFinalAttempt(studentId, courseId);
+        ExamAttempt finalAttempt = eligibility.bestFinalAttempt();
+        if (finalAttempt == null) {
+            throw new BusinessException(
+                    "FINAL_EXAM_NOT_PASSED",
+                    "Chưa đạt bài kiểm tra cuối kỳ.",
+                    HttpStatus.BAD_REQUEST);
+        }
 
         Certificate certificate = certificateRepository
                 .findByStudentIdAndCourseId(studentId, courseId)
@@ -168,30 +195,6 @@ public class CertificateService {
         return java.util.Optional.of(saved);
     }
 
-    private boolean isEligible(UUID studentId, UUID courseId) {
-        return hasCompletedCourse(studentId, courseId)
-                && !examAttemptRepository
-                .findPassedFinalAttempts(studentId, courseId, FINAL_EXAM_SLOT_INDEX)
-                .isEmpty();
-    }
-
-    private boolean hasCompletedCourse(UUID studentId, UUID courseId) {
-        long total = courseRepository.countProgressItemsByCourseId(courseId);
-        if (total <= 0) return false;
-        long completed = Math.min(progressItemRepository.countByStudentIdAndCourseId(studentId, courseId), total);
-        return completed >= total;
-    }
-
-    private ExamAttempt bestPassedFinalAttempt(UUID studentId, UUID courseId) {
-        return examAttemptRepository.findPassedFinalAttempts(studentId, courseId, FINAL_EXAM_SLOT_INDEX)
-                .stream()
-                .findFirst()
-                .orElseThrow(() -> new BusinessException(
-                        "FINAL_EXAM_NOT_PASSED",
-                        "Chua co bai kiem tra cuoi ky 2 dat yeu cau.",
-                        HttpStatus.BAD_REQUEST));
-    }
-
     private void requireEnrollment(UUID studentId, UUID courseId) {
         if (!enrollmentRepository.existsByStudentIdAndCourseId(studentId, courseId)) {
             throw new BusinessException(
@@ -199,12 +202,6 @@ public class CertificateService {
                     "Ban can ghi danh khoa hoc truoc khi nhan chung chi.",
                     HttpStatus.FORBIDDEN);
         }
-    }
-
-    private boolean isFinalExamAttempt(ExamAttempt attempt) {
-        return attempt != null
-                && attempt.getExamConfig() != null
-                && FINAL_EXAM_SLOT_INDEX == attempt.getExamConfig().getSlotIndex();
     }
 
     private CertificateResponse certificateResponseWithUrls(Certificate certificate) {
@@ -253,17 +250,19 @@ public class CertificateService {
             PdfWriter.getInstance(document, output);
             document.open();
 
+            PdfFontSet fonts = loadFonts();
+
             Rectangle border = new Rectangle(36, 36, PageSize.A4.getHeight() - 36, PageSize.A4.getWidth() - 36);
             border.setBorder(Rectangle.BOX);
             border.setBorderWidth(2f);
             border.setBorderColor(new Color(173, 44, 0));
             document.add(border);
 
-            Font titleFont = new Font(Font.HELVETICA, 30, Font.BOLD, new Color(173, 44, 0));
-            Font headingFont = new Font(Font.HELVETICA, 18, Font.BOLD, Color.BLACK);
-            Font normalFont = new Font(Font.HELVETICA, 12, Font.NORMAL, Color.DARK_GRAY);
-            Font nameFont = new Font(Font.HELVETICA, 26, Font.BOLD, Color.BLACK);
-            Font smallFont = new Font(Font.HELVETICA, 9, Font.NORMAL, Color.GRAY);
+            Font titleFont = font(fonts, 30, Font.BOLD, new Color(173, 44, 0));
+            Font headingFont = font(fonts, 18, Font.BOLD, Color.BLACK);
+            Font normalFont = font(fonts, 12, Font.NORMAL, Color.DARK_GRAY);
+            Font nameFont = font(fonts, 26, Font.BOLD, Color.BLACK);
+            Font smallFont = font(fonts, 9, Font.NORMAL, Color.GRAY);
 
             Paragraph brand = centered("BEE ACADEMY", titleFont);
             brand.setSpacingAfter(12);
@@ -277,19 +276,29 @@ public class CertificateService {
             studentName.setSpacingAfter(12);
             document.add(studentName);
 
-            document.add(centered("for completing 100% of the course and passing the final exam", normalFont));
+            document.add(centered(
+                    "for completing 100% of the course and passing all 4 required exams",
+                    normalFont));
             Paragraph courseTitle = centered(safeText(course.getTitle(), "Course"), headingFont);
             courseTitle.setSpacingBefore(10);
-            courseTitle.setSpacingAfter(16);
+            courseTitle.setSpacingAfter(8);
             document.add(courseTitle);
+
+            Profile teacher = course.getTeacher();
+            String teacherName = teacher == null
+                    ? "Teacher information unavailable"
+                    : safeText(teacher.getFullName(), "Teacher information unavailable");
+            Paragraph teacherLine = centered("Teacher: " + teacherName, normalFont);
+            teacherLine.setSpacingAfter(12);
+            document.add(teacherLine);
 
             BigDecimal score = finalAttempt.getEffectiveScorePercent();
             String issuedDate = DateTimeFormatter.ofPattern("dd/MM/yyyy")
                     .withZone(ZoneId.systemDefault())
                     .format(java.time.Instant.now());
-            document.add(centered("Final exam: passed"
+            document.add(centered("All 4 required exams: passed | Final exam"
                     + (score != null ? " - Score " + score.stripTrailingZeros().toPlainString() + "%" : "")
-                    + " | Issued: " + issuedDate, normalFont));
+                    + " | Completed: " + issuedDate + " | Issued: " + issuedDate, normalFont));
             document.add(Chunk.NEWLINE);
 
             Image qr = Image.getInstance(buildQrPngBytes(verificationUrl(certificate)));
@@ -321,14 +330,32 @@ public class CertificateService {
         return paragraph;
     }
 
+    private Font font(PdfFontSet fonts, float size, int style, Color color) {
+        return new Font(fonts.baseFont(), size, style, color);
+    }
+
+    private PdfFontSet loadFonts() throws Exception {
+        for (String candidate : FONT_CANDIDATES) {
+            if (new File(candidate).isFile()) {
+                return new PdfFontSet(
+                        BaseFont.createFont(candidate, BaseFont.IDENTITY_H, BaseFont.EMBEDDED),
+                        true);
+            }
+        }
+        return new PdfFontSet(
+                BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED),
+                false);
+    }
+
     /** Watermark de ban PDF tai ve luon gan voi hoc sinh va ngay phat hanh. */
     private byte[] watermarkPdf(byte[] source, String studentName, String issuedDate) {
         try {
             PdfReader reader = new PdfReader(source);
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             PdfStamper stamper = new PdfStamper(reader, output);
-            Font watermarkFont = new Font(Font.HELVETICA, 18, Font.BOLD, new Color(120, 120, 120));
-            String watermark = "BEE ACADEMY | " + studentName + " | " + issuedDate;
+            PdfFontSet fonts = loadFonts();
+            Font watermarkFont = font(fonts, 18, Font.BOLD, new Color(120, 120, 120));
+            String watermark = "BEE ACADEMY | " + pdfText(studentName, fonts) + " | " + issuedDate;
             for (int page = 1; page <= reader.getNumberOfPages(); page++) {
                 Rectangle pageSize = reader.getPageSizeWithRotation(page);
                 PdfContentByte canvas = stamper.getOverContent(page);
@@ -352,6 +379,15 @@ public class CertificateService {
 
     private String safeText(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private String pdfText(String value, PdfFontSet fonts) {
+        if (value == null) return "";
+        if (fonts.unicode()) return value;
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('Đ', 'D')
+                .replace('đ', 'd');
     }
 
     private String verificationUrl(Certificate certificate) {
@@ -383,4 +419,6 @@ public class CertificateService {
                 .replaceAll("^-+|-+$", "");
         return normalized.isBlank() ? fallback : normalized;
     }
+
+    private record PdfFontSet(BaseFont baseFont, boolean unicode) {}
 }

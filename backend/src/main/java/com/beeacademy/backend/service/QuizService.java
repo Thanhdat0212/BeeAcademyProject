@@ -17,10 +17,12 @@ import com.beeacademy.backend.repository.ChapterRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.repository.QuestionRepository;
+import com.beeacademy.backend.repository.QuestionVersionRepository;
 import com.beeacademy.backend.repository.QuizAttemptRepository;
 import com.beeacademy.backend.repository.QuizConfigRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -56,10 +58,13 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class QuizService {
+    private static final List<String> QUIZ_OBJECTIVE_TYPES = List.of(
+            "multiple_choice", "true_false", "image_question", "audio_question");
 
     private final QuizConfigRepository  configRepository;
     private final QuizAttemptRepository attemptRepository;
     private final QuestionRepository    questionRepository;
+    private final QuestionVersionRepository questionVersionRepository;
     private final ChapterRepository     chapterRepository;
     private final EnrollmentRepository  enrollmentRepository;
     private final ProfileRepository     profileRepository;
@@ -93,6 +98,9 @@ public class QuizService {
         }
 
         Profile teacher = loadProfile(me.userId());
+        if ("manual".equals(mode)) {
+            validateManualQuizQuestions(chapterId, teacher.getId(), req.selectedQuestionIds());
+        }
 
         // Số câu thực tế
         int totalQ = "manual".equals(mode) && req.selectedQuestionIds() != null
@@ -169,10 +177,17 @@ public class QuizService {
         if ("manual".equals(config.getSelectionMode())
                 && config.getSelectedQuestionIds() != null
                 && !config.getSelectedQuestionIds().isEmpty()) {
-            selected = new ArrayList<>(
-                    questionRepository.findAllById(config.getSelectedQuestionIds()));
+            selected = loadManualQuizQuestions(config);
         } else {
             selected = randomPickQuestions(chapterId, config);
+        }
+        selected = selected.stream()
+                .filter(this::isPlayableQuizQuestion)
+                .collect(Collectors.toCollection(ArrayList::new));
+        if (selected.isEmpty()) {
+            throw new BusinessException("QUIZ_HAS_NO_OBJECTIVE_QUESTIONS",
+                    "Quiz chua co cau hoi trac nghiem hop le de lam bai.",
+                    HttpStatus.BAD_REQUEST);
         }
         if (config.getShuffleQuestions()) Collections.shuffle(selected);
 
@@ -199,7 +214,7 @@ public class QuizService {
         return new QuizAttemptStartResponse(
                 saved.getId(),
                 config.getTimeLimitMinutes(),
-                config.getTotalQuestions(),
+                selected.size(),
                 attemptCount + 1,
                 questions);
     }
@@ -336,8 +351,14 @@ public class QuizService {
     }
 
     private List<Question> pickFromPool(UUID categoryId, List<Integer> grades, String difficulty, int count) {
+        if (count <= 0) {
+            return List.of();
+        }
         List<Question> pool = new ArrayList<>(
                 questionRepository.findActiveByCategoryAndGradesAndDifficulty(categoryId, grades, difficulty));
+        pool = pool.stream()
+                .filter(this::isPlayableQuizQuestion)
+                .collect(Collectors.toCollection(ArrayList::new));
         Collections.shuffle(pool);
         if (pool.size() < count) {
             log.warn("Ngân hàng câu hỏi category={} grades={} difficulty={} thiếu câu: cần={} có={}",
@@ -355,6 +376,7 @@ public class QuizService {
      * Field names phải khớp khi deserialize.
      */
     private record SnapshotQuestion(
+            String questionVersionId,
             String content,
             String explanation,
             List<UUID> correctChoiceIds,
@@ -409,7 +431,7 @@ public class QuizService {
             List<QuestionChoice> choices = shuffledChoicesMap.get(q.getId());
 
             List<UUID> correctIds = normalizeAnswerIds(choices.stream()
-                    .filter(QuestionChoice::getIsCorrect)
+                    .filter(choice -> Boolean.TRUE.equals(choice.getIsCorrect()))
                     .map(QuestionChoice::getId)
                     .toList());
 
@@ -423,6 +445,7 @@ public class QuizService {
             }).collect(Collectors.toList());
 
             Map<String, Object> qMap = new HashMap<>();
+            qMap.put("questionVersionId", currentQuestionVersionId(q));
             qMap.put("content", q.getContent());
             qMap.put("explanation", q.getExplanation());
             qMap.put("correctChoiceIds", correctIds.stream().map(UUID::toString).toList());
@@ -445,8 +468,19 @@ public class QuizService {
                             c.getId(), c.getContent(), c.getPosition()))
                     .toList();
             return new QuizAttemptStartResponse.QuestionForStudent(
-                    q.getId(), q.getContent(), studentQuestionType(q), choiceDtos);
+                    q.getId(),
+                    q.getContent(),
+                    q.getType(),
+                    parseMetadata(q.getMetadataJson()),
+                    hasMultipleCorrectAnswers(q),
+                    choiceDtos);
         }).toList();
+    }
+
+    private String currentQuestionVersionId(Question question) {
+        return questionVersionRepository.findTopByQuestionIdOrderByVersionNoDesc(question.getId())
+                .map(version -> version.getId().toString())
+                .orElse(null);
     }
 
     @SuppressWarnings("unchecked")
@@ -472,6 +506,7 @@ public class QuizService {
                         ))
                         .toList();
                 result.put(qId, new SnapshotQuestion(
+                        q.get("questionVersionId") instanceof String versionId ? versionId : null,
                         (String) q.get("content"),
                         (String) q.get("explanation"),
                         correctIds, choices));
@@ -542,14 +577,64 @@ public class QuizService {
         return List.of();
     }
 
-    private String studentQuestionType(Question question) {
-        if ("essay".equals(question.getType()) || "true_false".equals(question.getType())) {
-            return question.getType();
-        }
+    private boolean hasMultipleCorrectAnswers(Question question) {
         long correctCount = question.getChoices().stream()
-                .filter(QuestionChoice::getIsCorrect)
+                .filter(choice -> Boolean.TRUE.equals(choice.getIsCorrect()))
                 .count();
-        return correctCount > 1 ? "multiple" : "single";
+        return correctCount > 1;
+    }
+
+    private JsonNode parseMetadata(String metadataJson) {
+        if (metadataJson == null || metadataJson.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(metadataJson);
+        } catch (Exception e) {
+            log.warn("Khong doc duoc metadata cau hoi quiz: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private void validateManualQuizQuestions(UUID chapterId, UUID teacherId, List<UUID> questionIds) {
+        List<Question> questions = questionRepository.findAllById(questionIds);
+        if (questions.size() != questionIds.size()) {
+            throw new BusinessException("INVALID_CONFIG",
+                    "Danh sach cau hoi chon thu cong co cau khong ton tai.");
+        }
+        boolean invalid = questions.stream().anyMatch(q ->
+                q.getTeacher() == null || !teacherId.equals(q.getTeacher().getId())
+                        || q.getChapter() == null || !chapterId.equals(q.getChapter().getId())
+                        || !"active".equals(q.getStatus())
+                        || !isPlayableQuizQuestion(q));
+        if (invalid) {
+            throw new BusinessException("INVALID_CONFIG",
+                    "Quiz chuong chi duoc chon cau trac nghiem active co dap an dung: trac nghiem, dung/sai, cau hoi anh hoac audio.");
+        }
+    }
+
+    private List<Question> loadManualQuizQuestions(QuizConfig config) {
+        List<Question> questions = questionRepository.findAllById(config.getSelectedQuestionIds());
+        Map<UUID, Question> validById = questions.stream()
+                .filter(q -> "active".equals(q.getStatus()))
+                .filter(this::isQuizObjectiveQuestion)
+                .collect(Collectors.toMap(Question::getId, q -> q));
+        return config.getSelectedQuestionIds().stream()
+                .map(validById::get)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private boolean isQuizObjectiveQuestion(Question question) {
+        return question != null && QUIZ_OBJECTIVE_TYPES.contains(question.getType());
+    }
+
+    private boolean isPlayableQuizQuestion(Question question) {
+        return isQuizObjectiveQuestion(question)
+                && question.getChoices() != null
+                && !question.getChoices().isEmpty()
+                && question.getChoices().stream()
+                        .anyMatch(choice -> Boolean.TRUE.equals(choice.getIsCorrect()));
     }
 
     // ========================================================================

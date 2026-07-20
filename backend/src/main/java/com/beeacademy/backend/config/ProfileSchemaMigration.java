@@ -32,6 +32,11 @@ public class ProfileSchemaMigration implements ApplicationRunner {
                 """);
         jdbcTemplate.execute("""
                 ALTER TABLE public.profiles
+                ADD COLUMN IF NOT EXISTS date_of_birth DATE,
+                ADD COLUMN IF NOT EXISTS parent_privacy_enabled BOOLEAN NOT NULL DEFAULT TRUE
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE public.profiles
                 DROP CONSTRAINT IF EXISTS chk_profiles_teacher_approval_status
                 """);
         jdbcTemplate.execute("""

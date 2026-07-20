@@ -5,7 +5,6 @@ import { motion } from 'motion/react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart2,
-  Bell,
   BookOpen,
   CheckCheck,
   CheckCircle2,
@@ -252,6 +251,7 @@ export default function TeacherQAPage() {
       .filter(t => {
         if (!q) return true;
         return (
+          t.title.toLowerCase().includes(q) ||
           t.studentName.toLowerCase().includes(q) ||
           t.courseTitle.toLowerCase().includes(q) ||
           (t.lessonTitle ?? '').toLowerCase().includes(q) ||
@@ -665,7 +665,7 @@ export default function TeacherQAPage() {
                           />
                           <div className="min-w-0 flex-1">
                             <p className={`font-bold text-sm line-clamp-1 ${isSelected ? 'text-primary' : 'text-on-surface'}`}>{displayName}</p>
-                            <p className="text-xs text-on-surface-variant line-clamp-1">{thread.lessonTitle ?? thread.courseTitle}</p>
+                            <p className="text-xs text-on-surface-variant line-clamp-1">{thread.title}</p>
                           </div>
                           <StatusBadge status={thread.status} />
                         </div>
@@ -693,6 +693,7 @@ export default function TeacherQAPage() {
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div className="min-w-0 flex-1">
                         <p className="font-extrabold text-on-surface">{directThreadDisplayName(selectedThread)}</p>
+                        <p className="text-sm font-semibold text-on-surface mt-1">{selectedThread.title}</p>
                         <p className="text-xs text-on-surface-variant">Bắt đầu: {formatDateTime(selectedThread.createdAt)}</p>
                       </div>
                       <StatusBadge status={selectedThread.status} />
@@ -706,6 +707,9 @@ export default function TeacherQAPage() {
                       {selectedThread.lessonTitle && (
                         <span className="text-xs text-on-surface-variant">· {selectedThread.courseTitle}</span>
                       )}
+                      <span className="text-xs text-on-surface-variant">
+                        · {selectedThread.visibility === 'private' ? 'Riêng tư' : 'Công khai'}
+                      </span>
                     </div>
                   </div>
 

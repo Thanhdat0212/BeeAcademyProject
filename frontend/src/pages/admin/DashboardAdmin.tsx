@@ -30,6 +30,8 @@ import {
   type ComplaintAttachment,
 } from '../../api/complaintService';
 import { AttachmentPicker, MessageAttachments } from '../../components/complaints/ComplaintAttachments';
+import CourseReviewModerationPanel from '../../components/admin/CourseReviewModerationPanel';
+import AdminQaPanel from '../../components/admin/AdminQaPanel';
 import {
   LayoutDashboard, BookOpen, Users, ShoppingBag,
   FileText, TrendingUp, TrendingDown, DollarSign,
@@ -230,10 +232,19 @@ export default function DashboardAdmin() {
   const setGlobalMaintenanceMode = useSystemStore(state => state.setMaintenanceMode);
   const setGlobalMaintenanceUntil = useSystemStore(state => state.setMaintenanceUntil);
 
-  // Lấy tab hoạt động từ URL query (?tab=...), mặc định là 'overview'
-  const activeTab = location.pathname === '/admin/complaints'
-    ? 'complaints'
-    : searchParams.get('tab') || 'overview';
+  // Lấy tab hoạt động từ URL path hoặc query (?tab=...), mặc định là 'overview'
+  const pathTabMap: Record<string, string> = {
+    '/admin/users': 'users',
+    '/admin/courses': 'courses',
+    '/admin/payouts': 'payouts',
+    '/admin/accounting': 'payouts',
+    '/admin/complaints': 'complaints',
+    '/admin/qa': 'qa',
+    '/admin/reviews': 'reviews',
+    '/admin/notifications': 'announcements',
+    '/admin/settings': 'settings',
+  };
+  const activeTab = pathTabMap[location.pathname] ?? searchParams.get('tab') ?? 'overview';
 
   // State quản lý dữ liệu động của toàn trang
   const [users, setUsers] = useState<UserAccount[]>(INITIAL_USERS);
@@ -682,6 +693,8 @@ export default function DashboardAdmin() {
     { icon: Calculator, label: 'Kế toán & Lương', tabId: 'payouts' },
     { icon: BarChart2, label: 'Báo cáo & Thống kê', tabId: 'reports', path: '/admin/reports' },
     { icon: FileText, label: 'Hộp thư khiếu nại', tabId: 'complaints' },
+    { icon: MessageSquare, label: 'Quản lý Q&A', tabId: 'qa' },
+    { icon: Star, label: 'Duyệt đánh giá', tabId: 'reviews' },
     { icon: Bell, label: 'Phát thông báo', tabId: 'announcements' },
     { icon: Settings, label: 'Cài đặt hệ thống', tabId: 'settings' }
   ];
@@ -817,6 +830,8 @@ export default function DashboardAdmin() {
               {activeTab === 'courses' && 'Phê duyệt khóa học'}
               {activeTab === 'payouts' && 'Đối soát & thanh toán giáo viên'}
               {activeTab === 'complaints' && 'Xử lý khiếu nại'}
+              {activeTab === 'qa' && 'Quản lý Hỏi & Đáp'}
+              {activeTab === 'reviews' && 'Kiểm duyệt đánh giá khóa học'}
               {activeTab === 'announcements' && 'Phát thông báo'}
               {activeTab === 'settings' && 'Cấu hình hệ thống'}
             </h1>
@@ -1124,6 +1139,10 @@ export default function DashboardAdmin() {
                   </div>
                 </div>
               )}
+
+              {activeTab === 'reviews' && <CourseReviewModerationPanel />}
+
+              {activeTab === 'qa' && <AdminQaPanel />}
 
               {/* ─────────────────────────────────────────────────────────────
                   TAB 2: USERS (QUẢN LÝ TÀI KHOẢN NGƯỜI DÙNG - UC35)

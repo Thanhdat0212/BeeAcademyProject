@@ -17,6 +17,8 @@ public record StudentParentLinkInvitationResponse(
         Instant respondedAt,
         UUID unlinkRequestedById,
         String unlinkRequestedByRole,
-        Instant unlinkRequestedAt
+        Instant unlinkRequestedAt,
+        boolean sensitiveDataConsentGranted,
+        Instant sensitiveDataConsentUpdatedAt
 ) {
 }

@@ -32,11 +32,14 @@ public class ParentLinkSchemaMigration implements ApplicationRunner {
         jdbcTemplate.execute("""
                 DO $$
                 BEGIN
-                    CREATE TYPE public.parent_link_status AS ENUM ('pending', 'active', 'revoked');
+                    CREATE TYPE public.parent_link_status AS ENUM ('pending', 'active', 'rejected', 'expired', 'revoked');
                 EXCEPTION
                     WHEN duplicate_object THEN NULL;
                 END $$;
                 """);
+        jdbcTemplate.execute("ALTER TYPE public.parent_link_status ADD VALUE IF NOT EXISTS 'rejected'");
+        jdbcTemplate.execute("ALTER TYPE public.parent_link_status ADD VALUE IF NOT EXISTS 'expired'");
+        jdbcTemplate.execute("ALTER TYPE public.parent_link_status ADD VALUE IF NOT EXISTS 'revoked'");
         jdbcTemplate.execute("""
                 ALTER TABLE public.parent_student_links
                     ADD COLUMN IF NOT EXISTS status public.parent_link_status,
@@ -45,7 +48,9 @@ public class ParentLinkSchemaMigration implements ApplicationRunner {
                     ADD COLUMN IF NOT EXISTS relationship VARCHAR(30) NOT NULL DEFAULT 'guardian',
                     ADD COLUMN IF NOT EXISTS note VARCHAR(500) NULL,
                     ADD COLUMN IF NOT EXISTS unlink_requested_by UUID NULL,
-                    ADD COLUMN IF NOT EXISTS unlink_requested_at TIMESTAMPTZ NULL
+                    ADD COLUMN IF NOT EXISTS unlink_requested_at TIMESTAMPTZ NULL,
+                    ADD COLUMN IF NOT EXISTS sensitive_data_consent_granted BOOLEAN NOT NULL DEFAULT FALSE,
+                    ADD COLUMN IF NOT EXISTS sensitive_data_consent_updated_at TIMESTAMPTZ NULL
                 """);
         jdbcTemplate.execute("""
                 ALTER TABLE public.parent_student_links
@@ -69,7 +74,8 @@ public class ParentLinkSchemaMigration implements ApplicationRunner {
                                 WHEN 'pending' THEN 'pending'::public.parent_link_status
                                 WHEN 'accepted' THEN 'active'::public.parent_link_status
                                 WHEN 'active' THEN 'active'::public.parent_link_status
-                                WHEN 'rejected' THEN 'revoked'::public.parent_link_status
+                                WHEN 'rejected' THEN 'rejected'::public.parent_link_status
+                                WHEN 'expired' THEN 'expired'::public.parent_link_status
                                 WHEN 'revoked' THEN 'revoked'::public.parent_link_status
                                 ELSE 'active'::public.parent_link_status
                             END;
@@ -103,7 +109,7 @@ public class ParentLinkSchemaMigration implements ApplicationRunner {
                 CREATE TABLE IF NOT EXISTS public.parent_link_audit_log (
                     id UUID PRIMARY KEY,
                     parent_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-                    student_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+                    student_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
                     actor_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
                     actor_role VARCHAR(30) NOT NULL,
                     action VARCHAR(80) NOT NULL,
@@ -119,6 +125,40 @@ public class ParentLinkSchemaMigration implements ApplicationRunner {
         jdbcTemplate.execute("""
                 CREATE INDEX IF NOT EXISTS idx_parent_link_audit_log_actor
                 ON public.parent_link_audit_log (actor_id, created_at DESC)
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE public.parent_link_audit_log
+                    ADD COLUMN IF NOT EXISTS operation_id UUID,
+                    ADD COLUMN IF NOT EXISTS reason VARCHAR(500)
+                """);
+        jdbcTemplate.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_parent_link_audit_log_operation
+                ON public.parent_link_audit_log (operation_id)
+                WHERE operation_id IS NOT NULL
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS public.parent_progress_access_audit (
+                    id UUID PRIMARY KEY,
+                    parent_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+                    student_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+                    action VARCHAR(80) NOT NULL,
+                    sensitive_data_requested BOOLEAN NOT NULL,
+                    sensitive_data_allowed BOOLEAN NOT NULL,
+                    reason VARCHAR(255),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE public.parent_link_audit_log
+                    ALTER COLUMN student_id DROP NOT NULL
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_parent_progress_access_audit_parent_student
+                ON public.parent_progress_access_audit (parent_id, student_id, created_at DESC)
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_parent_progress_access_audit_created
+                ON public.parent_progress_access_audit (created_at DESC)
                 """);
     }
 }

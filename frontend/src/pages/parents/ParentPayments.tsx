@@ -133,6 +133,13 @@ function printInvoice(history: ParentPaymentHistoryResponse, transaction: Parent
   if (!printWindow) return false;
 
   const status = STATUS_CONFIG[transaction.status].label;
+  const invoice = transaction.invoiceInfo;
+  const sellerName = invoice?.sellerName || 'Bee Academy';
+  const sellerTaxCode = invoice?.sellerTaxCode || 'N/A';
+  const buyerName = invoice?.buyerName || payerLabel(transaction);
+  const legalDescription = invoice?.legalDescription || `Hoc phi khoa hoc ${transaction.courseTitle}`;
+  const currency = invoice?.currency || 'VND';
+  const invoiceIssuedAt = invoice?.issuedAt || transaction.paidAt || transaction.createdAt;
   const html = `<!doctype html>
   <html lang="vi">
     <head>
@@ -279,11 +286,21 @@ function printInvoice(history: ParentPaymentHistoryResponse, transaction: Parent
           </div>
           <div class="invoice-code">
             <strong>${escapeHtml(transaction.invoiceCode)}</strong><br />
-            Tao luc: ${escapeHtml(formatDateTime(new Date().toISOString()))}
+            Ngay lap: ${escapeHtml(formatDateTime(invoiceIssuedAt))}
           </div>
         </section>
 
         <section class="grid">
+          <div class="box">
+            <span>Don vi ban</span>
+            <strong>${escapeHtml(sellerName)}</strong>
+            <p class="muted">MST: ${escapeHtml(sellerTaxCode)}</p>
+          </div>
+          <div class="box">
+            <span>Nguoi mua</span>
+            <strong>${escapeHtml(buyerName)}</strong>
+            <p class="muted">${escapeHtml(payerLabel(transaction))}</p>
+          </div>
           <div class="box">
             <span>Hoc sinh</span>
             <strong>${escapeHtml(history.studentName)}</strong>
@@ -301,6 +318,11 @@ function printInvoice(history: ParentPaymentHistoryResponse, transaction: Parent
           <div class="box">
             <span>Trang thai</span>
             <strong>${escapeHtml(status)}</strong>
+          </div>
+          <div class="box">
+            <span>Noi dung hoa don</span>
+            <strong>${escapeHtml(legalDescription)}</strong>
+            <p class="muted">Tien te: ${escapeHtml(currency)}</p>
           </div>
         </section>
 
@@ -334,7 +356,7 @@ function printInvoice(history: ParentPaymentHistoryResponse, transaction: Parent
         </div>
 
         <p class="footer">
-          Chung tu nay duoc tao tu Bee Academy cho muc dich doi soat hoc phi va lich su giao dich cua phu huynh.
+          Chung tu nay duoc tao tu Bee Academy voi thong tin hoa don tra ve tu he thong thanh toan va lich su giao dich cua phu huynh.
           Vui long doi chieu voi ma don PayOS ${escapeHtml(transaction.orderCode)} khi can ho tro.
         </p>
       </main>

@@ -1,13 +1,16 @@
 package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.request.ApprovalActionRequest;
+import com.beeacademy.backend.dto.request.CourseVersionMigrationRequest;
 import com.beeacademy.backend.dto.response.AdminDocumentUrlResponse;
 import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.ApprovalHistoryResponse;
+import com.beeacademy.backend.dto.response.CourseVersionMigrationResponse;
 import com.beeacademy.backend.dto.response.PageResponse;
 import com.beeacademy.backend.dto.response.PendingCourseResponse;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.ApprovalService;
+import com.beeacademy.backend.service.CourseVersionMigrationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -35,6 +38,7 @@ import java.util.UUID;
 public class AdminApprovalController {
 
     private final ApprovalService approvalService;
+    private final CourseVersionMigrationService courseVersionMigrationService;
 
     /** Danh sách khóa học đang chờ duyệt, cũ nhất lên đầu (FIFO). */
     @GetMapping("/courses/pending")
@@ -70,6 +74,16 @@ public class AdminApprovalController {
     }
 
     /** Admin từ chối (bắt buộc có comment). */
+    @PostMapping("/courses/{courseId}/versions/migrate-enrollments")
+    public ApiResponse<CourseVersionMigrationResponse> migrateEnrollments(
+            @PathVariable UUID courseId,
+            @Valid @RequestBody CourseVersionMigrationRequest request) {
+        return ApiResponse.ok(
+                courseVersionMigrationService.migrate(
+                        courseId, request, CurrentUser.required()),
+                "Đã chuyển phiên bản cho học sinh và gửi thông báo liên quan");
+    }
+
     @PostMapping("/courses/{courseId}/reject")
     public ApiResponse<Void> reject(
             @PathVariable UUID courseId,

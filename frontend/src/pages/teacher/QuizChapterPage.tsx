@@ -9,7 +9,7 @@ import TeacherNotificationBell from '../../components/TeacherNotificationBell';
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
@@ -21,10 +21,10 @@ import * as questionService from '../../api/questionService';
 import type { QuestionResponse } from '../../api/questionService';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
-  Bell, LogOut, Menu, X, Save, Loader2,
+  LogOut, Menu, X, Save, Loader2,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Megaphone, Database, CheckCircle2,
-  ChevronDown, Shuffle, Timer, AlertTriangle,
+  ChevronDown, Shuffle, AlertTriangle,
   Circle, ListChecks, Zap, TrendingUp, Minus, UserCircle, Lock, Star,
 } from 'lucide-react';
 
@@ -105,6 +105,36 @@ function correctChoiceCount(
   choices: Array<{ isCorrect: boolean | null | undefined }>,
 ) {
   return choices.filter(choice => Boolean(choice.isCorrect)).length;
+}
+
+const QUIZ_OBJECTIVE_TYPES = new Set([
+  'multiple_choice',
+  'true_false',
+  'image_question',
+  'audio_question',
+]);
+
+function isQuizObjectiveQuestion(question: QuestionResponse) {
+  return QUIZ_OBJECTIVE_TYPES.has(question.type);
+}
+
+function isPlayableQuizQuestion(question: QuestionResponse) {
+  return question.status === 'active'
+    && isQuizObjectiveQuestion(question)
+    && question.choices.length > 0
+    && correctChoiceCount(question.choices) > 0;
+}
+
+function quizQuestionTypeLabel(question: QuestionResponse) {
+  if (question.type === 'multiple_choice') {
+    return correctChoiceCount(question.choices) > 1
+      ? 'Trac nghiem nhieu dap an'
+      : 'Trac nghiem 1 dap an';
+  }
+  if (question.type === 'true_false') return 'Dung/Sai';
+  if (question.type === 'image_question') return 'Cau hoi anh';
+  if (question.type === 'audio_question') return 'Cau hoi audio';
+  return question.type;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -214,7 +244,10 @@ export default function QuizChapterPage() {
     setLoadingBank(true);
     try {
       const page = await questionService.listQuestions({ chapterId: ch.id, size: 200 });
-      setBankQuestions(page.items);
+      const playableQuestions = page.items.filter(isPlayableQuizQuestion);
+      const playableIds = new Set(playableQuestions.map(question => question.id));
+      setBankQuestions(playableQuestions);
+      setSelectedIds(prev => new Set(Array.from(prev).filter(id => playableIds.has(id))));
     } catch {
       notify.error('Không tải được ngân hàng câu hỏi');
     } finally {
@@ -226,18 +259,33 @@ export default function QuizChapterPage() {
   async function handleSave() {
     if (!selectedChapter) return;
 
+    const selectedQuestionIds = Array.from(selectedIds).filter(id =>
+      bankQuestions.some(question => question.id === id));
+    const manualCounts = selectedQuestionIds.reduce(
+      (acc, id) => {
+        const question = bankQuestions.find(item => item.id === id);
+        if (question) acc[question.difficulty] += 1;
+        return acc;
+      },
+      { easy: 0, medium: 0, hard: 0 },
+    );
+    const totalQuestions = mode === 'manual' ? selectedQuestionIds.length : randomForm.totalQuestions;
+    const easyCount = mode === 'manual' ? manualCounts.easy : randomForm.easyCount;
+    const mediumCount = mode === 'manual' ? manualCounts.medium : randomForm.mediumCount;
+    const hardCount = mode === 'manual' ? manualCounts.hard : randomForm.hardCount;
+
     const req: quizService.QuizConfigRequest = {
-      totalQuestions:   randomForm.totalQuestions,
-      easyCount:        randomForm.easyCount,
-      mediumCount:      randomForm.mediumCount,
-      hardCount:        randomForm.hardCount,
+      totalQuestions,
+      easyCount,
+      mediumCount,
+      hardCount,
       timeLimitMinutes: randomForm.timeLimitMinutes ? Number(randomForm.timeLimitMinutes) : undefined,
       passingScore:     randomForm.passingScore,
       shuffleQuestions: randomForm.shuffleQuestions,
       shuffleChoices:   randomForm.shuffleChoices,
       maxAttempts:      randomForm.maxAttempts ? Number(randomForm.maxAttempts) : undefined,
       selectionMode:    mode,
-      selectedQuestionIds: mode === 'manual' ? Array.from(selectedIds) : undefined,
+      selectedQuestionIds: mode === 'manual' ? selectedQuestionIds : undefined,
     };
 
     if (mode === 'random') {
@@ -247,7 +295,7 @@ export default function QuizChapterPage() {
         return;
       }
     } else {
-      if (selectedIds.size === 0) {
+      if (selectedQuestionIds.length === 0) {
         notify.error('Chọn ít nhất 1 câu hỏi');
         return;
       }
@@ -262,8 +310,8 @@ export default function QuizChapterPage() {
         ch.id === selectedChapter.id ? { ...ch, quizConfig: saved } : ch
       ));
       setSelectedChapter(prev => prev ? { ...prev, quizConfig: saved } : prev);
-    } catch {
-      notify.error('Không lưu được cấu hình quiz');
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Không lưu được cấu hình quiz');
     } finally {
       setSaving(false);
     }
@@ -643,9 +691,7 @@ export default function QuizChapterPage() {
                                       <div className="flex items-center gap-2 mt-1">
                                         <DiffBadge d={q.difficulty} />
                                         <span className="text-xs text-on-surface-variant">
-                                          {q.type === 'multiple_choice'
-                                            ? (correctChoiceCount(q.choices) > 1 ? 'Trắc nghiệm nhiều đáp án' : 'Trắc nghiệm 1 đáp án')
-                                            : 'Đúng/Sai'}
+                                          {quizQuestionTypeLabel(q)}
                                         </span>
                                         {q.usageCount > 0 && (
                                           <span className="text-xs text-on-surface-variant">· dùng {q.usageCount} lần</span>

@@ -7,19 +7,18 @@ echo.
 
 cd /d "%~dp0"
 
-set "JAVA_EXE=java"
-if not "%JAVA_HOME%"=="" set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
-
-set "WRAPPER_JAR=%~dp0.mvn\wrapper\maven-wrapper.jar"
-
 echo Starting backend on http://localhost:8080 ...
 echo Press Ctrl+C to stop.
 echo.
 
-"%JAVA_EXE%" ^
-  -classpath "%WRAPPER_JAR%" ^
-  "-Dmaven.multiModuleProjectDirectory=%~dp0" ^
-  org.apache.maven.wrapper.MavenWrapperMain ^
-  spring-boot:run
+where mvn.cmd >nul 2>&1
+if errorlevel 1 (
+  echo ERROR: Maven was not found in PATH.
+  echo Install Maven or add its bin directory to PATH, then try again.
+  pause
+  exit /b 1
+)
+
+call mvn.cmd spring-boot:run
 
 pause

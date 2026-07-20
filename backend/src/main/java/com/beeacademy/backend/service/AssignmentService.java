@@ -3,6 +3,7 @@ package com.beeacademy.backend.service;
 import com.beeacademy.backend.dto.request.CreateAssignmentRequest;
 import com.beeacademy.backend.dto.request.GradeAssignmentSubmissionRequest;
 import com.beeacademy.backend.dto.request.SubmitAssignmentRequest;
+import com.beeacademy.backend.dto.request.UpdateAssignmentPolicyRequest;
 import com.beeacademy.backend.dto.response.AssignmentSubmissionResponse;
 import com.beeacademy.backend.dto.response.StudentAssignmentResponse;
 import com.beeacademy.backend.dto.response.TeacherAssignmentResponse;
@@ -19,6 +20,7 @@ import com.beeacademy.backend.repository.AssignmentRepository;
 import com.beeacademy.backend.repository.AssignmentSubmissionRepository;
 import com.beeacademy.backend.repository.ChapterRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
+import com.beeacademy.backend.repository.GradeAuditLogRepository;
 import com.beeacademy.backend.repository.LessonRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
@@ -31,6 +33,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -41,16 +44,32 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AssignmentService {
 
+    private static final int DEFAULT_MAX_ATTEMPTS = 3;
+    private static final long MAX_SUBMISSION_FILE_BYTES = 25L * 1024 * 1024;
+    private static final int DEFAULT_ASSIGNMENT_PASS_PERCENT = 50;
+    private static final java.util.Set<String> ALLOWED_SUBMISSION_TYPES = java.util.Set.of(
+            "pdf", "doc", "docx", "ppt", "pptx", "jpg", "jpeg", "png", "webp",
+            "application/pdf", "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "image/jpeg", "image/png", "image/webp");
+
     private final AssignmentRepository assignmentRepository;
     private final AssignmentSubmissionRepository submissionRepository;
     private final ChapterRepository chapterRepository;
     private final LessonRepository lessonRepository;
     private final EnrollmentRepository enrollmentRepository;
     private final ProfileRepository profileRepository;
+    private final GradeAuditLogRepository gradeAuditLogRepository;
+    private final UserNotificationService userNotificationService;
+    private final TeacherAccessService teacherAccessService;
+    private final CourseProgressService courseProgressService;
     private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
     public List<AssignmentSubmissionResponse> listTeacherSubmissions(AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
         return submissionRepository.findAllForTeacher(me.userId()).stream()
                 .map(this::toResponse)
                 .toList();
@@ -63,6 +82,7 @@ public class AssignmentService {
     @Transactional
     public TeacherAssignmentResponse createAssignment(
             AuthenticatedUser me, CreateAssignmentRequest request) {
+        teacherAccessService.requireApprovedTeacher(me);
         if (request.chapterId() == null && request.lessonId() == null) {
             throw new BusinessException("ASSIGNMENT_TARGET_REQUIRED",
                     "Bài tập phải gắn với một chương hoặc một bài giảng.");
@@ -86,12 +106,36 @@ public class AssignmentService {
 
         Assignment assignment = Assignment.create(
                 chapter, lesson, request.title(), request.description(),
-                request.maxScore(), request.dueAt());
+                request.maxScore(), request.dueAt(),
+                request.maxAttempts() != null ? request.maxAttempts() : DEFAULT_MAX_ATTEMPTS,
+                Boolean.TRUE.equals(request.allowLateSubmission()),
+                request.latePenaltyPercent() != null ? request.latePenaltyPercent() : 0,
+                request.acceptingSubmissions() == null || request.acceptingSubmissions());
+        return toTeacherResponse(assignmentRepository.save(assignment));
+    }
+
+    @Transactional
+    public TeacherAssignmentResponse updateSubmissionPolicy(
+            UUID assignmentId,
+            AuthenticatedUser me,
+            UpdateAssignmentPolicyRequest request) {
+        teacherAccessService.requireApprovedTeacher(me);
+        Assignment assignment = assignmentRepository.findWithCourseById(assignmentId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Assignment", assignmentId));
+        verifyCourseOwner(assignment.getCourse(), me.userId());
+        assignment.updateSubmissionPolicy(
+                request.dueAt(),
+                request.maxAttempts(),
+                request.allowLateSubmission(),
+                request.latePenaltyPercent(),
+                request.acceptingSubmissions());
         return toTeacherResponse(assignmentRepository.save(assignment));
     }
 
     @Transactional(readOnly = true)
     public List<TeacherAssignmentResponse> listTeacherAssignments(AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
         return assignmentRepository.findAllByTeacherId(me.userId()).stream()
                 .map(this::toTeacherResponse)
                 .toList();
@@ -99,6 +143,7 @@ public class AssignmentService {
 
     @Transactional
     public void deleteAssignment(UUID assignmentId, AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
         Assignment assignment = assignmentRepository.findWithCourseById(assignmentId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Assignment", assignmentId));
@@ -153,25 +198,38 @@ public class AssignmentService {
         }
         requireEnrollment(me.userId(), course.getId());
 
-        String filesJson = writeFiles(request.files());
-        AssignmentSubmission submission = submissionRepository
+        Instant submittedAt = Instant.now();
+        AssignmentSubmission existing = submissionRepository
                 .findByAssignmentIdAndStudentId(assignmentId, me.userId())
-                .map(existing -> {
-                    if ("graded".equals(existing.getStatus())) {
-                        throw new BusinessException("ALREADY_GRADED",
-                                "Bài đã được chấm điểm, không thể nộp lại.");
-                    }
-                    existing.resubmit(request.content(), filesJson);
-                    return existing;
-                })
-                .orElseGet(() -> {
-                    Profile student = profileRepository.findById(me.userId())
-                            .orElseThrow(() -> new ResourceNotFoundException(
-                                    "Profile", me.userId()));
-                    return AssignmentSubmission.submit(
-                            assignment, student, request.content(), filesJson);
-                });
-        return toStudentResponse(assignment, submissionRepository.save(submission));
+                .orElse(null);
+        validateCanSubmit(assignment, existing, submittedAt);
+        boolean late = isPastDeadline(assignment, submittedAt);
+        int latePenaltyPercent = late ? assignment.effectiveLatePenaltyPercent() : 0;
+        String filesJson = writeFiles(request.files());
+        AssignmentSubmission submission;
+        if (existing != null) {
+            existing.resubmit(request.content(), filesJson, late, latePenaltyPercent);
+            submission = existing;
+        } else {
+            Profile student = profileRepository.findById(me.userId())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Profile", me.userId()));
+            submission = AssignmentSubmission.submit(
+                    assignment, student, request.content(), filesJson,
+                    late, latePenaltyPercent);
+        }
+        AssignmentSubmission saved = submissionRepository.save(submission);
+        completeAssignmentRuleIfSatisfied(saved, "ASSIGNMENT_SUBMITTED");
+        if (course.getTeacher() != null) {
+            userNotificationService.notify(
+                    course.getTeacher().getId(),
+                    "assignment_submitted",
+                    "Có bài tập mới được nộp",
+                    (saved.getStudent().getFullName() == null ? "Học sinh" : saved.getStudent().getFullName())
+                            + " đã nộp bài \"" + assignment.getTitle() + "\".",
+                    "/teacher/grades");
+        }
+        return toStudentResponse(assignment, saved);
     }
 
     @Transactional(readOnly = true)
@@ -185,6 +243,47 @@ public class AssignmentService {
                     "Bài tập chưa được liên kết với khóa học.");
         }
         requireEnrollment(studentId, course.getId());
+        AssignmentSubmission existing = submissionRepository
+                .findByAssignmentIdAndStudentId(assignmentId, studentId)
+                .orElse(null);
+        validateCanSubmit(assignment, existing, Instant.now());
+    }
+
+    private void validateCanSubmit(
+            Assignment assignment,
+            AssignmentSubmission existing,
+            Instant submittedAt) {
+        if (!assignment.isAcceptingSubmissions()) {
+            throw new BusinessException(
+                    "ASSIGNMENT_CLOSED",
+                    "Bài tập đã đóng và không nhận thêm bài nộp.",
+                    HttpStatus.CONFLICT);
+        }
+        if (existing != null && "graded".equals(existing.getStatus())) {
+            throw new BusinessException(
+                    "ALREADY_GRADED",
+                    "Bài đã được chấm điểm, không thể nộp lại.",
+                    HttpStatus.CONFLICT);
+        }
+        if (existing != null
+                && existing.effectiveAttemptNumber() >= assignment.effectiveMaxAttempts()) {
+            throw new BusinessException(
+                    "ASSIGNMENT_ATTEMPT_LIMIT_REACHED",
+                    "Bạn đã sử dụng hết " + assignment.effectiveMaxAttempts()
+                            + " lần nộp của bài tập này.",
+                    HttpStatus.CONFLICT);
+        }
+        if (isPastDeadline(assignment, submittedAt)
+                && !assignment.permitsLateSubmission()) {
+            throw new BusinessException(
+                    "ASSIGNMENT_OVERDUE",
+                    "Bài tập đã quá hạn và giáo viên không cho phép nộp muộn.",
+                    HttpStatus.CONFLICT);
+        }
+    }
+
+    private boolean isPastDeadline(Assignment assignment, Instant at) {
+        return assignment.getDueAt() != null && at.isAfter(assignment.getDueAt());
     }
 
     private void requireEnrollment(UUID studentId, UUID courseId) {
@@ -207,6 +306,24 @@ public class AssignmentService {
         List<SubmitAssignmentRequest.SubmissionFile> valid = files.stream()
                 .filter(file -> file.url() != null && !file.url().isBlank())
                 .toList();
+        if (valid.size() != files.size()) {
+            throw new BusinessException("INVALID_FILES", "Mỗi file đính kèm phải có đường dẫn hợp lệ.");
+        }
+        for (SubmitAssignmentRequest.SubmissionFile file : valid) {
+            if (file.sizeBytes() == null || file.sizeBytes() < 0
+                    || file.sizeBytes() > MAX_SUBMISSION_FILE_BYTES) {
+                throw new BusinessException("FILE_TOO_LARGE", "Mỗi file bài tập tối đa 25MB.");
+            }
+            String type = file.type() == null ? "" : file.type().trim().toLowerCase(java.util.Locale.ROOT);
+            String name = file.name() == null ? "" : file.name().trim().toLowerCase(java.util.Locale.ROOT);
+            String extension = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1) : type;
+            if (!ALLOWED_SUBMISSION_TYPES.contains(type)
+                    && !ALLOWED_SUBMISSION_TYPES.contains(extension)) {
+                throw new BusinessException(
+                        "UNSUPPORTED_FILE_TYPE",
+                        "Chỉ hỗ trợ PDF, DOC/DOCX, PPT/PPTX và ảnh JPEG/PNG/WEBP.");
+            }
+        }
         try {
             return objectMapper.writeValueAsString(valid);
         } catch (JsonProcessingException ex) {
@@ -226,6 +343,10 @@ public class AssignmentService {
                 assignment.getDescription(),
                 assignment.getMaxScore(),
                 assignment.getDueAt(),
+                assignment.effectiveMaxAttempts(),
+                assignment.permitsLateSubmission(),
+                assignment.effectiveLatePenaltyPercent(),
+                assignment.isAcceptingSubmissions(),
                 course != null ? course.getId() : null,
                 course != null ? course.getTitle() : null,
                 chapter != null ? chapter.getId() : null,
@@ -242,7 +363,6 @@ public class AssignmentService {
                 : assignment.getLesson() != null ? assignment.getLesson().getChapter() : null;
         StudentAssignmentResponse.MySubmission mySubmission = null;
         if (submission != null) {
-            Instant dueAt = assignment.getDueAt();
             String status = switch (submission.getStatus()) {
                 case "graded" -> "graded";
                 case "returned" -> "resubmit";
@@ -256,15 +376,28 @@ public class AssignmentService {
                     submission.getScore(),
                     submission.getFeedback(),
                     submission.getSubmittedAt(),
+                    submission.getExpectedGradedBy(),
                     submission.getGradedAt(),
-                    dueAt != null && submission.getSubmittedAt().isAfter(dueAt));
+                    submission.isLate(),
+                    submission.effectiveAttemptNumber(),
+                    submission.effectiveLatePenaltyPercent(),
+                    submission.getRawScore());
         }
+        SubmissionAvailability availability = submissionAvailability(
+                assignment, submission, Instant.now());
         return new StudentAssignmentResponse(
                 assignment.getId(),
                 assignment.getTitle(),
                 assignment.getDescription(),
                 assignment.getMaxScore(),
                 assignment.getDueAt(),
+                assignment.effectiveMaxAttempts(),
+                assignment.permitsLateSubmission(),
+                assignment.effectiveLatePenaltyPercent(),
+                assignment.isAcceptingSubmissions(),
+                availability.status(),
+                availability.canSubmit(),
+                availability.remainingAttempts(),
                 chapter != null ? chapter.getId() : null,
                 chapter != null ? chapter.getTitle() : null,
                 assignment.getLesson() != null ? assignment.getLesson().getId() : null,
@@ -272,11 +405,36 @@ public class AssignmentService {
                 mySubmission);
     }
 
+    private SubmissionAvailability submissionAvailability(
+            Assignment assignment,
+            AssignmentSubmission submission,
+            Instant at) {
+        int attemptsUsed = submission != null ? submission.effectiveAttemptNumber() : 0;
+        int remainingAttempts = Math.max(
+                0, assignment.effectiveMaxAttempts() - attemptsUsed);
+        if (!assignment.isAcceptingSubmissions()) {
+            return new SubmissionAvailability("closed", false, remainingAttempts);
+        }
+        if (submission != null && "graded".equals(submission.getStatus())) {
+            return new SubmissionAvailability("graded", false, remainingAttempts);
+        }
+        if (remainingAttempts == 0) {
+            return new SubmissionAvailability("attempts_exhausted", false, 0);
+        }
+        if (isPastDeadline(assignment, at)) {
+            return assignment.permitsLateSubmission()
+                    ? new SubmissionAvailability("late_allowed", true, remainingAttempts)
+                    : new SubmissionAvailability("overdue", false, remainingAttempts);
+        }
+        return new SubmissionAvailability("open", true, remainingAttempts);
+    }
+
     @Transactional
     public AssignmentSubmissionResponse gradeSubmission(
             UUID submissionId,
             AuthenticatedUser me,
             GradeAssignmentSubmissionRequest request) {
+        teacherAccessService.requireApprovedTeacher(me);
         AssignmentSubmission submission = submissionRepository
                 .findOwned(submissionId, me.userId())
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -288,8 +446,59 @@ public class AssignmentService {
         }
         Profile teacher = profileRepository.findById(me.userId())
                 .orElseThrow(() -> new ResourceNotFoundException("Profile", me.userId()));
-        submission.grade(request.score().intValue(), request.feedback(), teacher);
-        return toResponse(submissionRepository.save(submission));
+        Double oldScore = submission.getScore() != null ? submission.getScore().doubleValue() : null;
+        validateGradeRevision(submission.getGradedAt(), request.revisionReason());
+        int rawScore = request.score().intValue();
+        int appliedLatePenaltyPercent = submission.isLate()
+                ? submission.effectiveLatePenaltyPercent()
+                : 0;
+        int finalScore = (int) Math.floor(
+                rawScore * (100 - appliedLatePenaltyPercent) / 100.0);
+        submission.grade(
+                rawScore,
+                finalScore,
+                appliedLatePenaltyPercent,
+                request.feedback(),
+                teacher);
+        AssignmentSubmission saved = submissionRepository.save(submission);
+        gradeAuditLogRepository.save(com.beeacademy.backend.model.GradeAuditLog.create(
+                "assignment_submission",
+                saved.getId(),
+                saved.getStudent().getId(),
+                me.userId(),
+                oldScore,
+                saved.getScore() != null ? saved.getScore().doubleValue() : null,
+                request.revisionReason()));
+        userNotificationService.notify(
+                saved.getStudent().getId(),
+                "assignment_graded",
+                "Bai tap da duoc cham diem",
+                "Bai tap \"" + saved.getAssignment().getTitle() + "\" da co diem.",
+                "/student/courses");
+        if (saved.getScore() != null
+                && saved.getAssignment().getMaxScore() != null
+                && saved.getAssignment().getMaxScore() > 0
+                && saved.getScore() * 100
+                >= saved.getAssignment().getMaxScore() * DEFAULT_ASSIGNMENT_PASS_PERCENT) {
+            completeAssignmentRuleIfSatisfied(saved, "ASSIGNMENT_PASSED");
+        }
+        return toResponse(saved);
+    }
+
+    private void validateGradeRevision(Instant gradedAt, String reason) {
+        if (gradedAt == null) {
+            return;
+        }
+        if (gradedAt.isBefore(Instant.now().minus(24, ChronoUnit.HOURS))) {
+            throw new BusinessException("GRADE_REVISION_WINDOW_EXPIRED",
+                    "Chi duoc sua diem trong vong 24 gio sau khi cham.",
+                    HttpStatus.CONFLICT);
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new BusinessException("GRADE_REVISION_REASON_REQUIRED",
+                    "Can nhap ly do khi sua diem bai tap.",
+                    HttpStatus.BAD_REQUEST);
+        }
     }
 
     private AssignmentSubmissionResponse toResponse(AssignmentSubmission submission) {
@@ -316,15 +525,20 @@ public class AssignmentService {
                 submission.getStudent().getFullName(),
                 submission.getContent(),
                 readFiles(submission.getFileUrlsJson()),
-                1,
+                submission.effectiveAttemptNumber(),
                 status,
                 submission.getScore() != null ? submission.getScore().doubleValue() : null,
                 assignment.getMaxScore().doubleValue(),
                 submission.getFeedback(),
                 submission.getSubmittedAt(),
+                submission.getExpectedGradedBy(),
                 submission.getGradedAt(),
                 dueAt,
-                dueAt != null && submission.getSubmittedAt().isAfter(dueAt));
+                submission.isLate(),
+                submission.effectiveLatePenaltyPercent(),
+                submission.getRawScore() != null
+                        ? submission.getRawScore().doubleValue()
+                        : null);
     }
 
     private List<AssignmentSubmissionResponse.SubmissionFile> readFiles(String json) {
@@ -336,6 +550,11 @@ public class AssignmentService {
                     .map(file -> new AssignmentSubmissionResponse.SubmissionFile(
                             stringValue(file, "name", "fileName"),
                             stringValue(file, "url", "fileUrl"),
+                            previewUrl(stringValue(file, "url", "fileUrl"),
+                                    stringValue(file, "type", "fileType"),
+                                    stringValue(file, "name", "fileName")),
+                            previewSupported(stringValue(file, "type", "fileType"),
+                                    stringValue(file, "name", "fileName")),
                             stringValue(file, "type", "fileType"),
                             longValue(file, "sizeBytes", "size")))
                     .filter(file -> file.url() != null)
@@ -366,5 +585,33 @@ public class AssignmentService {
             }
         }
         return null;
+    }
+
+    private void completeAssignmentRuleIfSatisfied(
+            AssignmentSubmission submission, String satisfiedRule) {
+        Assignment assignment = submission.getAssignment();
+        Lesson lesson = assignment.getLesson();
+        Course course = assignment.getCourse();
+        if (lesson == null || course == null) return;
+        courseProgressService.completeAssignmentLesson(
+                course.getId(), submission.getStudent().getId(), lesson.getId(), satisfiedRule);
+    }
+
+    private boolean previewSupported(String type, String name) {
+        String normalized = ((type == null ? "" : type) + " " + (name == null ? "" : name))
+                .toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("pdf") || normalized.contains("image")
+                || normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")
+                || normalized.endsWith(".png") || normalized.endsWith(".webp");
+    }
+
+    private String previewUrl(String url, String type, String name) {
+        return previewSupported(type, name) ? url : null;
+    }
+
+    private record SubmissionAvailability(
+            String status,
+            boolean canSubmit,
+            int remainingAttempts) {
     }
 }

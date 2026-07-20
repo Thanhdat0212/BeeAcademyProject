@@ -14,7 +14,18 @@ import java.util.UUID;
 @Repository
 public interface ExamConfigRepository extends JpaRepository<ExamConfig, UUID> {
 
-    List<ExamConfig> findByCourseIdOrderBySlotIndexAsc(UUID courseId);
+    List<ExamConfig> findByCourseIdAndDraftTrueOrderBySlotIndexAsc(UUID courseId);
+
+    Optional<ExamConfig> findByCourseIdAndDraftTrueAndSlotIndex(UUID courseId, Integer slotIndex);
+
+    List<ExamConfig> findByCourseIdAndCourseVersionIdAndDraftFalseOrderBySlotIndexAsc(
+            UUID courseId, UUID courseVersionId);
+
+    Optional<ExamConfig> findByCourseIdAndCourseVersionIdAndDraftFalseAndSlotIndex(
+            UUID courseId, UUID courseVersionId, Integer slotIndex);
+
+    List<ExamConfig> findByCourseIdAndCourseVersionIdIsNullAndDraftFalseOrderBySlotIndexAsc(
+            UUID courseId);
 
     @Query("""
            SELECT e
@@ -22,35 +33,10 @@ public interface ExamConfigRepository extends JpaRepository<ExamConfig, UUID> {
            LEFT JOIN FETCH e.scopeStartChapter
            LEFT JOIN FETCH e.placementChapter
            WHERE e.course.id IN :courseIds
+             AND e.draft = false
            ORDER BY e.slotIndex ASC
            """)
     List<ExamConfig> findByCourseIds(@Param("courseIds") Collection<UUID> courseIds);
-
-    @Query("""
-           SELECT e
-           FROM ExamConfig e
-           LEFT JOIN FETCH e.course
-           LEFT JOIN FETCH e.scopeStartChapter
-           LEFT JOIN FETCH e.placementChapter
-           WHERE e.course.id = :courseId
-           ORDER BY e.slotIndex ASC
-           """)
-    List<ExamConfig> findStudentVisibleByCourseId(@Param("courseId") UUID courseId);
-
-    @Query("""
-           SELECT e
-           FROM ExamConfig e
-           LEFT JOIN FETCH e.course
-           LEFT JOIN FETCH e.scopeStartChapter
-           LEFT JOIN FETCH e.placementChapter
-           WHERE e.course.id = :courseId
-             AND e.slotIndex = :slotIndex
-           """)
-    Optional<ExamConfig> findStudentVisibleByCourseIdAndSlotIndex(
-            @Param("courseId") UUID courseId,
-            @Param("slotIndex") Integer slotIndex);
-
-    Optional<ExamConfig> findByCourseIdAndSlotIndex(UUID courseId, Integer slotIndex);
 
     Optional<ExamConfig> findByIdAndCourseId(UUID id, UUID courseId);
 }

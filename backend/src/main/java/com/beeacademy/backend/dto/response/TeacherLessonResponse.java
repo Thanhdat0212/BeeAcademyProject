@@ -18,6 +18,9 @@ public record TeacherLessonResponse(
         String videoStoragePath,
         String videoUrl,
         String videoFallbackUrl,
+        String hlsPlaylistUrl,
+        String videoProcessingStatus,
+        java.time.Instant originalVideoRetentionUntil,
         Integer durationSec,
         boolean hasVideo,
         String completionRule,
@@ -48,7 +51,8 @@ public record TeacherLessonResponse(
                 lesson.getId(), lesson.getTitle(), lesson.getDescription(),
                 lesson.getPosition(), lesson.getIsFree(),
                 lesson.getVideoEmbedUrl(), lesson.getVideoStoragePath(), lesson.getVideoUrl(),
-                lesson.getVideoFallbackUrl(), lesson.getDurationSec(), hasVideo,
+                lesson.getVideoFallbackUrl(), lesson.getHlsPlaylistUrl(), lesson.getVideoProcessingStatus(),
+                lesson.getOriginalVideoRetentionUntil(), lesson.getDurationSec(), hasVideo,
                 lesson.getCompletionRule(), lesson.getTranscript(), lesson.getSubtitleUrl(),
                 lesson.getSlideCueSeconds(), documentDtos
         );

@@ -5,7 +5,6 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   BarChart2,
-  Bell,
   BookOpen,
   CheckCircle2,
   ClipboardList,
@@ -44,6 +43,7 @@ import {
   gradeAssignmentSubmission,
   listTeacherAssignments,
   listTeacherAssignmentSubmissions,
+  updateAssignmentSubmissionPolicy,
   type AssignmentSubmissionResponse,
   type AssignmentSubmissionStatus,
   type TeacherAssignmentResponse,
@@ -117,6 +117,10 @@ function studentName(submission: AssignmentSubmissionResponse): string {
   return submission.studentName?.trim() || 'Học sinh';
 }
 
+function examStudentName(attempt: TeacherExamAttemptResponse): string {
+  return attempt.studentName?.trim() || 'Học sinh';
+}
+
 function StatusBadge({ status }: { status: AssignmentSubmissionStatus }) {
   const config = {
     pending: {
@@ -155,12 +159,16 @@ function AssignmentManagerModal({ onClose }: { onClose: () => void }) {
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [updatingPolicyId, setUpdatingPolicyId] = useState<string | null>(null);
   const [courseId, setCourseId] = useState('');
   const [chapterId, setChapterId] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [maxScore, setMaxScore] = useState('10');
   const [dueAt, setDueAt] = useState('');
+  const [maxAttempts, setMaxAttempts] = useState('3');
+  const [allowLateSubmission, setAllowLateSubmission] = useState(false);
+  const [latePenaltyPercent, setLatePenaltyPercent] = useState('0');
 
   useEffect(() => {
     let cancelled = false;
@@ -220,6 +228,16 @@ function AssignmentManagerModal({ onClose }: { onClose: () => void }) {
       notify.error('Điểm tối đa phải là số nguyên từ 1 đến 100');
       return;
     }
+    const parsedMaxAttempts = Number(maxAttempts);
+    if (!Number.isInteger(parsedMaxAttempts) || parsedMaxAttempts < 1) {
+      notify.error('Số lần nộp tối đa phải từ 1');
+      return;
+    }
+    const parsedLatePenalty = Number(latePenaltyPercent);
+    if (!Number.isInteger(parsedLatePenalty) || parsedLatePenalty < 0 || parsedLatePenalty > 100) {
+      notify.error('Mức trừ điểm nộp muộn phải từ 0 đến 100%');
+      return;
+    }
     setCreating(true);
     try {
       const created = await createAssignment({
@@ -228,16 +246,38 @@ function AssignmentManagerModal({ onClose }: { onClose: () => void }) {
         description: description.trim() || undefined,
         maxScore: parsedMaxScore,
         dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
+        maxAttempts: parsedMaxAttempts,
+        allowLateSubmission,
+        latePenaltyPercent: parsedLatePenalty,
+        acceptingSubmissions: true,
       });
       setAssignments(prev => [created, ...prev]);
       setTitle('');
       setDescription('');
       setDueAt('');
+      setMaxAttempts('3');
+      setAllowLateSubmission(false);
+      setLatePenaltyPercent('0');
       notify.success('Đã tạo bài tập');
     } catch (err) {
       notify.error(isApiError(err) ? err.message : 'Tạo bài tập thất bại');
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleToggleAccepting(assignment: TeacherAssignmentResponse) {
+    setUpdatingPolicyId(assignment.id);
+    try {
+      const updated = await updateAssignmentSubmissionPolicy(assignment.id, {
+        acceptingSubmissions: !assignment.acceptingSubmissions,
+      });
+      setAssignments(prev => prev.map(item => (item.id === updated.id ? updated : item)));
+      notify.success(updated.acceptingSubmissions ? 'Đã mở nhận bài' : 'Đã đóng nhận bài');
+    } catch (err) {
+      notify.error(isApiError(err) ? err.message : 'Không cập nhật được trạng thái nhận bài');
+    } finally {
+      setUpdatingPolicyId(null);
     }
   }
 
@@ -307,7 +347,7 @@ function AssignmentManagerModal({ onClose }: { onClose: () => void }) {
             placeholder="Đề bài / hướng dẫn làm bài (không bắt buộc)"
             className="w-full px-3 py-2.5 bg-surface border border-outline-variant rounded-xl text-sm outline-none focus:border-primary"
           />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <label className="text-sm font-semibold text-on-surface-variant">
               Điểm tối đa
               <input
@@ -326,6 +366,38 @@ function AssignmentManagerModal({ onClose }: { onClose: () => void }) {
                 value={dueAt}
                 onChange={event => setDueAt(event.target.value)}
                 className="mt-1 w-full px-3 py-2.5 bg-surface border border-outline-variant rounded-xl text-sm outline-none focus:border-primary"
+              />
+            </label>
+            <label className="text-sm font-semibold text-on-surface-variant">
+              Số lần nộp tối đa
+              <input
+                type="number"
+                min={1}
+                value={maxAttempts}
+                onChange={event => setMaxAttempts(event.target.value)}
+                className="mt-1 w-full px-3 py-2.5 bg-surface border border-outline-variant rounded-xl text-sm outline-none focus:border-primary"
+              />
+            </label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+            <label className="inline-flex items-center gap-2 rounded-xl border border-outline-variant bg-surface px-3 py-2.5 text-sm font-semibold text-on-surface-variant">
+              <input
+                type="checkbox"
+                checked={allowLateSubmission}
+                onChange={event => setAllowLateSubmission(event.target.checked)}
+              />
+              Cho phép nộp sau deadline
+            </label>
+            <label className="text-sm font-semibold text-on-surface-variant">
+              Trừ điểm khi nộp muộn (%)
+              <input
+                type="number"
+                min={0}
+                max={100}
+                disabled={!allowLateSubmission}
+                value={latePenaltyPercent}
+                onChange={event => setLatePenaltyPercent(event.target.value)}
+                className="mt-1 w-full px-3 py-2.5 bg-surface border border-outline-variant rounded-xl text-sm outline-none focus:border-primary disabled:opacity-50"
               />
             </label>
           </div>
@@ -362,18 +434,34 @@ function AssignmentManagerModal({ onClose }: { onClose: () => void }) {
                     {assignment.chapterTitle && <> · {assignment.chapterTitle}</>}
                     {' · '}Tối đa {assignment.maxScore} điểm
                     {assignment.dueAt && <> · Hạn: {formatDateTime(assignment.dueAt)}</>}
+                    {' · '}{assignment.maxAttempts} lần nộp
+                    {assignment.allowLateSubmission && <> · Nộp muộn trừ {assignment.latePenaltyPercent}%</>}
                   </p>
+                  <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${assignment.acceptingSubmissions ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-500'}`}>
+                    {assignment.acceptingSubmissions ? 'Đang nhận bài' : 'Đã đóng nhận bài'}
+                  </span>
                 </div>
-                <button
-                  onClick={() => handleDelete(assignment.id)}
-                  disabled={deletingId === assignment.id}
-                  className="p-2 text-on-surface-variant hover:text-red-500 disabled:opacity-50 flex-shrink-0"
-                  title="Xóa bài tập"
-                >
-                  {deletingId === assignment.id
-                    ? <Loader2 className="w-4 h-4 animate-spin" />
-                    : <Trash2 className="w-4 h-4" />}
-                </button>
+                <div className="flex flex-shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => handleToggleAccepting(assignment)}
+                    disabled={updatingPolicyId === assignment.id}
+                    className="px-2.5 py-1.5 rounded-lg border border-outline-variant text-xs font-bold text-on-surface-variant hover:border-primary hover:text-primary disabled:opacity-50"
+                  >
+                    {updatingPolicyId === assignment.id
+                      ? 'Đang lưu...'
+                      : assignment.acceptingSubmissions ? 'Đóng nhận bài' : 'Mở nhận bài'}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(assignment.id)}
+                    disabled={deletingId === assignment.id}
+                    className="p-2 text-on-surface-variant hover:text-red-500 disabled:opacity-50"
+                    title="Xóa bài tập"
+                  >
+                    {deletingId === assignment.id
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : <Trash2 className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             ))
           )}
@@ -394,8 +482,10 @@ export default function TeacherGradesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [scoreInput, setScoreInput] = useState('');
   const [feedbackInput, setFeedbackInput] = useState('');
+  const [revisionReasonInput, setRevisionReasonInput] = useState('');
   const [examScoreInput, setExamScoreInput] = useState('');
   const [examFeedbackInput, setExamFeedbackInput] = useState('');
+  const [examRevisionReasonInput, setExamRevisionReasonInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -421,9 +511,9 @@ export default function TeacherGradesPage() {
           return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
         }),
       );
-      if (showSuccess) notify.success('Đã làm mới danh sách bài tự luận.');
+      if (showSuccess) notify.success('Đã làm mới danh sách bài cần chấm.');
     } catch (err) {
-      notify.error(isApiError(err) ? err.message : 'Không thể tải bài tự luận đã nộp.');
+      notify.error(isApiError(err) ? err.message : 'Không thể tải danh sách bài cần chấm.');
     } finally {
       setLoading(false);
     }
@@ -438,16 +528,20 @@ export default function TeacherGradesPage() {
   const courseOptions = useMemo(() => {
     const values = new Map<string, string>();
     submissions.forEach(item => values.set(item.courseId, item.courseTitle));
+    examAttempts.forEach(item => values.set(item.courseId, item.courseTitle));
     return Array.from(values, ([id, title]) => ({ id, title }));
-  }, [submissions]);
+  }, [submissions, examAttempts]);
 
   const assignmentOptions = useMemo(() => {
     const values = new Map<string, string>();
     submissions
       .filter(item => courseFilter === 'all' || item.courseId === courseFilter)
       .forEach(item => values.set(item.assignmentId, item.assignmentTitle));
+    examAttempts
+      .filter(item => courseFilter === 'all' || item.courseId === courseFilter)
+      .forEach(item => values.set(item.examId, item.examName));
     return Array.from(values, ([id, title]) => ({ id, title }));
-  }, [submissions, courseFilter]);
+  }, [submissions, examAttempts, courseFilter]);
 
   const filteredSubmissions = useMemo(() => {
     const term = searchTerm.trim().toLocaleLowerCase('vi-VN');
@@ -468,34 +562,53 @@ export default function TeacherGradesPage() {
   }, [filteredSubmissions, selectedId]);
 
   const selected = submissions.find(item => item.id === selectedId) ?? null;
+
+  const filteredExamAttempts = useMemo(() => {
+    const term = searchTerm.trim().toLocaleLowerCase('vi-VN');
+    return examAttempts.filter(item => {
+      if (courseFilter !== 'all' && item.courseId !== courseFilter) return false;
+      if (assignmentFilter !== 'all' && item.examId !== assignmentFilter) return false;
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'resubmit') return false;
+        if (item.status !== statusFilter) return false;
+      }
+      return !term || examStudentName(item).toLocaleLowerCase('vi-VN').includes(term);
+    });
+  }, [examAttempts, courseFilter, assignmentFilter, statusFilter, searchTerm]);
+
   const selectedExam = examAttempts.find(item => item.id === selectedExamId) ?? null;
 
   useEffect(() => {
-    setScoreInput(selected?.score != null ? String(selected.score) : '');
+    const editableScore = selected?.rawScore ?? selected?.score;
+    setScoreInput(editableScore != null ? String(editableScore) : '');
     setFeedbackInput(selected?.feedback ?? '');
+    setRevisionReasonInput('');
   }, [selected?.id]);
 
   useEffect(() => {
-    if (examAttempts.length === 0) {
+    if (filteredExamAttempts.length === 0) {
       setSelectedExamId(null);
-    } else if (!examAttempts.some(item => item.id === selectedExamId)) {
-      setSelectedExamId(examAttempts[0].id);
+    } else if (!filteredExamAttempts.some(item => item.id === selectedExamId)) {
+      setSelectedExamId(filteredExamAttempts[0].id);
     }
-  }, [examAttempts, selectedExamId]);
+  }, [filteredExamAttempts, selectedExamId]);
 
   useEffect(() => {
     setExamScoreInput(selectedExam?.effectiveScorePercent != null
       ? String(selectedExam.effectiveScorePercent)
       : '');
     setExamFeedbackInput(selectedExam?.feedback ?? '');
+    setExamRevisionReasonInput('');
   }, [selectedExam?.id]);
 
   const stats = useMemo(() => ({
-    total: submissions.length,
-    pending: submissions.filter(item => item.status === 'pending').length,
+    total: submissions.length + examAttempts.length,
+    pending: submissions.filter(item => item.status === 'pending').length
+      + examAttempts.filter(item => item.status === 'pending').length,
     resubmit: submissions.filter(item => item.status === 'resubmit').length,
-    graded: submissions.filter(item => item.status === 'graded').length,
-  }), [submissions]);
+    graded: submissions.filter(item => item.status === 'graded').length
+      + examAttempts.filter(item => item.status === 'graded').length,
+  }), [submissions, examAttempts]);
 
   function changeCourse(courseId: string) {
     setCourseFilter(courseId);
@@ -517,6 +630,11 @@ export default function TeacherGradesPage() {
       notify.error(`Điểm phải từ 0 đến ${selected.maxScore}.`);
       return;
     }
+    const revisionReason = revisionReasonInput.trim();
+    if (selected.gradedAt && !revisionReason) {
+      notify.error('Cần nhập lý do khi sửa điểm bài tập.');
+      return;
+    }
 
     setSaving(true);
     const toastId = notify.loading('Đang lưu kết quả chấm...');
@@ -525,8 +643,11 @@ export default function TeacherGradesPage() {
         selected.id,
         score,
         feedbackInput.trim(),
+        revisionReason || undefined,
       );
       setSubmissions(current => current.map(item => item.id === updated.id ? updated : item));
+      setScoreInput(String(updated.rawScore ?? updated.score ?? ''));
+      setRevisionReasonInput('');
       notify.dismiss(toastId);
       notify.success('Đã lưu điểm bài tự luận.');
     } catch (err) {
@@ -544,6 +665,11 @@ export default function TeacherGradesPage() {
       notify.error('Điểm bài kiểm tra phải từ 0 đến 100%.');
       return;
     }
+    const revisionReason = examRevisionReasonInput.trim();
+    if (selectedExam.gradedAt && !revisionReason) {
+      notify.error('Cần nhập lý do khi sửa điểm bài kiểm tra.');
+      return;
+    }
     setSaving(true);
     const toastId = notify.loading('Đang lưu điểm bài kiểm tra...');
     try {
@@ -551,8 +677,10 @@ export default function TeacherGradesPage() {
         selectedExam.id,
         score,
         examFeedbackInput.trim(),
+        revisionReason || undefined,
       );
       setExamAttempts(current => current.map(item => item.id === updated.id ? updated : item));
+      setExamRevisionReasonInput('');
       notify.dismiss(toastId);
       notify.success('Đã lưu điểm bài kiểm tra.');
     } catch (err) {
@@ -693,7 +821,7 @@ export default function TeacherGradesPage() {
                 {courseOptions.map(option => <option key={option.id} value={option.id}>{option.title}</option>)}
               </select>
               <select value={assignmentFilter} onChange={event => setAssignmentFilter(event.target.value)} className="px-3 py-2.5 bg-surface-container border border-outline-variant rounded-xl text-sm outline-none focus:border-primary">
-                <option value="all">Tất cả bài tự luận</option>
+                <option value="all">Tất cả bài</option>
                 {assignmentOptions.map(option => <option key={option.id} value={option.id}>{option.title}</option>)}
               </select>
               <select value={statusFilter} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)} className="px-3 py-2.5 bg-surface-container border border-outline-variant rounded-xl text-sm outline-none focus:border-primary">
@@ -717,9 +845,11 @@ export default function TeacherGradesPage() {
                   Bài kiểm tra đã nộp
                 </h3>
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {examAttempts.length === 0 ? (
-                    <p className="text-sm text-on-surface-variant">Chưa có lượt làm bài kiểm tra.</p>
-                  ) : examAttempts.map(attempt => (
+                  {filteredExamAttempts.length === 0 ? (
+                    <p className="text-sm text-on-surface-variant">
+                      {examAttempts.length === 0 ? 'Chưa có lượt làm bài kiểm tra.' : 'Không có bài kiểm tra phù hợp bộ lọc.'}
+                    </p>
+                  ) : filteredExamAttempts.map(attempt => (
                     <button
                       key={attempt.id}
                       onClick={() => setSelectedExamId(attempt.id)}
@@ -874,6 +1004,20 @@ export default function TeacherGradesPage() {
                         <span className="text-xs uppercase font-extrabold text-on-surface-variant mb-1.5 block">Nhận xét</span>
                         <input value={examFeedbackInput} onChange={event => setExamFeedbackInput(event.target.value)} className="w-full px-3 py-2.5 bg-surface-container border border-outline-variant rounded-xl text-sm outline-none focus:border-primary" />
                       </label>
+                      {selectedExam.gradedAt && (
+                        <label className="block md:col-span-2">
+                          <span className="text-xs uppercase font-extrabold text-on-surface-variant mb-1.5 block">
+                            Lý do sửa điểm
+                          </span>
+                          <input
+                            value={examRevisionReasonInput}
+                            onChange={event => setExamRevisionReasonInput(event.target.value)}
+                            maxLength={1000}
+                            placeholder="Nhập lý do thay đổi điểm đã chấm..."
+                            className="w-full px-3 py-2.5 bg-surface-container border border-outline-variant rounded-xl text-sm outline-none focus:border-primary"
+                          />
+                        </label>
+                      )}
                       <button onClick={handleSaveExamGrade} disabled={saving} className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-bold hover:bg-primary/90 disabled:opacity-60">
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                         Lưu điểm
@@ -889,13 +1033,13 @@ export default function TeacherGradesPage() {
             <div className="flex justify-center py-24">
               <Loader2 className="w-8 h-8 animate-spin text-primary" />
             </div>
-          ) : (
+          ) : submissions.length > 0 ? (
             <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
               <section className="xl:col-span-2 bg-surface-container-lowest border border-outline-variant/30 rounded-2xl p-4 shadow-sm h-fit">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-extrabold flex items-center gap-2">
                     <ClipboardList className="w-4 h-4 text-primary" />
-                    Bài học sinh đã nộp
+                    Bài tập tự luận đã nộp
                   </h3>
                   <span className="text-xs text-on-surface-variant">{filteredSubmissions.length} bài</span>
                 </div>
@@ -952,12 +1096,16 @@ export default function TeacherGradesPage() {
                         <p className="text-xs text-on-surface-variant">{selected.courseTitle}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        {selected.late && <span className="px-2.5 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold">Nộp muộn</span>}
+                        {selected.late && (
+                          <span className="px-2.5 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold">
+                            Nộp muộn · Trừ {selected.appliedLatePenaltyPercent}%
+                          </span>
+                        )}
                         <StatusBadge status={selected.status} />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 py-4">
                       <div className="rounded-xl bg-surface-container p-3">
                         <p className="text-[11px] uppercase font-bold text-on-surface-variant">Lần nộp</p>
                         <p className="font-extrabold mt-1">{selected.attemptNumber}</p>
@@ -973,6 +1121,10 @@ export default function TeacherGradesPage() {
                       <div className="rounded-xl bg-primary/10 p-3">
                         <p className="text-[11px] uppercase font-bold text-primary">Thang điểm</p>
                         <p className="font-extrabold text-primary mt-1">{selected.maxScore}</p>
+                      </div>
+                      <div className="rounded-xl bg-amber-500/10 p-3">
+                        <p className="text-[11px] uppercase font-bold text-amber-700">Dự kiến chấm</p>
+                        <p className="text-xs font-bold mt-1">{formatDateTime(selected.expectedGradedBy)}</p>
                       </div>
                     </div>
 
@@ -996,28 +1148,48 @@ export default function TeacherGradesPage() {
                       <h4 className="font-extrabold text-sm mb-2">File đính kèm</h4>
                       {selected.files.length > 0 ? (
                         <div className="space-y-2">
-                          {selected.files.map((file, index) => (
-                            <a
-                              key={`${file.url}-${index}`}
-                              href={file.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex items-center gap-3 rounded-xl border border-outline-variant/40 bg-surface-container p-3 hover:border-primary/50 transition-colors"
-                            >
-                              <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                                <Paperclip className="w-5 h-5" />
+                          {selected.files.map((file, index) => {
+                            const descriptor = `${file.type ?? ''} ${file.name ?? ''}`.toLowerCase();
+                            const isImage = descriptor.includes('image') || /\.(jpg|jpeg|png|webp)$/.test(descriptor);
+                            const isPdf = descriptor.includes('pdf');
+                            return (
+                              <div key={`${file.url}-${index}`} className="overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container">
+                                <a
+                                  href={file.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="flex items-center gap-3 p-3 hover:bg-surface-container-high transition-colors"
+                                >
+                                  <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                                    <Paperclip className="w-5 h-5" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-bold text-sm truncate">
+                                      {file.name ?? `Tệp đính kèm ${index + 1}`}
+                                    </p>
+                                    <p className="text-xs text-on-surface-variant">
+                                      {formatFileSize(file.sizeBytes)} · Mở file gốc
+                                    </p>
+                                  </div>
+                                  <Download className="w-5 h-5 text-primary" />
+                                </a>
+                                {file.previewSupported && file.previewUrl && isImage && (
+                                  <img
+                                    src={file.previewUrl}
+                                    alt={`Xem trước ${file.name ?? 'bài nộp'}`}
+                                    className="max-h-96 w-full border-t border-outline-variant/30 bg-white object-contain"
+                                  />
+                                )}
+                                {file.previewSupported && file.previewUrl && isPdf && (
+                                  <iframe
+                                    title={`Xem trước ${file.name ?? 'bài nộp'}`}
+                                    src={file.previewUrl}
+                                    className="h-96 w-full border-t border-outline-variant/30 bg-white"
+                                  />
+                                )}
                               </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="font-bold text-sm truncate">
-                                  {file.name ?? `Tệp đính kèm ${index + 1}`}
-                                </p>
-                                <p className="text-xs text-on-surface-variant">
-                                  {formatFileSize(file.sizeBytes)}
-                                </p>
-                              </div>
-                              <Download className="w-5 h-5 text-primary" />
-                            </a>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <p className="text-sm text-on-surface-variant">Không có file đính kèm.</p>
@@ -1027,7 +1199,7 @@ export default function TeacherGradesPage() {
                     <div className="border-t border-outline-variant/30 pt-5 space-y-4">
                       <label className="block">
                         <span className="text-xs uppercase font-extrabold text-on-surface-variant mb-1.5 block">
-                          Điểm số
+                          {selected.late ? 'Điểm trước khi trừ nộp muộn' : 'Điểm số'}
                         </span>
                         <div className="flex items-center gap-2">
                           <input type="number" min={0} max={selected.maxScore} step={1} value={scoreInput} onChange={event => setScoreInput(event.target.value)} className="w-28 px-3 py-2.5 text-lg font-extrabold text-center bg-surface-container border border-outline-variant rounded-xl outline-none focus:border-primary" />
@@ -1042,6 +1214,23 @@ export default function TeacherGradesPage() {
                         <textarea value={feedbackInput} onChange={event => setFeedbackInput(event.target.value)} rows={5} maxLength={3000} placeholder="Nhận xét về nội dung, lập luận, cách trình bày và điểm cần cải thiện..." className="w-full px-3 py-3 bg-surface-container border border-outline-variant rounded-xl text-sm outline-none focus:border-primary resize-none" />
                         <span className="block text-right text-[11px] text-on-surface-variant mt-1">{feedbackInput.length}/3000</span>
                       </label>
+
+                      {selected.gradedAt && (
+                        <label className="block">
+                          <span className="text-xs uppercase font-extrabold text-on-surface-variant mb-1.5 block">
+                            Lý do sửa điểm
+                          </span>
+                          <textarea
+                            value={revisionReasonInput}
+                            onChange={event => setRevisionReasonInput(event.target.value)}
+                            rows={3}
+                            maxLength={1000}
+                            placeholder="Nhập lý do thay đổi điểm đã chấm..."
+                            className="w-full px-3 py-3 bg-surface-container border border-outline-variant rounded-xl text-sm outline-none focus:border-primary resize-none"
+                          />
+                          <span className="block text-right text-[11px] text-on-surface-variant mt-1">{revisionReasonInput.length}/1000</span>
+                        </label>
+                      )}
 
                       <div className="flex flex-wrap gap-2">
                         {FEEDBACK_TEMPLATES.map(template => (
@@ -1065,7 +1254,7 @@ export default function TeacherGradesPage() {
                 )}
               </section>
             </div>
-          )}
+          ) : null}
         </main>
       </div>
 

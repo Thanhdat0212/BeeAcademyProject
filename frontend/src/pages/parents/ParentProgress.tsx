@@ -2,12 +2,16 @@ import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
   Award,
   BookOpen,
+  CalendarDays,
   ChevronDown,
   FileDown,
   Filter,
   Loader2,
+  Minus,
   RefreshCw,
   Star,
   TrendingUp,
@@ -23,7 +27,10 @@ import type {
   ChildProgressReportResponse,
   ParentAssessmentRecord,
   ParentCourseProgressItem,
+  ParentRequiredExamStatus,
 } from '../../types/api';
+
+const PROGRESS_AUTO_REFRESH_MS = 4 * 60 * 1000;
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—';
@@ -61,6 +68,117 @@ function courseStatusLabel(status: ParentCourseProgressItem['status']): string {
   return status === 'completed' ? 'Đã hoàn thành' : 'Đang học';
 }
 
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short' }).format(date);
+}
+
+function weeklyTrendLabel(trend: string): string {
+  switch (trend) {
+    case 'increasing':
+      return 'Tăng so với tuần trước';
+    case 'decreasing':
+      return 'Giảm so với tuần trước';
+    case 'stable':
+      return 'Ổn định so với tuần trước';
+    default:
+      return 'Chưa đủ dữ liệu so sánh';
+  }
+}
+
+function requiredExamStatusLabel(status: ParentRequiredExamStatus): string {
+  switch (status) {
+    case 'not_configured':
+      return 'Chưa cấu hình';
+    case 'not_submitted':
+      return 'Chưa nộp';
+    case 'in_progress':
+      return 'Đang làm';
+    case 'pending_grading':
+      return 'Chờ chấm';
+    case 'passed':
+      return 'Đạt';
+    case 'failed':
+      return 'Chưa đạt';
+    default:
+      return status;
+  }
+}
+
+function requiredExamStatusClass(status: ParentRequiredExamStatus): string {
+  switch (status) {
+    case 'passed':
+      return 'bg-green-500/10 text-green-700 border-green-500/20';
+    case 'failed':
+      return 'bg-red-500/10 text-red-700 border-red-500/20';
+    case 'pending_grading':
+    case 'in_progress':
+      return 'bg-amber-500/10 text-amber-700 border-amber-500/20';
+    default:
+      return 'bg-surface text-on-surface-variant border-outline-variant/20';
+  }
+}
+
+function requiredExamTypeLabel(examType: string | null): string {
+  if (examType === 'final_exam') return 'Cuối kỳ';
+  if (examType === 'chapter_test') return 'Giữa kỳ';
+  if (examType === 'quiz') return 'Quiz';
+  return examType || 'Chưa cấu hình';
+}
+
+function progressAccessReasonLabel(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'DOB_MISSING_REQUIRE_CONSENT':
+      return 'Thiếu ngày sinh học sinh, cần xác nhận đồng ý để xem dữ liệu nhạy cảm.';
+    case 'STUDENT_16_PLUS_PRIVACY_ENABLED_REQUIRE_CONSENT':
+      return 'Học sinh từ 16 tuổi đang bật quyền riêng tư, cần đồng ý trước khi hiển thị chi tiết nhạy cảm.';
+    default:
+      return 'Một số nhận xét và chi tiết bài làm đang được ẩn theo thiết lập quyền riêng tư.';
+  }
+}
+
+function certificateStatusLabel(status: string): string {
+  switch (status) {
+    case 'ISSUED':
+      return 'Đã cấp';
+    case 'REISSUED':
+      return 'Đã cấp lại';
+    case 'NEEDS_REVIEW':
+      return 'Cần xem xét';
+    case 'REVOKED':
+      return 'Đã thu hồi';
+    default:
+      return 'Chưa cấp';
+  }
+}
+
+function certificateStatusClass(status: string): string {
+  switch (status) {
+    case 'ISSUED':
+    case 'REISSUED':
+      return 'bg-green-500/10 text-green-700 border-green-500/20';
+    case 'NEEDS_REVIEW':
+      return 'bg-amber-500/10 text-amber-700 border-amber-500/20';
+    case 'REVOKED':
+      return 'bg-red-500/10 text-red-700 border-red-500/20';
+    default:
+      return 'bg-surface text-on-surface-variant border-outline-variant/20';
+  }
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function ParentProgress() {
   const { linkedStudents, fetchLinkedStudents } = useAuthStore();
   const [selectedStudentId, setSelectedStudentId] = useState<string>(() => {
@@ -68,6 +186,7 @@ export default function ParentProgress() {
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
   const [report, setReport] = useState<ChildProgressReportResponse | null>(null);
 
   const [courseFilter, setCourseFilter] = useState('');
@@ -103,8 +222,8 @@ export default function ParentProgress() {
     }
 
     let active = true;
-    const loadReport = async () => {
-      setLoading(true);
+    const loadReport = async (showLoading = true) => {
+      if (showLoading) setLoading(true);
       try {
         const data = await parentService.getChildProgressReport(selectedStudentId);
         if (!active) return;
@@ -115,13 +234,17 @@ export default function ParentProgress() {
         console.error('Lỗi khi tải báo cáo tiến độ của con:', error);
         notify.error('Không thể tải dữ liệu tiến độ học tập.');
       } finally {
-        if (active) setLoading(false);
+        if (active && showLoading) setLoading(false);
       }
     };
 
     loadReport();
+    const refreshTimer = window.setInterval(() => {
+      loadReport(false);
+    }, PROGRESS_AUTO_REFRESH_MS);
     return () => {
       active = false;
+      window.clearInterval(refreshTimer);
     };
   }, [selectedStudentId]);
 
@@ -154,6 +277,17 @@ export default function ParentProgress() {
       })
     : [];
 
+  const filteredCertificates = report
+    ? (report.certificates ?? []).filter(certificate => {
+        if (!certificate.courseId) return !courseFilter;
+        return allowedCourseIds.has(certificate.courseId);
+      })
+    : [];
+  const totalCompletedLessons = filteredCourses.reduce(
+    (sum, course) => sum + (course.completedLessons?.length ?? 0),
+    0,
+  );
+
   const scoredAssessments = filteredAssessments.filter(record => record.normalizedScore != null);
   const averageScore = scoredAssessments.length > 0
     ? scoredAssessments.reduce((sum, record) => sum + (record.normalizedScore ?? 0), 0) / scoredAssessments.length
@@ -166,6 +300,12 @@ export default function ParentProgress() {
   const bestCourse = filteredCourses
     .slice()
     .sort((left, right) => courseMetric(right) - courseMetric(left))[0];
+  const weeklySummary = report?.weeklySummary;
+  const weeklyActivityMax = Math.max(
+    weeklySummary?.currentWeekCompletedItems ?? 0,
+    weeklySummary?.previousWeekCompletedItems ?? 0,
+    1,
+  );
 
   const handleSelectStudent = (studentId: string) => {
     setSelectedStudentId(studentId);
@@ -212,6 +352,7 @@ export default function ParentProgress() {
       ...report,
       courses: filteredCourses,
       assessments: filteredAssessments,
+      certificates: filteredCertificates,
     };
 
     const opened = printParentProgressReport(printableReport, {
@@ -226,9 +367,34 @@ export default function ParentProgress() {
     notify.success(`Đã mở báo cáo PDF cho ${activeStudent.name}.`);
   };
 
+  const handleExportExcel = async () => {
+    if (!selectedStudentId || !activeStudent) return;
+    setExportingExcel(true);
+    try {
+      const blob = await parentService.exportChildProgressReport(selectedStudentId, {
+        courseId: courseFilter || undefined,
+        from: fromDate || undefined,
+        to: toDate || undefined,
+      });
+      const safeName = activeStudent.name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .toLowerCase() || 'hoc-sinh';
+      downloadBlob(blob, `bao-cao-tien-do-${safeName}.xlsx`);
+      notify.success(`Đã tải file Excel báo cáo của ${activeStudent.name}.`);
+    } catch (error) {
+      console.error('Lỗi khi tải Excel báo cáo tiến độ:', error);
+      notify.error('Không thể tải file Excel báo cáo.');
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
   if (linkedStudents.length === 0) {
     return (
-      <div className="min-h-screen bg-surface flex flex-col font-sans">
+      <div data-testid="parent-progress-empty" className="min-h-screen bg-surface flex flex-col font-sans">
         <DashboardHeader />
         <PageBanner title="Tiến độ & Điểm số" subtitle="Phân tích chi tiết kết quả học tập của con" />
         <div className="flex-grow max-w-[1600px] mx-auto w-full px-4 md:px-10 py-12 text-center">
@@ -245,7 +411,7 @@ export default function ParentProgress() {
   }
 
   return (
-    <div className="min-h-screen bg-surface flex flex-col font-sans">
+    <div data-testid="parent-progress-page" className="min-h-screen bg-surface flex flex-col font-sans">
       <DashboardHeader />
 
       <div className="relative">
@@ -257,6 +423,7 @@ export default function ParentProgress() {
         <div className="absolute bottom-4 right-4 md:right-10 z-10">
           <div className="relative">
             <button
+              data-testid="student-selector"
               onClick={() => setDropdownOpen(!dropdownOpen)}
               className="flex items-center gap-2 bg-surface-container-lowest px-4 py-2.5 rounded-xl border border-outline-variant/30 shadow-md font-bold text-sm text-on-surface hover:bg-surface-container-low transition-colors"
             >
@@ -313,6 +480,7 @@ export default function ParentProgress() {
                   <label className="flex flex-col gap-1.5">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">Khóa học</span>
                     <select
+                      data-testid="course-filter"
                       value={courseFilter}
                       onChange={(event) => setCourseFilter(event.target.value)}
                       className="h-11 rounded-xl border border-outline-variant/30 bg-surface px-3 text-sm font-semibold text-on-surface"
@@ -329,6 +497,7 @@ export default function ParentProgress() {
                   <label className="flex flex-col gap-1.5">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">Trạng thái</span>
                     <select
+                      data-testid="status-filter"
                       value={statusFilter}
                       onChange={(event) => setStatusFilter(event.target.value as 'all' | 'active' | 'completed')}
                       className="h-11 rounded-xl border border-outline-variant/30 bg-surface px-3 text-sm font-semibold text-on-surface"
@@ -342,6 +511,7 @@ export default function ParentProgress() {
                   <label className="flex flex-col gap-1.5">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">Từ ngày</span>
                     <input
+                      data-testid="from-date-filter"
                       type="date"
                       value={fromDate}
                       onChange={(event) => setFromDate(event.target.value)}
@@ -352,6 +522,7 @@ export default function ParentProgress() {
                   <label className="flex flex-col gap-1.5">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">Đến ngày</span>
                     <input
+                      data-testid="to-date-filter"
                       type="date"
                       value={toDate}
                       onChange={(event) => setToDate(event.target.value)}
@@ -367,6 +538,7 @@ export default function ParentProgress() {
                       Xóa lọc
                     </button>
                     <button
+                      data-testid="refresh-progress"
                       onClick={handleRefresh}
                       className="h-11 w-11 rounded-xl border border-outline-variant/30 bg-surface text-on-surface-variant hover:bg-surface-container-low transition-colors flex items-center justify-center"
                       title="Làm mới"
@@ -383,19 +555,183 @@ export default function ParentProgress() {
                     <Filter className="w-3.5 h-3.5" />
                     {filteredCourses.length} khóa học hiển thị
                   </span>
+                  <span>{totalCompletedLessons} bài đã học</span>
                   <span>{filteredAssessments.length} cột điểm khớp bộ lọc</span>
+                  <span>{filteredCertificates.length} chứng chỉ</span>
                 </div>
 
-                <button
-                  onClick={handlePrintReport}
-                  disabled={!report || loading}
-                  className="h-11 px-5 rounded-xl bg-primary text-on-primary font-bold text-xs hover:bg-primary/95 transition-all shadow-md shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
-                >
-                  <FileDown className="w-4 h-4" />
-                  In / Lưu PDF
-                </button>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    data-testid="export-progress-xlsx"
+                    onClick={handleExportExcel}
+                    disabled={!report || loading || exportingExcel}
+                    className="h-11 px-5 rounded-xl border border-outline-variant/30 bg-surface text-on-surface font-bold text-xs hover:bg-surface-container-low transition-all disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                  >
+                    {exportingExcel ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+                    Tải Excel
+                  </button>
+                  <button
+                    onClick={handlePrintReport}
+                    disabled={!report || loading}
+                    className="h-11 px-5 rounded-xl bg-primary text-on-primary font-bold text-xs hover:bg-primary/95 transition-all shadow-md shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    In / Lưu PDF
+                  </button>
+                </div>
               </div>
             </motion.div>
+
+            {report?.sensitiveDataMasked && (
+              <div data-testid="privacy-warning" className="bg-amber-500/10 border border-amber-500/25 rounded-2xl p-4 flex items-start gap-3 text-amber-800">
+                <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-extrabold">Đang ẩn dữ liệu nhạy cảm</p>
+                  <p className="text-xs mt-1 font-medium">
+                    {progressAccessReasonLabel(report.detailAccessReason)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {weeklySummary && (
+              <section data-testid="weekly-report" className="bg-surface-container-lowest border-y border-outline-variant/30 px-5 py-6 md:px-6">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-primary">
+                      <CalendarDays className="h-5 w-5" />
+                      <h3 className="text-base font-extrabold text-on-surface">Báo cáo 7 ngày</h3>
+                    </div>
+                    <p className="mt-1 text-xs font-medium text-on-surface-variant">
+                      {formatDate(weeklySummary.periodStart)} đến {formatDate(weeklySummary.periodEnd)}
+                    </p>
+                  </div>
+                  <div className="inline-flex items-center gap-2 text-sm font-extrabold text-on-surface">
+                    {weeklySummary.progressTrend === 'increasing' ? (
+                      <ArrowUp className="h-4 w-4 text-green-600" />
+                    ) : weeklySummary.progressTrend === 'decreasing' ? (
+                      <ArrowDown className="h-4 w-4 text-red-600" />
+                    ) : (
+                      <Minus className="h-4 w-4 text-on-surface-variant" />
+                    )}
+                    {weeklyTrendLabel(weeklySummary.progressTrend)}
+                  </div>
+                </div>
+
+                <div className="mt-5 space-y-3" aria-label="So sánh hoạt động học tập hai tuần">
+                  <div className="grid grid-cols-[76px_minmax(0,1fr)_32px] items-center gap-3">
+                    <span className="text-xs font-bold text-on-surface-variant">Tuần này</span>
+                    <div className="h-3 overflow-hidden bg-surface-container-high">
+                      <div
+                        className="h-full bg-primary transition-[width] duration-300"
+                        style={{ width: `${(weeklySummary.currentWeekCompletedItems / weeklyActivityMax) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-right text-xs font-extrabold text-on-surface">{weeklySummary.currentWeekCompletedItems}</span>
+                  </div>
+                  <div className="grid grid-cols-[76px_minmax(0,1fr)_32px] items-center gap-3">
+                    <span className="text-xs font-bold text-on-surface-variant">Tuần trước</span>
+                    <div className="h-3 overflow-hidden bg-surface-container-high">
+                      <div
+                        className="h-full bg-secondary transition-[width] duration-300"
+                        style={{ width: `${(weeklySummary.previousWeekCompletedItems / weeklyActivityMax) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-right text-xs font-extrabold text-on-surface">{weeklySummary.previousWeekCompletedItems}</span>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-2 border-y border-outline-variant/20 md:grid-cols-4">
+                  <div className="px-3 py-4 md:border-r md:border-outline-variant/20">
+                    <p className="text-[11px] font-bold uppercase text-on-surface-variant">Hoàn thành tuần này</p>
+                    <p className="mt-1 text-2xl font-extrabold text-on-surface">{weeklySummary.currentWeekCompletedItems}</p>
+                    <p className="mt-1 text-[11px] text-on-surface-variant">Tuần trước: {weeklySummary.previousWeekCompletedItems}</p>
+                  </div>
+                  <div className="border-l border-outline-variant/20 px-3 py-4 md:border-l-0 md:border-r">
+                    <p className="text-[11px] font-bold uppercase text-on-surface-variant">Điểm trung bình</p>
+                    <p className="mt-1 text-2xl font-extrabold text-on-surface">
+                      {weeklySummary.averageScore == null ? '—' : weeklySummary.averageScore.toFixed(1)}<span className="text-sm">/10</span>
+                    </p>
+                    <p className="mt-1 text-[11px] text-on-surface-variant">{weeklySummary.completedAssessments} bài đánh giá</p>
+                  </div>
+                  <div className="border-t border-outline-variant/20 px-3 py-4 md:border-r md:border-t-0">
+                    <p className="text-[11px] font-bold uppercase text-on-surface-variant">Bài chưa hoàn thành</p>
+                    <p className="mt-1 text-2xl font-extrabold text-on-surface">{weeklySummary.incompleteLearningItems}</p>
+                    <p className="mt-1 text-[11px] text-on-surface-variant">Trong {weeklySummary.incompleteCourses} khóa chưa xong</p>
+                  </div>
+                  <div className="border-l border-t border-outline-variant/20 px-3 py-4 md:border-l-0 md:border-t-0">
+                    <p className="text-[11px] font-bold uppercase text-on-surface-variant">Ngày không học</p>
+                    <p className="mt-1 text-2xl font-extrabold text-on-surface">{weeklySummary.inactiveDays}<span className="text-sm">/7</span></p>
+                    <p className="mt-1 text-[11px] text-on-surface-variant">Tính từ bài học và bài đánh giá</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex items-start gap-3 bg-primary/5 px-4 py-3 text-sm text-on-surface">
+                  <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
+                  <div>
+                    <p className="font-extrabold">Khuyến nghị theo quy tắc</p>
+                    <p className="mt-0.5 text-xs font-medium text-on-surface-variant">{weeklySummary.actionSuggestion}</p>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {report && (
+              <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-6 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h3 className="font-extrabold text-on-surface text-base">Chứng chỉ của con</h3>
+                    <p className="text-xs text-on-surface-variant mt-0.5">
+                      Trạng thái chứng chỉ theo từng khóa học.
+                    </p>
+                  </div>
+                  <Award className="w-5 h-5 text-primary flex-shrink-0" />
+                </div>
+
+                {filteredCertificates.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-outline-variant/30 bg-surface px-4 py-5 text-sm text-on-surface-variant">
+                    Chưa có chứng chỉ phù hợp với bộ lọc hiện tại.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {filteredCertificates.map(certificate => (
+                      <div
+                        key={certificate.certificateId}
+                        className="rounded-2xl border border-outline-variant/20 bg-surface p-4"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-extrabold text-sm text-on-surface truncate" title={certificate.courseTitle}>
+                              {certificate.courseTitle}
+                            </p>
+                            <p className="text-[11px] text-on-surface-variant mt-1">
+                              {certificate.teacherName || 'Chưa rõ giáo viên'}
+                            </p>
+                          </div>
+                          <span className={`px-2 py-1 rounded-full border text-[10px] font-extrabold whitespace-nowrap ${certificateStatusClass(certificate.status)}`}>
+                            {certificateStatusLabel(certificate.status)}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-1 gap-2 text-[11px]">
+                          <div>
+                            <p className="text-on-surface-variant font-bold uppercase tracking-wider">Số chứng chỉ</p>
+                            <p className="font-extrabold text-on-surface mt-0.5 break-all">{certificate.certificateNo}</p>
+                          </div>
+                          <div>
+                            <p className="text-on-surface-variant font-bold uppercase tracking-wider">Mã xác thực</p>
+                            <p className="font-extrabold text-primary mt-0.5 break-all">{certificate.verificationCode}</p>
+                          </div>
+                          <div>
+                            <p className="text-on-surface-variant font-bold uppercase tracking-wider">Ngày cấp</p>
+                            <p className="font-semibold text-on-surface mt-0.5">{formatDateTime(certificate.issuedAt)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="relative">
               {loading && (
@@ -477,7 +813,11 @@ export default function ParentProgress() {
 
                       <div className="space-y-4">
                         {filteredCourses.map(course => (
-                          <div key={course.courseId} className="p-4 bg-surface-container-low rounded-2xl border border-outline-variant/10 space-y-3">
+                          <div
+                            key={course.courseId}
+                            data-testid={`course-progress-${course.courseId}`}
+                            className="p-4 bg-surface-container-low rounded-2xl border border-outline-variant/10 space-y-3"
+                          >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <h4 className="font-extrabold text-sm text-on-surface truncate">{course.courseTitle}</h4>
@@ -509,6 +849,18 @@ export default function ParentProgress() {
                               </div>
                             </div>
 
+                            <div className="bg-surface px-3 py-2 rounded-xl border border-outline-variant/15">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-on-surface-variant font-bold uppercase tracking-wider text-[11px]">Bài đã học</p>
+                                <p className="text-on-surface font-extrabold text-xs">{course.completedLessons?.length ?? 0}</p>
+                              </div>
+                              {(course.completedLessons?.length ?? 0) > 0 && (
+                                <p className="text-[11px] text-on-surface-variant mt-1 truncate">
+                                  Mới nhất: {course.completedLessons[course.completedLessons.length - 1]?.lessonTitle}
+                                </p>
+                              )}
+                            </div>
+
                             <div className="grid grid-cols-2 gap-3 text-[11px]">
                               <div className="bg-surface px-3 py-2 rounded-xl border border-outline-variant/15">
                                 <p className="text-on-surface-variant font-bold uppercase tracking-wider">Quiz</p>
@@ -525,6 +877,42 @@ export default function ParentProgress() {
                               <div className="bg-surface px-3 py-2 rounded-xl border border-outline-variant/15">
                                 <p className="text-on-surface-variant font-bold uppercase tracking-wider">Exam mới nhất</p>
                                 <p className="text-on-surface font-extrabold mt-1">{course.latestExamScore != null ? `${course.latestExamScore.toFixed(1)}/10` : '—'}</p>
+                              </div>
+                            </div>
+
+                            <div className="bg-surface px-3 py-3 rounded-xl border border-outline-variant/15">
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <p className="text-[11px] text-on-surface-variant font-bold uppercase tracking-wider">4 bài kiểm tra bắt buộc</p>
+                                <span className="text-[10px] text-on-surface-variant font-bold">
+                                  {(course.requiredExams ?? []).filter(exam => exam.status === 'passed').length}/4 đạt
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {(course.requiredExams ?? []).map(exam => (
+                                  <div
+                                    key={`${course.courseId}-${exam.slotIndex}`}
+                                    data-testid={`required-exam-${course.courseId}-${exam.slotIndex}`}
+                                    className={`rounded-lg border px-2.5 py-2 ${requiredExamStatusClass(exam.status)}`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <p className="font-extrabold text-[11px] leading-tight">{exam.label}</p>
+                                      <span className="text-[9px] font-extrabold whitespace-nowrap">
+                                        {requiredExamStatusLabel(exam.status)}
+                                      </span>
+                                    </div>
+                                    <p className="text-[10px] mt-1 font-semibold">
+                                      {exam.normalizedScore != null ? `${exam.normalizedScore.toFixed(1)}/10` : 'Chưa có điểm'}
+                                    </p>
+                                    {exam.examName && (
+                                      <p className="text-[10px] mt-1 truncate" title={exam.examName}>
+                                        {exam.examName}
+                                      </p>
+                                    )}
+                                    <p className="text-[9px] mt-1 opacity-75">
+                                      {requiredExamTypeLabel(exam.examType)}
+                                    </p>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                           </div>
@@ -554,7 +942,11 @@ export default function ParentProgress() {
                           </thead>
                           <tbody className="divide-y divide-outline-variant/10">
                             {filteredAssessments.map(record => (
-                              <tr key={record.id} className="hover:bg-surface-container-low/20 transition-colors">
+                              <tr
+                                key={record.id}
+                                data-testid={`assessment-${record.id}`}
+                                className="hover:bg-surface-container-low/20 transition-colors"
+                              >
                                 <td className="px-4 py-3.5 text-xs text-on-surface-variant font-medium whitespace-nowrap">
                                   {formatDateTime(record.submittedAt)}
                                 </td>
@@ -587,7 +979,7 @@ export default function ParentProgress() {
                                 </td>
                                 <td className="px-4 py-3.5 text-xs text-on-surface-variant max-w-[220px]">
                                   <p className="line-clamp-2" title={record.feedback || undefined}>
-                                    {record.feedback || 'Chưa có nhận xét chi tiết'}
+                                    {record.feedback || (report?.sensitiveDataMasked ? 'Đang ẩn theo quyền riêng tư/consent' : 'Chưa có nhận xét chi tiết')}
                                   </p>
                                 </td>
                               </tr>

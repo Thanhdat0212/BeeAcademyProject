@@ -21,13 +21,18 @@ public record AssignmentSubmissionResponse(
         Double maxScore,
         String feedback,
         Instant submittedAt,
+        Instant expectedGradedBy,
         Instant gradedAt,
         Instant dueAt,
-        Boolean late
+        Boolean late,
+        Integer appliedLatePenaltyPercent,
+        Double rawScore
 ) {
     public record SubmissionFile(
             String name,
             String url,
+            String previewUrl,
+            Boolean previewSupported,
             String type,
             Long sizeBytes
     ) {

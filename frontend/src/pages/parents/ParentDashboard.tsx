@@ -49,6 +49,17 @@ function assessmentTypeLabel(type: ParentAssessmentRecord['assessmentType']): st
   }
 }
 
+function progressAccessReasonLabel(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'DOB_MISSING_REQUIRE_CONSENT':
+      return 'Thiếu ngày sinh học sinh, cần xác nhận đồng ý để xem dữ liệu nhạy cảm.';
+    case 'STUDENT_16_PLUS_PRIVACY_ENABLED_REQUIRE_CONSENT':
+      return 'Học sinh từ 16 tuổi đang bật quyền riêng tư, cần đồng ý trước khi hiển thị chi tiết nhạy cảm.';
+    default:
+      return 'Một số nhận xét và chi tiết bài làm đang được ẩn theo thiết lập quyền riêng tư.';
+  }
+}
+
 function fallbackAvatar(name: string): string {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=feb700&color=1a1b1e&bold=true`;
 }
@@ -297,6 +308,18 @@ export default function ParentDashboard() {
               </button>
             </motion.div>
 
+            {(overview?.sensitiveDataMasked || progressReport?.sensitiveDataMasked) && (
+              <div className="bg-amber-500/10 border border-amber-500/25 rounded-2xl p-4 flex items-start gap-3 text-amber-800">
+                <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-extrabold">Đang ẩn dữ liệu nhạy cảm</p>
+                  <p className="text-xs mt-1 font-medium">
+                    {progressAccessReasonLabel(progressReport?.detailAccessReason ?? overview?.detailAccessReason)}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* 4 Thẻ Chỉ số chính */}
             <div className="relative">
               {loadingOverview && (
@@ -508,7 +531,11 @@ export default function ParentDashboard() {
                           {assessment.normalizedScore != null
                             ? `Điểm ${formatScore(assessment.normalizedScore)}/10 · ${scoreLabel(assessment.normalizedScore)}`
                             : 'Chưa có điểm'}
-                          {assessment.feedback ? ` · ${assessment.feedback}` : ''}
+                          {assessment.feedback
+                            ? ` · ${assessment.feedback}`
+                            : progressReport?.sensitiveDataMasked
+                              ? ' · Đang ẩn nhận xét theo quyền riêng tư/consent'
+                              : ''}
                         </p>
                       </div>
                     ))

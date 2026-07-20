@@ -62,8 +62,31 @@ public class AssignmentSubmission {
     @Column(name = "graded_at")
     private Instant gradedAt;
 
+    /** Cam kết thời gian chấm theo UC16: không quá 7 ngày sau lần nộp gần nhất. */
+    @Column(name = "expected_graded_by", nullable = false)
+    private Instant expectedGradedBy;
+
+    @Column(name = "attempt_number", nullable = false)
+    private Integer attemptNumber;
+
+    @Column(name = "late", nullable = false)
+    private Boolean late;
+
+    @Column(name = "late_penalty_percent", nullable = false)
+    private Integer latePenaltyPercent;
+
+    @Column(name = "raw_score")
+    private Integer rawScore;
+
     public void grade(int score, String feedback, Profile teacher) {
-        this.score = score;
+        grade(score, score, 0, feedback, teacher);
+    }
+
+    public void grade(int rawScore, int finalScore, int appliedLatePenaltyPercent,
+                      String feedback, Profile teacher) {
+        this.rawScore = rawScore;
+        this.score = finalScore;
+        this.latePenaltyPercent = Math.max(0, Math.min(100, appliedLatePenaltyPercent));
         this.feedback = feedback == null || feedback.isBlank() ? null : feedback.trim();
         this.gradedBy = teacher;
         this.status = "graded";
@@ -71,21 +94,53 @@ public class AssignmentSubmission {
     }
 
     public static AssignmentSubmission submit(Assignment assignment, Profile student,
-                                              String content, String fileUrlsJson) {
+                                              String content, String fileUrlsJson,
+                                              boolean late, int latePenaltyPercent) {
         AssignmentSubmission submission = new AssignmentSubmission();
         submission.id = UUID.randomUUID();
         submission.assignment = assignment;
         submission.student = student;
+        submission.attemptNumber = 1;
+        submission.late = late;
+        submission.latePenaltyPercent = late ? latePenaltyPercent : 0;
         submission.applyContent(content, fileUrlsJson);
         return submission;
     }
 
-    public void resubmit(String content, String fileUrlsJson) {
+    public static AssignmentSubmission submit(Assignment assignment, Profile student,
+                                               String content, String fileUrlsJson) {
+        return submit(assignment, student, content, fileUrlsJson, false, 0);
+    }
+
+    public void resubmit(String content, String fileUrlsJson,
+                         boolean late, int latePenaltyPercent) {
+        this.attemptNumber = effectiveAttemptNumber() + 1;
+        this.late = late;
+        this.latePenaltyPercent = late ? latePenaltyPercent : 0;
         applyContent(content, fileUrlsJson);
         this.score = null;
+        this.rawScore = null;
         this.feedback = null;
         this.gradedBy = null;
         this.gradedAt = null;
+    }
+
+    public void resubmit(String content, String fileUrlsJson) {
+        resubmit(content, fileUrlsJson, false, 0);
+    }
+
+    public int effectiveAttemptNumber() {
+        return attemptNumber != null && attemptNumber > 0 ? attemptNumber : 1;
+    }
+
+    public boolean isLate() {
+        return Boolean.TRUE.equals(late);
+    }
+
+    public int effectiveLatePenaltyPercent() {
+        return latePenaltyPercent != null
+                ? Math.max(0, Math.min(100, latePenaltyPercent))
+                : 0;
     }
 
     private void applyContent(String content, String fileUrlsJson) {
@@ -94,5 +149,6 @@ public class AssignmentSubmission {
                 ? "[]" : fileUrlsJson;
         this.status = "submitted";
         this.submittedAt = Instant.now();
+        this.expectedGradedBy = this.submittedAt.plus(7, java.time.temporal.ChronoUnit.DAYS);
     }
 }

@@ -22,10 +22,10 @@ import type { QuizConfigRequest } from '../../api/quizService';
 import type { QuestionStatsResponse } from '../../api/questionService';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
-  Bell, LogOut, Menu, X, Save,
+  LogOut, Menu, X, Save,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Megaphone, AlertTriangle, CheckCircle2,
-  Shuffle, Timer, Target, Layers, Database, UserCircle, Lock, Star,
+  Shuffle, Timer, Layers, Database, UserCircle, Lock, Star,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════

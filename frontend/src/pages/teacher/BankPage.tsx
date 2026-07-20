@@ -31,7 +31,7 @@ import {
 } from '../../api/bankService';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
-  Bell, LogOut, Menu, X, Save, Pencil,
+  LogOut, Menu, X, Save, Pencil,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, CheckCircle2, Clock, AlertTriangle,
   Eye, EyeOff, History, ChevronDown, ChevronRight,

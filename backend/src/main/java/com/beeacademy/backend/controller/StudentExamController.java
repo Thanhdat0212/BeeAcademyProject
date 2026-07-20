@@ -1,6 +1,8 @@
 package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.response.ApiResponse;
+import com.beeacademy.backend.dto.request.ExamIntegrityEventRequest;
+import com.beeacademy.backend.dto.response.ExamIntegrityEventResponse;
 import com.beeacademy.backend.dto.response.ExamRetakeRequestResponse;
 import com.beeacademy.backend.dto.response.StudentExamResponse;
 import com.beeacademy.backend.dto.request.ExamRetakeRequestCreate;
@@ -81,6 +83,17 @@ public class StudentExamController {
             @Valid @RequestBody SaveExamDraftRequest request) {
         examService.saveStudentExamDraft(courseId, slotIndex, CurrentUser.required(), request);
         return ApiResponse.ok(null, "Da luu nhap bai kiem tra");
+    }
+
+    @PostMapping("/{slotIndex}/integrity-events")
+    public ApiResponse<ExamIntegrityEventResponse> recordIntegrityEvent(
+            @PathVariable UUID courseId,
+            @PathVariable Integer slotIndex,
+            @Valid @RequestBody ExamIntegrityEventRequest request) {
+        return ApiResponse.ok(
+                examService.recordStudentExamIntegrityEvent(
+                        courseId, slotIndex, CurrentUser.required(), request),
+                "Đã ghi nhận sự kiện chống gian lận");
     }
 
     @PostMapping("/{slotIndex}/retake-requests")

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
@@ -138,7 +138,10 @@ function RoadmapView({ roadmap }: { roadmap: AiRoadmap }) {
 }
 
 export default function AiTutorPage() {
-  const [activeTab, setActiveTab] = useState<'chat' | 'roadmap'>('chat');
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<'chat' | 'roadmap'>(
+    searchParams.get('tab') === 'roadmap' ? 'roadmap' : 'chat',
+  );
   const [messages, setMessages] = useState<AiChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);

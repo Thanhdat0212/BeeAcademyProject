@@ -95,7 +95,7 @@ public class AdminPayoutService {
                     "TK ngân hàng của giáo viên đang chờ duyệt hoặc bị từ chối. "
                             + "Duyệt TK trước khi xác nhận chuyển khoản.");
         }
-        period.markPaid(adminId, req.transferRef(), req.transferContent());
+        period.markPaid(adminId, req.transferRef(), req.transferContent(), req.uncAttachmentUrl());
         periodRepository.save(period);
 
         String currentMonth = ZonedDateTime.now(ZoneOffset.UTC).format(MONTH_FMT);

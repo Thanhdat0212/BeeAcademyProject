@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
-  CheckCircle2,
   Clock3,
   Loader2,
   Mail,
@@ -41,10 +40,14 @@ function formatDateTime(value: string | null): string {
 
 function statusLabel(status: ParentLinkInvitationResponse['status']): string {
   switch (status) {
-    case 'accepted':
+    case 'active':
       return 'Đã chấp nhận';
     case 'rejected':
       return 'Đã từ chối';
+    case 'expired':
+      return 'Đã hết hạn';
+    case 'revoked':
+      return 'Đã hủy';
     default:
       return 'Đang chờ xác nhận';
   }
@@ -62,13 +65,13 @@ export default function ParentStudentLink() {
   const [resendingEmail, setResendingEmail] = useState<string | null>(null);
   const [cancellingInvitationId, setCancellingInvitationId] = useState<string | null>(null);
   const [confirmUnlinkId, setConfirmUnlinkId] = useState<string | null>(null);
+  const [unlinkReason, setUnlinkReason] = useState('');
   const [unlinking, setUnlinking] = useState(false);
 
   const confirmStudent = useMemo(
     () => linkedStudents.find(student => student.id === confirmUnlinkId) ?? null,
     [confirmUnlinkId, linkedStudents]
   );
-  const isConfirmingStudentUnlinkRequest = confirmStudent?.unlinkRequestedByRole === 'student';
 
   const loadData = async (showLoading = true) => {
     if (showLoading) setPageLoading(true);
@@ -110,16 +113,18 @@ export default function ParentStudentLink() {
         relationship: existingInvitation?.relationship ?? relationship,
         note: existingInvitation?.note ?? (inviteNote.trim() || null),
       });
-      setPendingInvitations(current => [
-        invitation,
-        ...current.filter(item => item.studentId !== invitation.studentId),
-      ]);
+      if (invitation.acceptedForProcessing !== false && invitation.studentId) {
+        setPendingInvitations(current => [
+          invitation,
+          ...current.filter(item => item.studentId !== invitation.studentId),
+        ]);
+      }
       if (!emailOverride) {
         setInviteEmail('');
         setRelationship('guardian');
         setInviteNote('');
       }
-      notify.success(`Đã gửi lời mời liên kết tới ${targetEmail}.`);
+      notify.success(invitation.neutralMessage || `Đã gửi lời mời liên kết tới ${targetEmail}.`);
     } catch (error) {
       console.error('Lỗi khi gửi lời mời liên kết:', error);
       notify.error(error instanceof Error ? error.message : 'Không thể gửi lời mời liên kết.');
@@ -130,6 +135,7 @@ export default function ParentStudentLink() {
   };
 
   const handleCancelInvitation = async (invitation: ParentLinkInvitationResponse) => {
+    if (!invitation.studentId) return;
     setCancellingInvitationId(invitation.studentId);
     try {
       await parentService.cancelLinkInvitation(invitation.studentId);
@@ -147,7 +153,7 @@ export default function ParentStudentLink() {
     if (!confirmUnlinkId) return;
 
     setUnlinking(true);
-    const result = await unlinkStudent(confirmUnlinkId);
+    const result = await unlinkStudent(confirmUnlinkId, unlinkReason);
     setUnlinking(false);
 
     if (typeof result === 'string') {
@@ -155,15 +161,12 @@ export default function ParentStudentLink() {
       return;
     }
 
-    if (isConfirmingStudentUnlinkRequest && localStorage.getItem('parent_active_student_id') === confirmUnlinkId) {
+    if (localStorage.getItem('parent_active_student_id') === confirmUnlinkId) {
       localStorage.removeItem('parent_active_student_id');
     }
-    notify.success(
-      isConfirmingStudentUnlinkRequest
-        ? `Đã đồng ý hủy liên kết với ${confirmStudent?.name ?? 'học sinh'}.`
-        : `Đã gửi yêu cầu hủy liên kết tới ${confirmStudent?.name ?? 'học sinh'}. Cần học sinh đồng ý để hoàn tất.`
-    );
+    notify.success(`Đã hủy liên kết với ${confirmStudent?.name ?? 'học sinh'}.`);
     setConfirmUnlinkId(null);
+    setUnlinkReason('');
   };
 
   return (
@@ -306,7 +309,7 @@ export default function ParentStudentLink() {
                 <div className="space-y-4">
                   {pendingInvitations.map(invitation => (
                     <div
-                      key={invitation.studentId}
+                      key={invitation.studentId ?? invitation.studentEmail}
                       className="p-4 rounded-2xl border border-outline-variant/20 bg-surface-container-low/40"
                     >
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -405,11 +408,7 @@ export default function ParentStudentLink() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {linkedStudents.map(student => {
-                    const waitingForStudent = student.unlinkRequestedByRole === 'parent';
-                    const waitingForParent = student.unlinkRequestedByRole === 'student';
-
-                    return (
+                  {linkedStudents.map(student => (
                     <div
                       key={student.id}
                       className="p-4 bg-surface-container-low/40 border border-outline-variant/15 rounded-2xl flex items-center justify-between gap-4"
@@ -424,49 +423,20 @@ export default function ParentStudentLink() {
                           <h4 className="font-extrabold text-sm text-on-surface truncate">{student.name}</h4>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-on-surface-variant">
                             <span>{student.grade || 'Chưa có lớp học'}</span>
-                            <span>
-                              {waitingForStudent
-                                ? 'Đang chờ học sinh đồng ý hủy'
-                                : waitingForParent
-                                  ? 'Học sinh đang yêu cầu hủy'
-                                  : 'Đã liên kết'}
-                            </span>
-                            {student.unlinkRequestedAt && (
-                              <span>Yêu cầu lúc: {formatDateTime(student.unlinkRequestedAt)}</span>
-                            )}
+                            <span>Đã liên kết</span>
                           </div>
                         </div>
                       </div>
 
                       <button
                         onClick={() => setConfirmUnlinkId(student.id)}
-                        disabled={waitingForStudent}
-                        className={`h-10 w-10 rounded-xl transition-colors border flex items-center justify-center flex-shrink-0 ${
-                          waitingForStudent
-                            ? 'bg-amber-50 text-amber-600 border-amber-200/50 cursor-not-allowed'
-                            : waitingForParent
-                              ? 'bg-emerald-50 hover:bg-emerald-100/70 text-emerald-600 border-emerald-200/60'
-                              : 'bg-red-50 hover:bg-red-100/60 text-red-500 border-red-200/40'
-                        }`}
-                        title={
-                          waitingForStudent
-                            ? 'Đang chờ học sinh đồng ý hủy'
-                            : waitingForParent
-                              ? 'Đồng ý hủy liên kết'
-                              : 'Gửi yêu cầu hủy liên kết'
-                        }
+                        className="h-10 w-10 rounded-xl transition-colors border flex items-center justify-center flex-shrink-0 bg-red-50 hover:bg-red-100/60 text-red-500 border-red-200/40"
+                        title="Hủy liên kết"
                       >
-                        {waitingForStudent ? (
-                          <Clock3 className="w-4 h-4" />
-                        ) : waitingForParent ? (
-                          <CheckCircle2 className="w-4 h-4" />
-                        ) : (
-                          <Trash2 className="w-4 h-4" />
-                        )}
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                    );
-                  })}
+                  ))}
                 </div>
               )}
             </motion.section>
@@ -483,32 +453,37 @@ export default function ParentStudentLink() {
               exit={{ scale: 0.95, opacity: 0 }}
               className="bg-surface-container-lowest border border-outline-variant/40 rounded-3xl p-6 shadow-2xl max-w-sm w-full space-y-6"
             >
-              <div className={`flex items-center gap-3 ${isConfirmingStudentUnlinkRequest ? 'text-emerald-600' : 'text-red-600'}`}>
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isConfirmingStudentUnlinkRequest ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
-                  {isConfirmingStudentUnlinkRequest ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+              <div className="flex items-center gap-3 text-red-600">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-red-500/10">
+                  <AlertTriangle className="w-5 h-5" />
                 </div>
-                <h4 className="font-extrabold text-base text-on-surface">
-                  {isConfirmingStudentUnlinkRequest ? 'Đồng ý hủy liên kết?' : 'Gửi yêu cầu hủy liên kết?'}
-                </h4>
+                <h4 className="font-extrabold text-base text-on-surface">Xác nhận hủy liên kết?</h4>
               </div>
 
               <p className="text-sm text-on-surface-variant leading-relaxed">
-                {isConfirmingStudentUnlinkRequest ? (
-                  <>
-                    Học sinh <strong className="text-on-surface">{confirmStudent?.name ?? 'đã chọn'}</strong> đã gửi yêu cầu hủy liên kết.
-                    Khi bạn đồng ý, liên kết sẽ chuyển sang trạng thái đã hủy và bạn sẽ không còn xem được tiến độ, điểm số của con.
-                  </>
-                ) : (
-                  <>
-                    Hệ thống sẽ gửi yêu cầu hủy liên kết tới học sinh{' '}
-                    <strong className="text-on-surface">{confirmStudent?.name ?? 'đã chọn'}</strong>. Liên kết chỉ bị hủy sau khi học sinh đồng ý.
-                  </>
-                )}
+                Liên kết với <strong className="text-on-surface">{confirmStudent?.name ?? 'học sinh đã chọn'}</strong> sẽ
+                chuyển sang trạng thái đã hủy ngay. Bạn sẽ không thể xem tiến độ, nhắn giáo viên hoặc xem lịch sử thanh toán của học sinh này.
               </p>
+
+              <label className="block space-y-2">
+                <span className="text-xs font-bold text-on-surface-variant">Lý do (tùy chọn)</span>
+                <textarea
+                  value={unlinkReason}
+                  onChange={event => setUnlinkReason(event.target.value)}
+                  maxLength={500}
+                  rows={3}
+                  placeholder="Nhập lý do hủy liên kết"
+                  className="w-full resize-none rounded-xl border border-outline-variant/40 bg-surface px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary"
+                />
+                <span className="block text-right text-[11px] text-on-surface-variant">{unlinkReason.length}/500</span>
+              </label>
 
               <div className="flex gap-2 justify-end">
                 <button
-                  onClick={() => setConfirmUnlinkId(null)}
+                  onClick={() => {
+                    setConfirmUnlinkId(null);
+                    setUnlinkReason('');
+                  }}
                   disabled={unlinking}
                   className="px-4 py-2.5 bg-surface-container hover:bg-surface-container-high rounded-xl text-sm font-bold text-on-surface-variant transition-colors disabled:opacity-60"
                 >
@@ -517,14 +492,10 @@ export default function ParentStudentLink() {
                 <button
                   onClick={handleExecuteUnlink}
                   disabled={unlinking}
-                  className={`px-4 py-2.5 text-white rounded-xl text-sm font-bold transition-all shadow-md disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2 ${
-                    isConfirmingStudentUnlinkRequest
-                      ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
-                      : 'bg-red-500 hover:bg-red-600 shadow-red-500/20'
-                  }`}
+                  className="px-4 py-2.5 text-white rounded-xl text-sm font-bold transition-all shadow-md disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2 bg-red-500 hover:bg-red-600 shadow-red-500/20"
                 >
                   {unlinking && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {isConfirmingStudentUnlinkRequest ? 'Đồng ý hủy' : 'Gửi yêu cầu'}
+                  Xác nhận hủy
                 </button>
               </div>
             </motion.div>

@@ -26,6 +26,17 @@ public record CreateAssignmentRequest(
         @Max(value = 100, message = "Điểm tối đa không vượt quá 100")
         Integer maxScore,
 
-        Instant dueAt
+        Instant dueAt,
+
+        @Min(value = 1, message = "Số lần nộp tối đa phải từ 1")
+        Integer maxAttempts,
+
+        Boolean allowLateSubmission,
+
+        @Min(value = 0, message = "Mức trừ điểm nộp muộn không được âm")
+        @Max(value = 100, message = "Mức trừ điểm nộp muộn không vượt quá 100%")
+        Integer latePenaltyPercent,
+
+        Boolean acceptingSubmissions
 ) {
 }

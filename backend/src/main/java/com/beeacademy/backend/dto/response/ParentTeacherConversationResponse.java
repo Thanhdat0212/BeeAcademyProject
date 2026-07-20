@@ -20,6 +20,7 @@ public record ParentTeacherConversationResponse(
         Instant lastActivityAt,
         String lastMessage,
         int messageCount,
+        int pendingModerationCount,
         List<QaMessageResponse> messages
 ) {
 }

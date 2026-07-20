@@ -1,5 +1,6 @@
 package com.beeacademy.backend.model;
 
+import com.beeacademy.backend.exception.BusinessException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -13,8 +14,14 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+import org.springframework.http.HttpStatus;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.text.Normalizer;
+import java.util.Locale;
 import java.util.UUID;
 
 @Entity
@@ -22,6 +29,9 @@ import java.util.UUID;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class QaMessage {
+
+    public static final int QA_MESSAGE_RETENTION_MONTHS = 12;
+    private static final int MAX_QA_MESSAGE_LENGTH = 5000;
 
     @Id
     @Column(name = "id", nullable = false, updatable = false)
@@ -55,9 +65,25 @@ public class QaMessage {
     @Column(name = "attachment_size_bytes")
     private Long attachmentSizeBytes;
 
+    @Column(name = "moderation_status", nullable = false, length = 30)
+    private String moderationStatus;
+
+    @Column(name = "moderation_reason")
+    private String moderationReason;
+
+    @Column(name = "retention_until", nullable = false)
+    private Instant retentionUntil;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    @UpdateTimestamp
+    @Column(name = "updated_at")
+    private Instant updatedAt;
+
+    @Column(name = "edited_at")
+    private Instant editedAt;
 
     static QaMessage create(QaThread thread, Profile author, String content) {
         return create(thread, author, content, null, null, null, null);
@@ -66,6 +92,7 @@ public class QaMessage {
     static QaMessage create(QaThread thread, Profile author, String content,
                             String attachmentUrl, String attachmentName,
                             String attachmentType, Long attachmentSizeBytes) {
+        requireAllowedContent(content, MAX_QA_MESSAGE_LENGTH);
         QaMessage message = new QaMessage();
         message.id = UUID.randomUUID();
         message.thread = thread;
@@ -76,7 +103,76 @@ public class QaMessage {
         message.attachmentName = blankToNull(attachmentName);
         message.attachmentType = blankToNull(attachmentType);
         message.attachmentSizeBytes = attachmentSizeBytes;
+        message.moderationStatus = moderationStatusFor(content);
+        message.moderationReason = "pending_review".equals(message.moderationStatus)
+                ? "Message matched safety moderation keyword."
+                : null;
+        message.retentionUntil = defaultRetentionUntil();
         return message;
+    }
+
+    public void updateContent(String content) {
+        requireAllowedContent(content, MAX_QA_MESSAGE_LENGTH);
+        this.content = content.trim();
+        this.moderationStatus = moderationStatusFor(content);
+        this.moderationReason = "pending_review".equals(this.moderationStatus)
+                ? "Message matched safety moderation keyword."
+                : null;
+        this.editedAt = Instant.now();
+    }
+
+    public static void requireAllowedContent(String content, int maxLength) {
+        if (content == null || content.isBlank()) {
+            throw new BusinessException(
+                    "MESSAGE_CONTENT_REQUIRED",
+                    "Vui long nhap noi dung tin nhan.",
+                    HttpStatus.BAD_REQUEST);
+        }
+        String trimmed = content.trim();
+        if (trimmed.length() > maxLength) {
+            throw new BusinessException(
+                    "MESSAGE_TOO_LONG",
+                    "Tin nhan vuot qua gioi han ky tu cho phep.",
+                    HttpStatus.BAD_REQUEST);
+        }
+        if (containsPolicyViolation(trimmed)) {
+            throw new BusinessException(
+                    "MESSAGE_POLICY_VIOLATION",
+                    "Tin nhan co noi dung vi pham chinh sach an toan nen khong the gui.",
+                    HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    private static Instant defaultRetentionUntil() {
+        return OffsetDateTime.now(ZoneOffset.UTC)
+                .plusMonths(QA_MESSAGE_RETENTION_MONTHS)
+                .toInstant();
+    }
+
+    private static String moderationStatusFor(String content) {
+        return containsPolicyViolation(content)
+                ? "pending_review"
+                : "approved";
+    }
+
+    private static boolean containsPolicyViolation(String content) {
+        String normalized = normalizeForPolicy(content);
+        return normalized.contains("spam")
+                || normalized.contains("lua dao")
+                || normalized.contains("chui")
+                || normalized.contains("xuc pham")
+                || normalized.contains("kich dong")
+                || normalized.contains("bao luc")
+                || normalized.contains("tinh duc")
+                || normalized.contains("ma tuy")
+                || normalized.contains("co bac");
+    }
+
+    private static String normalizeForPolicy(String content) {
+        String lower = content == null ? "" : content.toLowerCase(Locale.ROOT);
+        String decomposed = Normalizer.normalize(lower, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "");
+        return decomposed.replace('đ', 'd');
     }
 
     private static String blankToNull(String value) {

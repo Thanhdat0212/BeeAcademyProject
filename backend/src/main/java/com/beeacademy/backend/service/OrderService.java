@@ -35,6 +35,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final CourseRepository courseRepository;
+    private final PublishedCourseVersionResolver publishedCourseVersionResolver;
     private final EnrollmentRepository enrollmentRepository;
     private final TeacherRevenueService teacherRevenueService;
     private final RewardService rewardService;
@@ -403,14 +404,19 @@ public class OrderService {
         long orderCode = order.getOrderCode();
         List<OrderItem> items = orderItemRepository.findByOrderId(order.getId());
         for (OrderItem item : items) {
+            Course enrollmentCourse = courseRepository.findById(item.getCourseId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Course", item.getCourseId()));
+            CourseVersion publishedVersion = publishedCourseVersionResolver.resolve(enrollmentCourse);
             // Tạo enrollment trước — đây là phần quan trọng nhất
             if (!enrollmentRepository.existsByStudentIdAndCourseId(order.getUserId(), item.getCourseId())) {
-                enrollmentRepository.save(Enrollment.create(order.getUserId(), item.getCourseId()));
-                log.info("Enrollment created: user={} course={}", order.getUserId(), item.getCourseId());
+                enrollmentRepository.save(Enrollment.create(
+                        order.getUserId(), item.getCourseId(), publishedVersion.getId()));
+                log.info("Enrollment created: user={} course={} version={}",
+                        order.getUserId(), item.getCourseId(), publishedVersion.getId());
             }
             // Ghi revenue split riêng — lỗi ở đây không được rollback enrollment
             try {
-                Course course = courseRepository.findById(item.getCourseId()).orElse(null);
+                Course course = enrollmentCourse;
                 if (course == null) {
                     log.warn("Revenue split bỏ qua: course {} không tồn tại", item.getCourseId());
                 } else if (course.getTeacher() == null) {

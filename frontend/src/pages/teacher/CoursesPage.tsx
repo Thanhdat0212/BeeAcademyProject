@@ -22,7 +22,7 @@ import { listCategories } from '../../api/courseService';
 import type { Category } from '../../types/api';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
-  Bell, LogOut, Menu, X, Plus, Pencil, Trash2,
+  LogOut, Menu, X, Plus, Pencil, Trash2,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, CheckCircle2, Clock, AlertTriangle,
   Megaphone, Database, Send, RefreshCcw, Eye, Save, Loader2, ChevronDown,

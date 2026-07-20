@@ -12,6 +12,8 @@ public record QuestionResponse(
         UUID id,
         String content,
         String explanation,
+        Double defaultPoints,
+        List<String> tags,
         JsonNode metadata,
         String difficulty,
         String type,
@@ -25,6 +27,7 @@ public record QuestionResponse(
         UUID chapterId,
         String chapterTitle,
         Instant createdAt,
+        String duplicateWarning,
         List<ChoiceResponse> choices
 ) {
     public record ChoiceResponse(UUID id, String content, Boolean isCorrect, Integer position) {}
@@ -37,6 +40,8 @@ public record QuestionResponse(
                 q.getId(),
                 q.getContent(),
                 q.getExplanation(),
+                q.getDefaultPoints(),
+                parseStringList(q.getTagsJson(), mapper),
                 parseMetadata(q.getMetadataJson(), mapper),
                 q.getDifficulty(),
                 q.getType(),
@@ -50,8 +55,33 @@ public record QuestionResponse(
                 q.getChapter() != null ? q.getChapter().getId() : null,
                 q.getChapter() != null ? q.getChapter().getTitle() : null,
                 q.getCreatedAt(),
+                null,
                 choices
         );
+    }
+
+    public QuestionResponse withDuplicateWarning(String warning) {
+        return new QuestionResponse(
+                id,
+                content,
+                explanation,
+                defaultPoints,
+                tags,
+                metadata,
+                difficulty,
+                type,
+                status,
+                usageCount,
+                questionBankId,
+                questionBankTitle,
+                categoryId,
+                categoryName,
+                grade,
+                chapterId,
+                chapterTitle,
+                createdAt,
+                warning,
+                choices);
     }
 
     public static QuestionResponse forStudent(Question q, ObjectMapper mapper) {
@@ -62,11 +92,14 @@ public record QuestionResponse(
                 q.getId(),
                 q.getContent(),
                 null,
+                q.getDefaultPoints(),
+                parseStringList(q.getTagsJson(), mapper),
                 parseMetadata(q.getMetadataJson(), mapper),
                 q.getDifficulty(),
                 q.getType(),
                 q.getStatus(),
                 q.getUsageCount(),
+                null,
                 null,
                 null,
                 null,
@@ -87,6 +120,17 @@ public record QuestionResponse(
             return mapper.readTree(metadataJson);
         } catch (Exception ignored) {
             return null;
+        }
+    }
+
+    private static List<String> parseStringList(String json, ObjectMapper mapper) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return mapper.readerForListOf(String.class).readValue(json);
+        } catch (Exception ignored) {
+            return List.of();
         }
     }
 }

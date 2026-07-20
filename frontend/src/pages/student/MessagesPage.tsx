@@ -26,6 +26,7 @@ import {
   QaMessage,
   QaThread,
   QaThreadStatus,
+  QaVisibility,
   uploadQaImage,
 } from '../../api/qaService';
 
@@ -124,7 +125,9 @@ function flattenLessons(course: CourseDetail | null): LessonDetail[] {
 function ComposeModal({ courses, onClose, onCreated }: ComposeModalProps) {
   const [courseId, setCourseId] = useState(courses[0]?.id ?? '');
   const [lessonId, setLessonId] = useState('');
+  const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [visibility, setVisibility] = useState<QaVisibility>('public');
   const [courseDetail, setCourseDetail] = useState<CourseDetail | null>(null);
   const [loadingLessons, setLoadingLessons] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -165,8 +168,12 @@ function ComposeModal({ courses, onClose, onCreated }: ComposeModalProps) {
       notify.error('Vui lòng chọn khóa học');
       return;
     }
-    if (!content.trim()) {
-      notify.error('Vui lòng nhập nội dung câu hỏi');
+    if (!title.trim()) {
+      notify.error('Vui lòng nhập tiêu đề câu hỏi');
+      return;
+    }
+    if (content.trim().length < 10) {
+      notify.error('Nội dung câu hỏi phải có ít nhất 10 ký tự');
       return;
     }
     try {
@@ -175,7 +182,9 @@ function ComposeModal({ courses, onClose, onCreated }: ComposeModalProps) {
       const thread = await createStudentQaThread({
         courseId,
         lessonId: lessonId || null,
+        title: title.trim(),
         content: content.trim(),
+        visibility,
         attachment,
       });
       notify.success('Đã gửi câu hỏi tới giáo viên');
@@ -233,14 +242,40 @@ function ComposeModal({ courses, onClose, onCreated }: ComposeModalProps) {
           </label>
 
           <label className="block">
+            <span className="block text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5">Tiêu đề</span>
+            <input
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              maxLength={180}
+              placeholder="Ví dụ: Thắc mắc về phép biến đổi ở bài 3"
+              className="w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 focus:border-primary outline-none text-sm text-on-surface placeholder:text-on-surface-variant/60"
+            />
+          </label>
+
+          <label className="block">
             <span className="block text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5">Nội dung câu hỏi</span>
             <textarea
               value={content}
               onChange={e => setContent(e.target.value)}
               placeholder="Ví dụ: Em chưa hiểu bước biến đổi ở phút 07:30..."
               rows={6}
+              minLength={10}
+              maxLength={5000}
               className="w-full px-4 py-3 rounded-xl bg-surface-container border border-outline-variant/40 focus:border-primary outline-none text-sm text-on-surface placeholder:text-on-surface-variant/60 resize-none leading-relaxed"
             />
+            <span className="block text-xs text-on-surface-variant mt-1">Tối thiểu 10 ký tự.</span>
+          </label>
+
+          <label className="block">
+            <span className="block text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1.5">Phạm vi hiển thị</span>
+            <select
+              value={visibility}
+              onChange={e => setVisibility(e.target.value as QaVisibility)}
+              className="w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 focus:border-primary outline-none text-sm text-on-surface"
+            >
+              <option value="public">Công khai — học sinh cùng khóa có thể xem</option>
+              <option value="private">Riêng tư — chỉ bạn, giáo viên và Admin</option>
+            </select>
           </label>
           <QaImagePicker file={imageFile} onChange={setImageFile} disabled={submitting} />
         </div>
@@ -415,8 +450,8 @@ export default function MessagesPage() {
                       >
                         <div className="flex items-start justify-between gap-2 mb-2">
                           <div className="min-w-0">
-                            <p className={`font-bold text-sm line-clamp-1 ${isSelected ? 'text-primary' : 'text-on-surface'}`}>{thread.courseTitle}</p>
-                            <p className="text-xs text-on-surface-variant line-clamp-1">{thread.lessonTitle ?? 'Hỏi chung về khóa học'}</p>
+                            <p className={`font-bold text-sm line-clamp-1 ${isSelected ? 'text-primary' : 'text-on-surface'}`}>{thread.title}</p>
+                            <p className="text-xs text-on-surface-variant line-clamp-1">{thread.courseTitle} · {thread.lessonTitle ?? 'Hỏi chung'}</p>
                           </div>
                           <StatusBadge status={thread.status} />
                         </div>
@@ -444,9 +479,12 @@ export default function MessagesPage() {
                         <div className="min-w-0">
                           <p className="font-extrabold text-on-surface flex items-center gap-2">
                             <BookOpen className="w-4 h-4 text-primary flex-shrink-0" />
-                            {selectedThread.courseTitle}
+                            {selectedThread.title}
                           </p>
-                          <p className="text-sm text-on-surface-variant mt-1">{selectedThread.lessonTitle ?? 'Hỏi chung về khóa học'}</p>
+                          <p className="text-sm text-on-surface-variant mt-1">{selectedThread.courseTitle} · {selectedThread.lessonTitle ?? 'Hỏi chung về khóa học'}</p>
+                          <p className="text-xs text-on-surface-variant mt-1">
+                            {selectedThread.visibility === 'private' ? 'Riêng tư: chỉ bạn, giáo viên và Admin' : 'Công khai với học sinh cùng khóa'}
+                          </p>
                           <p className="text-xs text-on-surface-variant mt-1">Bắt đầu: {formatDateTime(selectedThread.createdAt)}</p>
                         </div>
                         <StatusBadge status={selectedThread.status} />

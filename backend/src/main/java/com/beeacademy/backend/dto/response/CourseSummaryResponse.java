@@ -68,7 +68,8 @@ public record CourseSummaryResponse(
         Instant purchasedAt,
         Instant lastAccessedAt,
         String learningStatus,
-        Boolean finalExamPassed
+        Boolean finalExamPassed,
+        Boolean allRequiredExamsPassed
 ) {
 
     /**
@@ -104,7 +105,7 @@ public record CourseSummaryResponse(
             int studentCount
     ) {
         return fromEntity(course, hasFreePreview, averageRating, reviewCount, studentCount,
-                null, null, null, null, null);
+                null, null, null, null, null, null);
     }
 
     public static CourseSummaryResponse fromEntity(
@@ -116,7 +117,7 @@ public record CourseSummaryResponse(
             Integer progressPct
     ) {
         return fromEntity(course, hasFreePreview, averageRating, reviewCount, studentCount,
-                progressPct, null, null, null, null);
+                progressPct, null, null, null, null, null);
     }
 
     public static CourseSummaryResponse fromEntity(
@@ -129,7 +130,8 @@ public record CourseSummaryResponse(
             Instant purchasedAt,
             Instant lastAccessedAt,
             String learningStatus,
-            Boolean finalExamPassed
+            Boolean finalExamPassed,
+            Boolean allRequiredExamsPassed
     ) {
         // Boxing int[] → List<Integer> để JSON ra mảng JSON chuẩn
         List<Integer> grades = Arrays.stream(course.getGrades()).boxed().collect(Collectors.toList());
@@ -167,7 +169,8 @@ public record CourseSummaryResponse(
                 purchasedAt,
                 lastAccessedAt,
                 learningStatus,
-                finalExamPassed
+                finalExamPassed,
+                allRequiredExamsPassed
         );
     }
 }

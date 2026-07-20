@@ -43,7 +43,7 @@ import {
 } from '../../api/complaintService';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
-  Bell, LogOut, Menu, X, Send, Plus,
+  LogOut, Menu, X, Send, Plus,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, CheckCircle2, Clock, AlertTriangle,
   XCircle, Megaphone, Database, MessageSquare, AlertCircle, UserCircle, Lock, Star,

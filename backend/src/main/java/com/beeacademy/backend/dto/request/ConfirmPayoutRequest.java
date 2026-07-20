@@ -12,6 +12,12 @@ public record ConfirmPayoutRequest(
         String transferRef,
 
         @Size(max = 500, message = "Ghi chú tối đa 500 ký tự")
-        String transferContent
+        String transferContent,
+
+        @Size(max = 1000, message = "URL UNC toi da 1000 ky tu")
+        String uncAttachmentUrl
 ) {
+    public ConfirmPayoutRequest(String transferRef, String transferContent) {
+        this(transferRef, transferContent, null);
+    }
 }

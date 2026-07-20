@@ -161,6 +161,13 @@ public class CourseReviewService {
                 == ModerateCourseReviewRequest.ModerationDecision.APPROVE
                 ? CourseReviewModerationStatus.PUBLISHED
                 : CourseReviewModerationStatus.REJECTED;
+        if (nextStatus == CourseReviewModerationStatus.REJECTED
+                && (request.reason() == null || request.reason().isBlank())) {
+            throw new BusinessException(
+                    "COURSE_REVIEW_REJECTION_REASON_REQUIRED",
+                    "Admin cần nhập lý do khi từ chối đánh giá.",
+                    HttpStatus.BAD_REQUEST);
+        }
         review.moderate(nextStatus, request.reason(), me.userId());
         CourseReview saved = courseReviewRepository.save(review);
         userNotificationService.notify(

@@ -62,6 +62,8 @@ export interface QuestionResponse {
   id: string;
   content: string;
   explanation: string | null;
+  defaultPoints: number | null;
+  tags: string[];
   metadata: QuestionMetadata | null;
   difficulty: Difficulty;
   type: QuestionType;
@@ -75,7 +77,40 @@ export interface QuestionResponse {
   chapterId: string | null;
   chapterTitle: string | null;
   createdAt: string;
+  duplicateWarning?: string | null;
   choices: ChoiceResponse[];
+}
+
+export interface QuestionVersionResponse {
+  id: string;
+  versionNo: number;
+  questionBankId: string | null;
+  categoryId: string | null;
+  grade: number | null;
+  chapterId: string | null;
+  content: string;
+  explanation: string | null;
+  defaultPoints: number | null;
+  tags: string[];
+  metadata: QuestionMetadata | null;
+  difficulty: Difficulty;
+  type: QuestionType;
+  status: QuestionStatus;
+  choices: ChoiceResponse[] | null;
+  changeReason: string | null;
+  createdAt: string;
+}
+
+export interface QuestionAuditLogResponse {
+  id: string;
+  teacherId: string;
+  questionId: string;
+  oldVersion: number | null;
+  newVersion: number | null;
+  action: 'CREATE' | 'UPDATE' | 'ARCHIVE' | 'DELETE';
+  oldState: Record<string, unknown> | null;
+  newState: Record<string, unknown> | null;
+  createdAt: string;
 }
 
 export interface QuestionStatsResponse {
@@ -108,6 +143,8 @@ export interface CreateQuestionRequest {
   difficulty: Difficulty;
   type: QuestionType;
   choices: Array<{ content: string; isCorrect: boolean }>;
+  defaultPoints?: number | null;
+  tags?: string[];
   metadata?: QuestionMetadata | null;
 }
 
@@ -154,6 +191,20 @@ export async function updateQuestion(questionId: string,
 
 export async function deleteQuestion(questionId: string): Promise<void> {
   await apiClient.delete(`/api/teacher/questions/${questionId}`);
+}
+
+export async function listQuestionVersions(questionId: string): Promise<QuestionVersionResponse[]> {
+  const res = await apiClient.get<ApiResponse<QuestionVersionResponse[]>>(
+    `/api/teacher/questions/${questionId}/versions`,
+  );
+  return unwrap(res.data);
+}
+
+export async function listQuestionAuditLogs(questionId: string): Promise<QuestionAuditLogResponse[]> {
+  const res = await apiClient.get<ApiResponse<QuestionAuditLogResponse[]>>(
+    `/api/teacher/questions/${questionId}/audit-logs`,
+  );
+  return unwrap(res.data);
 }
 
 export async function getQuestionStats(chapterId: string): Promise<QuestionStatsResponse> {

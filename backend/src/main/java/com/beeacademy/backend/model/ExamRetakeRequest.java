@@ -48,11 +48,26 @@ public class ExamRetakeRequest {
     @Column(name = "decided_by")
     private UUID decidedBy;
 
+    @Column(name = "approver_role")
+    private String approverRole;
+
     @Column(name = "decided_reason")
     private String decidedReason;
 
     @Column(name = "retake_expire_at")
     private Instant retakeExpireAt;
+
+    @Column(name = "request_count", nullable = false)
+    private Integer requestCount = 1;
+
+    @Column(name = "approval_count", nullable = false)
+    private Integer approvalCount = 0;
+
+    @Column(name = "rejected_at")
+    private Instant rejectedAt;
+
+    @Column(name = "cooldown_until")
+    private Instant cooldownUntil;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -61,29 +76,38 @@ public class ExamRetakeRequest {
     @Column(name = "decided_at")
     private Instant decidedAt;
 
-    public static ExamRetakeRequest create(Profile student, ExamConfig examConfig, String reason) {
+    public static ExamRetakeRequest create(Profile student, ExamConfig examConfig, String reason,
+                                           int requestCount, int approvalCount) {
         ExamRetakeRequest request = new ExamRetakeRequest();
         request.id = UUID.randomUUID();
         request.student = student;
         request.examConfig = examConfig;
         request.status = ExamRetakeStatus.PENDING;
         request.requestedReason = reason;
+        request.requestCount = requestCount;
+        request.approvalCount = approvalCount;
         return request;
     }
 
-    public void approve(UUID adminOrTeacherId, int extraAttempts, String reason, Instant retakeExpireAt) {
+    public void approve(UUID adminOrTeacherId, String approverRole, int extraAttempts,
+                        String reason, Instant retakeExpireAt, int approvalCount) {
         this.status = ExamRetakeStatus.APPROVED;
         this.decidedBy = adminOrTeacherId;
+        this.approverRole = approverRole;
         this.extraAttempts = extraAttempts;
         this.decidedReason = reason;
         this.retakeExpireAt = retakeExpireAt;
+        this.approvalCount = approvalCount;
         this.decidedAt = Instant.now();
     }
 
-    public void reject(UUID adminOrTeacherId, String reason) {
+    public void reject(UUID adminOrTeacherId, String approverRole, String reason, Instant cooldownUntil) {
         this.status = ExamRetakeStatus.REJECTED;
         this.decidedBy = adminOrTeacherId;
+        this.approverRole = approverRole;
         this.decidedReason = reason;
+        this.rejectedAt = Instant.now();
+        this.cooldownUntil = cooldownUntil;
         this.decidedAt = Instant.now();
     }
 

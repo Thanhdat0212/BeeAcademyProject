@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -16,4 +17,8 @@ public interface CourseVersionRepository extends JpaRepository<CourseVersion, UU
     int findMaxVersionNo(@Param("courseId") UUID courseId);
 
     List<CourseVersion> findByCourseIdOrderByVersionNoDesc(UUID courseId);
+
+    Optional<CourseVersion> findByCourseIdAndVersionNo(UUID courseId, Integer versionNo);
+
+    Optional<CourseVersion> findFirstByCourseIdAndApprovedAtIsNotNullOrderByVersionNoDesc(UUID courseId);
 }

@@ -3,6 +3,7 @@ import type { ApiResponse } from '../types/api';
 
 export type QaThreadStatus = 'pending' | 'answered' | 'resolved';
 export type QaAuthorRole = 'student' | 'teacher' | 'parent' | 'admin';
+export type QaVisibility = 'public' | 'private';
 
 export interface QaMessage {
   id: string;
@@ -14,6 +15,7 @@ export interface QaMessage {
   attachmentName: string | null;
   attachmentType: string | null;
   attachmentSizeBytes: number | null;
+  editedAt?: string | null;
   sentAt: string;
 }
 
@@ -26,6 +28,7 @@ export interface QaAttachment {
 
 export interface QaThread {
   id: string;
+  title: string;
   studentId: string;
   studentName: string;
   courseId: string;
@@ -33,15 +36,28 @@ export interface QaThread {
   lessonId: string | null;
   lessonTitle: string | null;
   status: QaThreadStatus;
+  visibility: QaVisibility;
+  duplicateOfThreadId?: string | null;
+  duplicateMarkedAt?: string | null;
   createdAt: string;
   lastActivityAt: string;
   messages: QaMessage[];
 }
 
+export interface QaKpiReportResponse {
+  totalAnswered: number;
+  answeredWithin48Hours: number;
+  answeredWithin7Days: number;
+  within48HoursRate: number;
+  within7DaysRate: number;
+}
+
 export interface CreateQaThreadPayload {
   courseId: string;
   lessonId?: string | null;
+  title: string;
   content: string;
+  visibility?: QaVisibility;
   attachment?: QaAttachment;
 }
 
@@ -54,9 +70,25 @@ export async function createStudentQaThread(payload: CreateQaThreadPayload): Pro
   const res = await apiClient.post<ApiResponse<QaThread>>('/api/student/qa', {
     courseId: payload.courseId,
     lessonId: payload.lessonId,
+    title: payload.title,
     content: payload.content,
+    visibility: payload.visibility ?? 'public',
     ...payload.attachment,
   });
+  return unwrap(res.data);
+}
+
+export async function listCoursePublicQaThreads(courseId: string): Promise<QaThread[]> {
+  const res = await apiClient.get<ApiResponse<QaThread[]>>(
+    `/api/student/courses/${encodeURIComponent(courseId)}/qa/public`,
+  );
+  return unwrap(res.data);
+}
+
+export async function getStudentQaThread(threadId: string): Promise<QaThread> {
+  const res = await apiClient.get<ApiResponse<QaThread>>(
+    `/api/student/qa/${encodeURIComponent(threadId)}`,
+  );
   return unwrap(res.data);
 }
 
@@ -74,12 +106,54 @@ export async function listTeacherQaThreads(): Promise<QaThread[]> {
   return unwrap(res.data);
 }
 
+export async function listAdminQaThreads(courseId?: string): Promise<QaThread[]> {
+  const res = await apiClient.get<ApiResponse<QaThread[]>>('/api/admin/qa', {
+    params: courseId ? { courseId } : undefined,
+  });
+  return unwrap(res.data);
+}
+
+export async function getAdminQaThread(threadId: string): Promise<QaThread> {
+  const res = await apiClient.get<ApiResponse<QaThread>>(
+    `/api/admin/qa/${encodeURIComponent(threadId)}`,
+  );
+  return unwrap(res.data);
+}
+
 export async function addTeacherQaMessage(threadId: string, content: string,
                                            attachment?: QaAttachment): Promise<QaThread> {
   const res = await apiClient.post<ApiResponse<QaThread>>(
     `/api/teacher/qa/${encodeURIComponent(threadId)}/messages`,
     { content, ...attachment },
   );
+  return unwrap(res.data);
+}
+
+export async function editTeacherQaMessage(
+  threadId: string,
+  messageId: string,
+  content: string,
+): Promise<QaThread> {
+  const res = await apiClient.put<ApiResponse<QaThread>>(
+    `/api/teacher/qa/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`,
+    { content },
+  );
+  return unwrap(res.data);
+}
+
+export async function markTeacherQaDuplicate(
+  threadId: string,
+  duplicateOfThreadId: string,
+): Promise<QaThread> {
+  const res = await apiClient.post<ApiResponse<QaThread>>(
+    `/api/teacher/qa/${encodeURIComponent(threadId)}/duplicate`,
+    { duplicateOfThreadId },
+  );
+  return unwrap(res.data);
+}
+
+export async function getTeacherQaReport(): Promise<QaKpiReportResponse> {
+  const res = await apiClient.get<ApiResponse<QaKpiReportResponse>>('/api/teacher/qa/report');
   return unwrap(res.data);
 }
 

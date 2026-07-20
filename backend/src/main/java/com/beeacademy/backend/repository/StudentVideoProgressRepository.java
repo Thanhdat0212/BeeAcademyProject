@@ -22,6 +22,20 @@ public interface StudentVideoProgressRepository extends JpaRepository<StudentVid
     );
 
     @Query("""
+           SELECT p
+           FROM StudentVideoProgress p
+           JOIN FETCH p.lesson lesson
+           JOIN FETCH lesson.chapter chapter
+           JOIN FETCH chapter.course course
+           WHERE p.student.id = :studentId
+             AND course.id IN :courseIds
+           """)
+    List<StudentVideoProgress> findByStudentAndCourseIds(
+            @Param("studentId") UUID studentId,
+            @Param("courseIds") Collection<UUID> courseIds
+    );
+
+    @Query("""
            SELECT p.lesson.chapter.course.id, MAX(p.updatedAt)
            FROM StudentVideoProgress p
            WHERE p.student.id = :studentId

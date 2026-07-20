@@ -5,6 +5,7 @@
  */
 import { apiClient, unwrap } from './client';
 import type { ApiResponse } from '../types/api';
+import type { QuestionMetadata } from './questionService';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,8 @@ export interface QuestionForStudent {
   id: string;
   content: string;
   type: string;
+  metadata?: QuestionMetadata | null;
+  multipleAnswer?: boolean;
   choices: ChoiceForStudent[];
 }
 

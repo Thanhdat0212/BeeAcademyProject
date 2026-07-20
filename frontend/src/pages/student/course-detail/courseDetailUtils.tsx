@@ -1,37 +1,14 @@
+import {
+  BookOpen,
+  Star,
+} from 'lucide-react';
 import { useState } from 'react';
-import { Star, Video, BookOpen } from 'lucide-react';
-import type { Course, Lesson } from '../../../data/mockCourses';
 import { formatDurationSec } from '../../../api/adapter';
-import type { StudentVideoProgress, VideoWatchedSegment } from '../../../api/studentVideoProgressService';
-import type { ChapterDetail, LessonDetail } from '../../../types/api';
-import { LearningView } from './LearningView';
+import type { VideoWatchedSegment } from '../../../api/studentVideoProgressService';
+import type { VideoPosition } from '../../../store/useCourseStore';
+import type { LessonDetail } from '../../../types/api';
+import type { Course, Lesson } from '../../../types/course';
 
-export type MarketingSyllabusSection = Omit<ChapterDetail, 'lessons'> & { lessons: Lesson[] };
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// COMPONENT: LearningView
-//
-// Hiển thị khi user ĐÃ MUA khóa học.
-// Giao diện học giống YouTube/Udemy: video player trái + sidebar mục lục phải.
-//
-// STATE QUAN TRỌNG:
-//   activeLesson  — bài học đang xem (video/pdf), quyết định nội dung player
-//   activeQuiz    — bài quiz đang mở (null = không có modal), tách biệt với activeLesson
-//   quizScores    — Record<lessonId, điểm%> lưu điểm các quiz trong session
-//   isSidebarOpen — toggle sidebar mục lục (ẩn/hiện)
-//
-// TẠI SAO activeQuiz TÁCH BIỆT activeLesson?
-//   Quiz không hiển thị trong video player — chúng mở modal overlay.
-//   Nếu dùng chung, khi user đóng quiz thì video player cũng bị reset.
-//   Tách biệt: click quiz → setActiveQuiz(lesson), click video/pdf → setActiveLesson(lesson)
-//
-// SIDEBAR:
-//   Mỗi item là một bài trong course.lessons
-//   Quiz items: hiển thị badge "Quiz" + điểm nếu đã làm (từ quizScores)
-//   Video/PDF items: hiển thị icon type + dấu tích xanh nếu isCompleted
-//   Sidebar slide in/out từ bên phải với spring animation
-// ═══════════════════════════════════════════════════════════════════════════════
 export function formatDiscussionDate(iso: string): string {
   return new Date(iso).toLocaleString('vi-VN', {
     day: '2-digit',
@@ -130,7 +107,6 @@ export function SafeCourseImage({
 
 export function adaptLearningLesson(lesson: LessonDetail): Lesson {
   const hasVideo = Boolean(lesson.videoUrl || lesson.videoEmbedUrl);
-  const hasDocuments = (lesson.documents?.length ?? 0) > 0;
   const type: Lesson['type'] = hasVideo ? 'video' : 'pdf';
   return {
     id: lesson.id,
@@ -145,6 +121,8 @@ export function adaptLearningLesson(lesson: LessonDetail): Lesson {
     completionRule: lesson.completionRule,
     transcript: lesson.transcript,
     subtitleUrl: lesson.subtitleUrl,
+    videoFallbackUrl: lesson.videoFallbackUrl,
+    slideCueSeconds: lesson.slideCueSeconds,
     documents: lesson.documents ?? [],
   };
 }
@@ -194,26 +172,19 @@ export function getOrderedVideoLessons(
   return sections.flatMap((section) => section.lessons).filter((lesson) => lesson.type === 'video');
 }
 
-export function getContinueLearningLesson(
-  orderedVideoLessons: Lesson[],
-  completedLessonIds: string[],
-  latestProgress: Pick<StudentVideoProgress, 'lessonId'> | null | undefined,
-): Lesson | null {
-  if (orderedVideoLessons.length === 0) return null;
+export function getGlobalLessonNumberById(sections: Array<{ lessons: Lesson[] }>): Map<string, number> {
+  const result = new Map<string, number>();
+  let nextNumber = 1;
 
-  const latestIndex = latestProgress
-    ? orderedVideoLessons.findIndex(lesson => lesson.id === latestProgress.lessonId)
-    : -1;
+  sections.forEach((section) => {
+    section.lessons.forEach((lesson) => {
+      if (lesson.type === 'quiz') return;
+      result.set(lesson.id, nextNumber);
+      nextNumber += 1;
+    });
+  });
 
-  if (latestIndex >= 0) {
-    if (!completedLessonIds.includes(orderedVideoLessons[latestIndex].id)) {
-      return orderedVideoLessons[latestIndex];
-    }
-    return orderedVideoLessons[latestIndex + 1] ?? orderedVideoLessons[latestIndex];
-  }
-
-  return orderedVideoLessons.find(lesson => !completedLessonIds.includes(lesson.id))
-    ?? orderedVideoLessons[orderedVideoLessons.length - 1];
+  return result;
 }
 
 export function getLessonUnlockState(
@@ -281,6 +252,64 @@ export function getLessonUnlockState(
     lockedByPurchase: false,
     lockedByPrerequisite: true,
   };
+}
+
+export function getVideoPositionUpdatedTime(position?: VideoPosition): number {
+  if (!position?.updatedAt) return 0;
+  const time = new Date(position.updatedAt).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+export function hasUnfinishedVideoProgress(position?: VideoPosition): boolean {
+  if (!position || position.positionSec <= 0) return false;
+  if (position.durationSec > 0) {
+    return position.positionSec < position.durationSec - 5;
+  }
+  return true;
+}
+
+export function findContinueLearningLesson(
+  course: Course,
+  sections: Array<{ lessons: Lesson[] }>,
+  completedLessonIds: string[],
+  videoPositions: Record<string, VideoPosition> = {},
+): Lesson | null {
+  const orderedVideoLessons = getOrderedVideoLessons(sections);
+  const completedSet = new Set(completedLessonIds);
+  const canOpen = (lesson: Lesson) =>
+    getLessonUnlockState(course, lesson, orderedVideoLessons, completedLessonIds).canOpen;
+
+  const unfinishedLessons = orderedVideoLessons
+    .filter(lesson =>
+      !completedSet.has(lesson.id) &&
+      canOpen(lesson) &&
+      hasUnfinishedVideoProgress(videoPositions[lesson.id])
+    )
+    .sort((a, b) =>
+      getVideoPositionUpdatedTime(videoPositions[b.id]) - getVideoPositionUpdatedTime(videoPositions[a.id])
+    );
+
+  if (unfinishedLessons.length > 0) {
+    return unfinishedLessons[0];
+  }
+
+  const latestActivityLesson = orderedVideoLessons
+    .filter(lesson => videoPositions[lesson.id])
+    .sort((a, b) =>
+      getVideoPositionUpdatedTime(videoPositions[b.id]) - getVideoPositionUpdatedTime(videoPositions[a.id])
+    )[0];
+
+  if (latestActivityLesson && completedSet.has(latestActivityLesson.id)) {
+    const latestIndex = orderedVideoLessons.findIndex(lesson => lesson.id === latestActivityLesson.id);
+    const nextLesson = orderedVideoLessons
+      .slice(latestIndex + 1)
+      .find(lesson => !completedSet.has(lesson.id) && canOpen(lesson));
+    if (nextLesson) return nextLesson;
+  }
+
+  return orderedVideoLessons.find(lesson => !completedSet.has(lesson.id) && canOpen(lesson))
+    ?? orderedVideoLessons.find(canOpen)
+    ?? null;
 }
 
 export function getLessonDisplayDuration(

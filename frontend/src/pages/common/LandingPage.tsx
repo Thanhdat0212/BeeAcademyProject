@@ -4,7 +4,7 @@ import { ArrowRight, BookOpen, Users, Award, Star, CheckCircle, Loader2 } from '
 import { Link } from 'react-router-dom';
 import { searchCourses } from '../../api/courseService';
 import { adaptCourseSummary } from '../../api/adapter';
-import type { Course as UiCourse } from '../../data/mockCourses';
+import type { Course as UiCourse } from '../../types/course';
 
 const FEATURED_LIMIT = 3;
 

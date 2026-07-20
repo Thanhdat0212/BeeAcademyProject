@@ -5,6 +5,7 @@ import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Course;
 import com.beeacademy.backend.model.CourseStatus;
 import com.beeacademy.backend.model.Enrollment;
+import com.beeacademy.backend.model.CourseVersion;
 import com.beeacademy.backend.repository.CourseRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
 import org.springframework.http.HttpStatus;
@@ -29,6 +30,7 @@ public class EnrollmentService {
 
     private final EnrollmentRepository enrollmentRepository;
     private final CourseRepository     courseRepository;
+    private final PublishedCourseVersionResolver publishedCourseVersionResolver;
     private final TeacherRevenueService teacherRevenueService;
 
     /**
@@ -61,7 +63,8 @@ public class EnrollmentService {
             return;
         }
 
-        Enrollment enrollment = Enrollment.create(studentId, courseId);
+        CourseVersion publishedVersion = publishedCourseVersionResolver.resolve(course);
+        Enrollment enrollment = Enrollment.create(studentId, courseId, publishedVersion.getId());
         enrollmentRepository.save(enrollment);
         teacherRevenueService.recordEnrollmentRevenue(studentId, course);
         log.info("Đã ghi danh student {} vào khóa học {}", studentId, courseId);
@@ -76,4 +79,5 @@ public class EnrollmentService {
     public boolean isEnrolled(UUID studentId, UUID courseId) {
         return enrollmentRepository.existsByStudentIdAndCourseId(studentId, courseId);
     }
+
 }

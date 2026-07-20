@@ -1,6 +1,7 @@
 package com.beeacademy.backend.service;
 
 import com.beeacademy.backend.dto.response.StudentParentLinkInvitationResponse;
+import com.beeacademy.backend.dto.request.RevokeParentStudentLinkRequest;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.model.ParentLinkAuditLog;
 import com.beeacademy.backend.model.ParentStudentLink;
@@ -34,14 +35,19 @@ public class StudentParentLinkService {
     private final ParentLinkAuditLogRepository auditLogRepository;
     private final UserNotificationService notificationService;
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<StudentParentLinkInvitationResponse> listPendingInvitations(AuthenticatedUser me) {
         log.info("Student {} requested pending parent link invitations", me.userId());
 
-        return linkRepository.findByIdStudentIdAndStatusOrderByInvitedAtDesc(
+        return linkRepository.findByIdStudentIdAndStatusesOrderByInvitedAtDesc(
                         me.userId(),
-                        ParentStudentLinkStatus.PENDING.toDbValue())
+                        List.of(
+                                ParentStudentLinkStatus.PENDING.toDbValue(),
+                                ParentStudentLinkStatus.EXPIRED.toDbValue()))
                 .stream()
+                .map(link -> expireIfPending(link, me.userId(), "expire_invitation"))
+                .filter(link -> link.getStatus() == ParentStudentLinkStatus.PENDING
+                        || link.getStatus() == ParentStudentLinkStatus.EXPIRED)
                 .map(this::toResponse)
                 .toList();
     }
@@ -52,7 +58,7 @@ public class StudentParentLinkService {
 
         return linkRepository.findByIdStudentIdAndStatusOrderByInvitedAtDesc(
                         me.userId(),
-                        ParentStudentLinkStatus.ACCEPTED.toDbValue())
+                        ParentStudentLinkStatus.ACTIVE.toDbValue())
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -83,44 +89,57 @@ public class StudentParentLinkService {
     }
 
     @Transactional
-    public StudentParentLinkInvitationResponse requestUnlink(AuthenticatedUser me, UUID parentId) {
-        ParentStudentLink link = requireActiveLink(me.userId(), parentId);
-        if (link.hasPendingUnlinkRequest()) {
-            if (link.isUnlinkRequestedBy(me.userId())) {
-                return toResponse(link);
-            }
+    public StudentParentLinkInvitationResponse revokeParentLink(
+            AuthenticatedUser me,
+            UUID parentId,
+            RevokeParentStudentLinkRequest request) {
+        ParentStudentLink link = linkRepository.findForUpdate(parentId, me.userId())
+                .orElseThrow(() -> new BusinessException(
+                        "PARENT_LINK_NOT_FOUND",
+                        "Không tìm thấy liên kết với phụ huynh này.",
+                        HttpStatus.NOT_FOUND));
 
-            link.revoke();
-            ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
-            log.info("Student {} confirmed unlink requested by parent {}", me.userId(), parentId);
-            return toResponse(savedLink);
+        if (isIdempotentRevocationRetry(link, me.userId(), request.operationId())) {
+            return toResponse(link);
         }
+        requireRevocableStatus(link);
 
-        link.requestUnlink(me.userId());
+        ParentStudentLinkStatus oldStatus = link.getStatus();
+        link.revoke();
         ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
-        log.info("Student {} sent unlink request to parent {}", me.userId(), parentId);
+        auditLogRepository.save(ParentLinkAuditLog.create(
+                savedLink,
+                me.userId(),
+                UserRole.STUDENT,
+                "revoke_link",
+                oldStatus,
+                savedLink.getStatus(),
+                request.operationId(),
+                request.reason()));
+        notifyParentAboutUnlink(savedLink);
+        log.info("Student {} revoked link with parent {}", me.userId(), parentId);
         return toResponse(savedLink);
     }
 
     @Transactional
-    public StudentParentLinkInvitationResponse confirmUnlink(AuthenticatedUser me, UUID parentId) {
+    public StudentParentLinkInvitationResponse updateSensitiveDataConsent(
+            AuthenticatedUser me,
+            UUID parentId,
+            boolean consentGranted) {
         ParentStudentLink link = requireActiveLink(me.userId(), parentId);
-        if (!link.hasPendingUnlinkRequest()) {
-            throw new BusinessException(
-                    "UNLINK_REQUEST_NOT_FOUND",
-                    "Chưa có yêu cầu hủy liên kết nào cần xác nhận.",
-                    HttpStatus.CONFLICT);
-        }
-        if (link.isUnlinkRequestedBy(me.userId())) {
-            throw new BusinessException(
-                    "UNLINK_REQUEST_OWNED_BY_STUDENT",
-                    "Bạn đã gửi yêu cầu hủy. Cần phụ huynh đồng ý để hoàn tất.",
-                    HttpStatus.CONFLICT);
-        }
-
-        link.revoke();
+        link.updateSensitiveDataConsent(consentGranted);
         ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
-        log.info("Student {} completed unlink for parent {}", me.userId(), parentId);
+        auditStatusChange(
+                savedLink,
+                me.userId(),
+                consentGranted ? "grant_sensitive_data_consent" : "revoke_sensitive_data_consent",
+                savedLink.getStatus(),
+                savedLink.getStatus());
+        log.info(
+                "Student {} {} sensitive data consent for parent {}",
+                me.userId(),
+                consentGranted ? "granted" : "revoked",
+                parentId);
         return toResponse(savedLink);
     }
 
@@ -139,6 +158,10 @@ public class StudentParentLinkService {
         }
 
         if (isExpired(link)) {
+            ParentStudentLinkStatus oldStatus = link.getStatus();
+            link.expire();
+            ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+            auditStatusChange(savedLink, studentId, "expire_invitation", oldStatus, savedLink.getStatus());
             throw new BusinessException(
                     "PARENT_LINK_INVITATION_EXPIRED",
                     "Yeu cau lien ket da het han. Vui long nho phu huynh gui lai loi moi.",
@@ -146,6 +169,18 @@ public class StudentParentLinkService {
         }
 
         return link;
+    }
+
+    private ParentStudentLink expireIfPending(ParentStudentLink link, UUID actorId, String action) {
+        if (link.getStatus() != ParentStudentLinkStatus.PENDING || !isExpired(link)) {
+            return link;
+        }
+
+        ParentStudentLinkStatus oldStatus = link.getStatus();
+        link.expire();
+        ParentStudentLink savedLink = linkRepository.saveAndFlush(link);
+        auditStatusChange(savedLink, actorId, action, oldStatus, savedLink.getStatus());
+        return savedLink;
     }
 
     private boolean isExpired(ParentStudentLink link) {
@@ -184,6 +219,48 @@ public class StudentParentLinkService {
                 "/parent/link");
     }
 
+    private void notifyParentAboutUnlink(ParentStudentLink link) {
+        notificationService.notify(
+                link.getParent().getId(),
+                "parent_link_revoked",
+                "Lien ket da bi huy",
+                "Lien ket voi " + studentDisplayName(link.getStudent()) + " da bi huy.",
+                "/parent/link");
+    }
+
+    private boolean isIdempotentRevocationRetry(
+            ParentStudentLink link,
+            UUID actorId,
+            UUID operationId) {
+        return link.getStatus() == ParentStudentLinkStatus.REVOKED
+                && auditLogRepository.existsByParentIdAndStudentIdAndActorIdAndActionAndOperationId(
+                        link.getParent().getId(),
+                        link.getStudent().getId(),
+                        actorId,
+                        "revoke_link",
+                        operationId);
+    }
+
+    private void requireRevocableStatus(ParentStudentLink link) {
+        if (link.getStatus() == ParentStudentLinkStatus.ACTIVE) {
+            return;
+        }
+
+        String code = switch (link.getStatus()) {
+            case REVOKED -> "PARENT_LINK_ALREADY_REVOKED";
+            case REJECTED -> "PARENT_LINK_REJECTED";
+            case EXPIRED -> "PARENT_LINK_EXPIRED";
+            default -> "PARENT_LINK_NOT_ACTIVE";
+        };
+        String message = switch (link.getStatus()) {
+            case REVOKED -> "Liên kết này đã được hủy trước đó.";
+            case REJECTED -> "Lời mời liên kết này đã bị từ chối.";
+            case EXPIRED -> "Lời mời liên kết này đã hết hạn.";
+            default -> "Chỉ có thể hủy liên kết đang hoạt động.";
+        };
+        throw new BusinessException(code, message, HttpStatus.CONFLICT);
+    }
+
     private ParentStudentLink requireActiveLink(UUID studentId, UUID parentId) {
         ParentStudentLink link = linkRepository.findByIdParentIdAndIdStudentId(parentId, studentId)
                 .orElseThrow(() -> new BusinessException(
@@ -191,7 +268,7 @@ public class StudentParentLinkService {
                         "Không tìm thấy liên kết phụ huynh này.",
                         HttpStatus.NOT_FOUND));
 
-        if (link.getStatus() != ParentStudentLinkStatus.ACCEPTED) {
+        if (link.getStatus() != ParentStudentLinkStatus.ACTIVE) {
             throw new BusinessException(
                     "PARENT_LINK_NOT_ACTIVE",
                     "Liên kết phụ huynh này không còn hoạt động.",
@@ -214,11 +291,13 @@ public class StudentParentLinkService {
                 link.getStatus().toApiValue(),
                 link.getInvitedAt(),
                 expiresAt(link),
-                isExpired(link),
+                link.getStatus() == ParentStudentLinkStatus.EXPIRED || isExpired(link),
                 link.getRespondedAt(),
                 link.getUnlinkRequestedBy(),
                 resolveUnlinkRequestedByRole(link),
-                link.getUnlinkRequestedAt());
+                link.getUnlinkRequestedAt(),
+                link.isSensitiveDataConsentGranted(),
+                link.getSensitiveDataConsentUpdatedAt());
     }
 
     private Instant expiresAt(ParentStudentLink link) {

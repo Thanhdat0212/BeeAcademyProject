@@ -10,8 +10,11 @@ import com.beeacademy.backend.model.Lesson;
 import com.beeacademy.backend.repository.CourseDocumentRepository;
 import com.beeacademy.backend.repository.CourseRepository;
 import com.beeacademy.backend.repository.LessonRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -19,8 +22,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -77,7 +82,7 @@ public class ContentUploadService {
 
     private static final long MAX_VIDEO_BYTES = 2L * 1024 * 1024 * 1024; // 2 GB
     private static final long MAX_DOC_BYTES   = 100L * 1024 * 1024;      // 100 MB
-    private static final long MAX_SUBMISSION_BYTES = 20L * 1024 * 1024;  // 20 MB
+    private static final long MAX_SUBMISSION_BYTES = 25L * 1024 * 1024;  // UC16: 25 MB
     private static final long MAX_THUMBNAIL_BYTES = 5L * 1024 * 1024; // 5 MB
     private static final long MAX_QUESTION_IMAGE_BYTES = 5L * 1024 * 1024;
     private static final long MAX_QUESTION_AUDIO_BYTES = 20L * 1024 * 1024;
@@ -86,6 +91,8 @@ public class ContentUploadService {
     private final CourseRepository       courseRepository;
     private final LessonRepository       lessonRepository;
     private final CourseDocumentRepository documentRepository;
+    private final JdbcTemplate           jdbcTemplate;
+    private final ObjectMapper           objectMapper;
 
     // ========================================================================
     // Video upload (Phase 2)
@@ -131,6 +138,8 @@ public class ContentUploadService {
         // BUG FIX: save lesson trực tiếp thay vì save cả Course aggregate
         // — tránh dirty-check toàn bộ chapters/lessons không liên quan
         lessonRepository.save(lesson);
+        auditContentChange(courseId, lessonId, "UPLOAD_VIDEO", "MAJOR", teacherId,
+                null, lessonAuditSnapshot(lesson));
         deleteVideoAfterCommit(oldPath);
 
         log.info("Upload video thành công: bucket={} path={} size={}",
@@ -197,6 +206,9 @@ public class ContentUploadService {
         CourseDocument doc = CourseDocument.create(lesson, name, null, path, DOCS_BUCKET,
                                                    fileType, file.getSize(), position);
         documentRepository.save(doc);
+        Course course = lesson.getChapter().getCourse();
+        auditContentChange(course.getId(), lessonId, "UPLOAD_DOCUMENT", "MINOR", teacherId,
+                null, documentAuditSnapshot(doc));
 
         log.info("Upload tài liệu private thành công: lessonId={} path={}", lessonId, path);
         return new UploadResponse(path, null, fileType, file.getSize());
@@ -210,7 +222,7 @@ public class ContentUploadService {
     public UploadResponse uploadAssignmentFile(UUID assignmentId, UUID studentId,
                                                 MultipartFile file) {
         validateFile(file, ALLOWED_SUBMISSION_MIME, MAX_SUBMISSION_BYTES,
-                     "PDF, DOCX, PPTX hoặc ảnh JPEG/PNG/WEBP", "20MB");
+                     "PDF, DOCX, PPTX hoặc ảnh JPEG/PNG/WEBP", "25MB");
 
         String ext  = getExtension(file.getOriginalFilename(), "pdf");
         String path = "assignment-submissions/" + assignmentId + "/" + studentId + "/"
@@ -242,8 +254,12 @@ public class ContentUploadService {
                     org.springframework.http.HttpStatus.FORBIDDEN);
         }
 
+        Map<String, Object> before = documentAuditSnapshot(document);
         documentRepository.delete(document);
         deleteLessonFilesAfterCommit(List.of(), List.of(document));
+        Course course = lesson.getChapter().getCourse();
+        auditContentChange(course.getId(), lessonId, "DELETE_DOCUMENT", "MINOR", teacherId,
+                before, null);
         log.info("Xóa tài liệu thành công: lessonId={} documentId={}", lessonId, documentId);
     }
 
@@ -399,6 +415,57 @@ public class ContentUploadService {
             path = extractPublicObjectPath(PUBLIC_ASSET_BUCKET, document.getFileUrl());
         }
         return path == null || path.isBlank() ? null : bucket + "|" + path;
+    }
+
+    private Map<String, Object> lessonAuditSnapshot(Lesson lesson) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", lesson.getId());
+        row.put("title", lesson.getTitle());
+        row.put("videoStoragePath", lesson.getVideoStoragePath());
+        row.put("hlsPlaylistUrl", lesson.getHlsPlaylistUrl());
+        row.put("videoProcessingStatus", lesson.getVideoProcessingStatus());
+        row.put("originalVideoRetentionUntil", lesson.getOriginalVideoRetentionUntil());
+        row.put("durationSec", lesson.getDurationSec());
+        return row;
+    }
+
+    private Map<String, Object> documentAuditSnapshot(CourseDocument document) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", document.getId());
+        row.put("lessonId", document.getLesson() != null ? document.getLesson().getId() : null);
+        row.put("name", document.getName());
+        row.put("fileType", document.getFileType());
+        row.put("storageBucket", document.getStorageBucket());
+        row.put("storagePath", document.getStoragePath());
+        row.put("fileSizeBytes", document.getFileSizeBytes());
+        row.put("position", document.getPosition());
+        return row;
+    }
+
+    private void auditContentChange(UUID courseId, UUID lessonId, String action,
+                                    String changeType, UUID actorId,
+                                    Map<String, Object> before, Map<String, Object> after) {
+        try {
+            jdbcTemplate.update("""
+                    INSERT INTO public.course_content_audit_logs
+                    (course_id, entity_type, entity_id, action, change_type, actor_id, before_state, after_state)
+                    VALUES (?, 'LESSON', ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+                    """,
+                    courseId, lessonId, action, changeType, actorId,
+                    toJsonOrNull(before), toJsonOrNull(after));
+        } catch (Exception ex) {
+            log.warn("Could not write upload audit log course={} lesson={} action={}",
+                    courseId, lessonId, action, ex);
+        }
+    }
+
+    private String toJsonOrNull(Map<String, Object> payload) {
+        if (payload == null) return null;
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
     }
 
     private void deleteObjectQuietly(String bucket, String path) {

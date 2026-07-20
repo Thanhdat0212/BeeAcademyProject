@@ -198,6 +198,43 @@ function getChapterVideoProgress(
   return { total: videoLessons.length, completed };
 }
 
+async function getQuizUnlockError(
+  courseId: string,
+  chapterId: string,
+  completedLessons: Record<string, string[]>,
+  hydrateCourseProgress: (
+    courseId: string,
+    completedLessonIds: string[],
+    completedQuizIds: string[],
+  ) => void,
+): Promise<string | null> {
+  try {
+    const detail = await getCourseDetail(courseId);
+    const chapter = detail.chapters.find(item => item.id === chapterId);
+    if (!chapter) {
+      return 'Không tìm thấy chương.';
+    }
+
+    let completedLessonIds = completedLessons[courseId] ?? [];
+    try {
+      const serverProgress = await getCourseProgress(courseId);
+      completedLessonIds = serverProgress.completedLessonIds;
+      hydrateCourseProgress(courseId, serverProgress.completedLessonIds, serverProgress.completedQuizIds);
+    } catch (progressError) {
+      console.warn('Không tải được tiến độ khóa học, dùng cache hiện tại:', progressError);
+    }
+
+    const progress = getChapterVideoProgress(chapter, completedLessonIds);
+    if (progress.total > 0 && progress.completed < progress.total) {
+      return `Bạn cần hoàn thành ${progress.completed}/${progress.total} video trong chương này trước khi làm quiz.`;
+    }
+    return null;
+  } catch (error) {
+    console.warn('Không kiểm tra được điều kiện mở quiz, tiếp tục gọi API quiz:', error);
+    return null;
+  }
+}
+
 export default function StudentQuizPage() {
   const { courseId, chapterId } = useParams<{ courseId: string; chapterId: string }>();
   const [searchParams] = useSearchParams();
@@ -245,28 +282,15 @@ export default function StudentQuizPage() {
           return;
         }
 
-        const detail = await getCourseDetail(courseId!);
+        const unlockError = await getQuizUnlockError(
+          courseId!,
+          chapterId!,
+          completedLessons,
+          hydrateCourseProgress,
+        );
         if (cancelled) return;
-
-        const chapter = detail.chapters.find(item => item.id === chapterId);
-        if (!chapter) {
-          setErrorMsg('Không tìm thấy chương.');
-          setPhase('error');
-          return;
-        }
-
-        let completedLessonIds = completedLessons[courseId!] ?? [];
-        try {
-          const serverProgress = await getCourseProgress(courseId!);
-          completedLessonIds = serverProgress.completedLessonIds;
-          hydrateCourseProgress(courseId!, serverProgress.completedLessonIds, serverProgress.completedQuizIds);
-        } catch (progressError) {
-          console.error('Không tải được tiến độ khóa học:', progressError);
-        }
-
-        const progress = getChapterVideoProgress(chapter, completedLessonIds);
-        if (progress.total > 0 && progress.completed < progress.total) {
-          setErrorMsg(`Bạn cần hoàn thành ${progress.completed}/${progress.total} video trong chương này trước khi làm quiz.`);
+        if (unlockError) {
+          setErrorMsg(unlockError);
           setPhase('error');
           return;
         }
@@ -349,26 +373,14 @@ export default function StudentQuizPage() {
     setResult(null);
     setAiAnalysis(null);
     try {
-      const detail = await getCourseDetail(courseId);
-      const chapter = detail.chapters.find(item => item.id === chapterId);
-      if (!chapter) {
-        setErrorMsg('Không tìm thấy chương.');
-        setPhase('error');
-        return;
-      }
-
-      let completedLessonIds = completedLessons[courseId] ?? [];
-      try {
-        const serverProgress = await getCourseProgress(courseId);
-        completedLessonIds = serverProgress.completedLessonIds;
-        hydrateCourseProgress(courseId, serverProgress.completedLessonIds, serverProgress.completedQuizIds);
-      } catch (progressError) {
-        console.error('Không tải được tiến độ khóa học:', progressError);
-      }
-
-      const progress = getChapterVideoProgress(chapter, completedLessonIds);
-      if (progress.total > 0 && progress.completed < progress.total) {
-        setErrorMsg(`Bạn cần hoàn thành ${progress.completed}/${progress.total} video trong chương này trước khi làm quiz.`);
+      const unlockError = await getQuizUnlockError(
+        courseId,
+        chapterId,
+        completedLessons,
+        hydrateCourseProgress,
+      );
+      if (unlockError) {
+        setErrorMsg(unlockError);
         setPhase('error');
         return;
       }
@@ -703,18 +715,42 @@ export default function StudentQuizPage() {
                 <h2 className="text-xl font-bold text-on-surface leading-relaxed">
                   <LatexText content={currentQ.content} />
                 </h2>
-                {currentQ.type === 'multiple' && (
+                {currentQ.multipleAnswer && (
                   <p className="mt-2 text-sm font-medium text-primary">
                     CÃ¢u nÃ y cÃ³ thá»ƒ cÃ³ nhiá»u Ä‘Ã¡p Ã¡n Ä‘Ãºng.
                   </p>
                 )}
               </div>
 
+              {currentQ.type === 'image_question' && currentQ.metadata?.promptAssetUrl && (
+                <div className="mb-6 overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest">
+                  <img
+                    src={currentQ.metadata.promptAssetUrl}
+                    alt="Question"
+                    className="max-h-[420px] w-full object-contain"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              )}
+
+              {currentQ.type === 'audio_question' && currentQ.metadata?.promptAssetUrl && (
+                <div className="mb-6 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+                  <audio
+                    controls
+                    preload="metadata"
+                    className="w-full"
+                    src={currentQ.metadata.promptAssetUrl}
+                  >
+                    Trinh duyet khong ho tro phat audio.
+                  </audio>
+                </div>
+              )}
+
               {/* Choices */}
               <div className="space-y-3">
                 {currentQ.choices.map((choice, i) => {
                   const selectedAnswers = answers[currentQ.id] ?? [];
-                  const isMultiple = currentQ.type === 'multiple';
+                  const isMultiple = Boolean(currentQ.multipleAnswer);
                   const isSelected = selectedAnswers.includes(choice.id);
                   const letter = ['A', 'B', 'C', 'D', 'E'][i] ?? String(i + 1);
                   return (

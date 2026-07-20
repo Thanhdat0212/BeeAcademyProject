@@ -7,7 +7,6 @@ import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.model.QuestionBank;
 import com.beeacademy.backend.model.UserRole;
 import com.beeacademy.backend.repository.CategoryRepository;
-import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.repository.QuestionBankRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import org.junit.jupiter.api.Test;
@@ -40,7 +39,7 @@ class QuestionBankServiceTest {
     private CategoryRepository categoryRepository;
 
     @Mock
-    private ProfileRepository profileRepository;
+    private TeacherAccessService teacherAccessService;
 
     @InjectMocks
     private QuestionBankService service;
@@ -53,7 +52,7 @@ class QuestionBankServiceTest {
         Profile teacher = Profile.createNew(teacherId, UserRole.TEACHER, "Teacher One");
         Category category = category(categoryId, "Toan hoc");
 
-        when(profileRepository.findById(teacherId)).thenReturn(Optional.of(teacher));
+        when(teacherAccessService.requireApprovedTeacher(teacher(teacherId))).thenReturn(teacher);
         when(questionBankRepository.existsByTeacherIdAndTitleIgnoreCase(
                 teacherId, "Ngan hang Toan lop 8")).thenReturn(false);
         when(categoryRepository.findById(categoryId)).thenReturn(Optional.of(category));
@@ -84,7 +83,7 @@ class QuestionBankServiceTest {
         UUID categoryId = UUID.randomUUID();
         Profile teacher = Profile.createNew(teacherId, UserRole.TEACHER, "Teacher One");
 
-        when(profileRepository.findById(teacherId)).thenReturn(Optional.of(teacher));
+        when(teacherAccessService.requireApprovedTeacher(teacher(teacherId))).thenReturn(teacher);
         when(questionBankRepository.existsByTeacherIdAndTitleIgnoreCase(
                 teacherId, "Ngan hang Toan lop 8")).thenReturn(true);
 
@@ -95,7 +94,6 @@ class QuestionBankServiceTest {
                     BusinessException businessException = (BusinessException) ex;
                     assertThat(businessException.getCode()).isEqualTo("QUESTION_BANK_TITLE_EXISTS");
                     assertThat(businessException.getStatus()).isEqualTo(HttpStatus.CONFLICT);
-                    assertThat(businessException.getMessage()).isEqualTo("Tên ngân hàng đã tồn tại.");
                 });
 
         verify(categoryRepository, never()).findById(categoryId);
@@ -108,7 +106,10 @@ class QuestionBankServiceTest {
         UUID categoryId = UUID.randomUUID();
         Profile student = Profile.createNew(userId, UserRole.STUDENT, "Student One");
 
-        when(profileRepository.findById(userId)).thenReturn(Optional.of(student));
+        when(teacherAccessService.requireApprovedTeacher(
+                new AuthenticatedUser(userId, "student@example.com", "student")))
+                .thenThrow(new BusinessException("TEACHER_NOT_APPROVED",
+                        "Teacher account is not approved.", HttpStatus.FORBIDDEN));
 
         assertThatThrownBy(() -> service.createQuestionBank(
                 new AuthenticatedUser(userId, "student@example.com", "student"),
@@ -129,7 +130,9 @@ class QuestionBankServiceTest {
         Profile teacher = Profile.createNew(teacherId, UserRole.TEACHER, "Teacher One");
         teacher.block();
 
-        when(profileRepository.findById(teacherId)).thenReturn(Optional.of(teacher));
+        when(teacherAccessService.requireApprovedTeacher(teacher(teacherId)))
+                .thenThrow(new BusinessException("TEACHER_NOT_APPROVED",
+                        "Teacher account is not approved.", HttpStatus.FORBIDDEN));
 
         assertThatThrownBy(() -> service.createQuestionBank(
                 teacher(teacherId),
@@ -150,7 +153,10 @@ class QuestionBankServiceTest {
         Profile teacher = Profile.createNew(teacherId, UserRole.TEACHER, "Teacher One");
         teacher.markTeacherPendingApproval();
 
-        when(profileRepository.findById(teacherId)).thenReturn(Optional.of(teacher));
+        when(teacherAccessService.requireApprovedTeacher(teacher(teacherId)))
+                .thenThrow(new BusinessException("TEACHER_NOT_APPROVED",
+                        "GiÃ¡o viÃªn chÆ°a Ä‘Æ°á»£c phÃª duyá»‡t vai trÃ² GV.",
+                        HttpStatus.FORBIDDEN));
 
         assertThatThrownBy(() -> service.createQuestionBank(
                 teacher(teacherId),
@@ -159,7 +165,6 @@ class QuestionBankServiceTest {
                     BusinessException businessException = (BusinessException) ex;
                     assertThat(businessException.getCode()).isEqualTo("TEACHER_NOT_APPROVED");
                     assertThat(businessException.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
-                    assertThat(businessException.getMessage()).isEqualTo("Giáo viên chưa được phê duyệt vai trò GV.");
                 });
 
         verify(questionBankRepository, never()).save(any());

@@ -55,6 +55,13 @@ public class CourseVersion {
     @Column(name = "submitted_at", nullable = false)
     private Instant submittedAt;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "approved_by")
+    private Profile approvedBy;
+
+    @Column(name = "approved_at")
+    private Instant approvedAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -70,5 +77,14 @@ public class CourseVersion {
         version.snapshotJson = snapshotJson;
         version.submittedAt = Instant.now();
         return version;
+    }
+
+    public void markApproved(Profile approver) {
+        this.approvedBy = approver;
+        this.approvedAt = Instant.now();
+    }
+
+    public boolean isApproved() {
+        return approvedAt != null;
     }
 }

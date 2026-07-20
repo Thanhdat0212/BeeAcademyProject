@@ -48,7 +48,7 @@ public class ParentStudentLink {
     @ColumnTransformer(read = "status::text", write = "?::parent_link_status")
     @Column(name = "status", nullable = false)
     @Builder.Default
-    private ParentStudentLinkStatus status = ParentStudentLinkStatus.ACCEPTED;
+    private ParentStudentLinkStatus status = ParentStudentLinkStatus.ACTIVE;
 
     @Column(name = "invited_at", nullable = false)
     private Instant invitedAt;
@@ -69,6 +69,13 @@ public class ParentStudentLink {
     @Column(name = "unlink_requested_at")
     private Instant unlinkRequestedAt;
 
+    @Column(name = "sensitive_data_consent_granted", nullable = false)
+    @Builder.Default
+    private boolean sensitiveDataConsentGranted = false;
+
+    @Column(name = "sensitive_data_consent_updated_at")
+    private Instant sensitiveDataConsentUpdatedAt;
+
     @Embeddable
     @Getter
     @Setter
@@ -86,7 +93,7 @@ public class ParentStudentLink {
         private UUID studentId;
     }
 
-    public static ParentStudentLink createAcceptedLink(Profile parent, Profile student) {
+    public static ParentStudentLink createActiveLink(Profile parent, Profile student) {
         if (parent == null || student == null) {
             throw new IllegalArgumentException("Parent and student profile must not be null.");
         }
@@ -96,7 +103,7 @@ public class ParentStudentLink {
                 .id(new Id(parent.getId(), student.getId()))
                 .parent(parent)
                 .student(student)
-                .status(ParentStudentLinkStatus.ACCEPTED)
+                .status(ParentStudentLinkStatus.ACTIVE)
                 .invitedAt(now)
                 .respondedAt(now)
                 .build();
@@ -143,7 +150,7 @@ public class ParentStudentLink {
     }
 
     public void accept() {
-        this.status = ParentStudentLinkStatus.ACCEPTED;
+        this.status = ParentStudentLinkStatus.ACTIVE;
         this.respondedAt = Instant.now();
         this.unlinkRequestedBy = null;
         this.unlinkRequestedAt = null;
@@ -151,6 +158,13 @@ public class ParentStudentLink {
 
     public void reject() {
         this.status = ParentStudentLinkStatus.REJECTED;
+        this.respondedAt = Instant.now();
+        this.unlinkRequestedBy = null;
+        this.unlinkRequestedAt = null;
+    }
+
+    public void expire() {
+        this.status = ParentStudentLinkStatus.EXPIRED;
         this.respondedAt = Instant.now();
         this.unlinkRequestedBy = null;
         this.unlinkRequestedAt = null;
@@ -173,8 +187,15 @@ public class ParentStudentLink {
     }
 
     public void revoke() {
-        this.status = ParentStudentLinkStatus.REJECTED;
+        this.status = ParentStudentLinkStatus.REVOKED;
         this.respondedAt = Instant.now();
+        this.unlinkRequestedBy = null;
+        this.unlinkRequestedAt = null;
+    }
+
+    public void updateSensitiveDataConsent(boolean granted) {
+        this.sensitiveDataConsentGranted = granted;
+        this.sensitiveDataConsentUpdatedAt = Instant.now();
     }
 
     private static String normalizeRelationship(String relationship) {

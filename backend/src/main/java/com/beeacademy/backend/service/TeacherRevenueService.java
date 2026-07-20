@@ -12,6 +12,7 @@ import com.beeacademy.backend.model.Order;
 import com.beeacademy.backend.model.OrderItem;
 import com.beeacademy.backend.model.OrderStatus;
 import com.beeacademy.backend.model.PayoutPeriod;
+import com.beeacademy.backend.model.PayoutStatus;
 import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.model.RevenueSplit;
 import com.beeacademy.backend.repository.CourseRepository;
@@ -36,6 +37,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -138,8 +140,10 @@ public class TeacherRevenueService {
         backfillEnrollmentRevenue(teacherId);
         List<RevenueSplit> splits = splitRepo.findByTeacherIdOrderByOccurredAtDesc(teacherId);
 
-        Set<UUID> studentIds = splits.stream().map(RevenueSplit::getStudentId).collect(Collectors.toSet());
-        Set<UUID> courseIds = splits.stream().map(RevenueSplit::getCourseId).collect(Collectors.toSet());
+        Set<UUID> studentIds = splits.stream().map(RevenueSplit::getStudentId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<UUID> courseIds = splits.stream().map(RevenueSplit::getCourseId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
 
         Map<UUID, String> studentNames = profileRepo.findAllById(studentIds).stream()
                 .collect(Collectors.toMap(Profile::getId,
@@ -156,13 +160,175 @@ public class TeacherRevenueService {
 
     @Transactional
     public List<PayoutPeriodResponse> getPeriods(UUID teacherId) {
-        return periodRepo.findByTeacherIdOrderByMonthYearDesc(teacherId).stream()
+        return periodRepo.findByTeacherIdAndStatusOrderByMonthYearDesc(teacherId, PayoutStatus.PAID).stream()
                 .map(p -> PayoutPeriodResponse.from(
                         p,
                         splitRepo.countByPayoutPeriodId(p.getId()),
                         splitRepo.sumGrossAmountByPeriodId(p.getId()),
                         splitRepo.sumTeacherAmountByPeriodId(p.getId())))
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<RevenueSplitResponse> getConfirmedPeriodSplits(UUID teacherId, UUID periodId) {
+        PayoutPeriod period = requirePaidTeacherPeriod(teacherId, periodId);
+        List<RevenueSplit> splits = splitRepo.findByTeacherIdAndPayoutPeriodIdOrderByOccurredAtDesc(
+                teacherId, period.getId());
+        Set<UUID> studentIds = splits.stream().map(RevenueSplit::getStudentId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<UUID> courseIds = splits.stream().map(RevenueSplit::getCourseId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<UUID, String> studentNames = profileRepo.findAllById(studentIds).stream()
+                .collect(Collectors.toMap(Profile::getId,
+                        p -> p.getFullName() != null ? p.getFullName() : "Hoc vien"));
+        Map<UUID, String> courseTitles = courseRepo.findAllById(courseIds).stream()
+                .collect(Collectors.toMap(Course::getId, Course::getTitle));
+        return splits.stream()
+                .map(s -> RevenueSplitResponse.from(s,
+                        studentNames.getOrDefault(s.getStudentId(), "Hoc vien"),
+                        courseTitles.getOrDefault(s.getCourseId(), "Khoa hoc")))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public String exportConfirmedPeriodCsv(UUID teacherId, UUID periodId) {
+        PayoutPeriod period = requirePaidTeacherPeriod(teacherId, periodId);
+        List<RevenueSplitResponse> rows = getConfirmedPeriodSplits(teacherId, periodId);
+        StringBuilder csv = new StringBuilder();
+        csv.append('\ufeff');
+        csv.append("period,paid_at,paid_by_admin,transfer_ref,transfer_content,unc_attachment_url\n");
+        csv.append(escapeCsv(period.getMonthYear())).append(',')
+                .append(period.getPaidAt()).append(',')
+                .append(period.getPaidByAdmin()).append(',')
+                .append(escapeCsv(period.getTransferRef())).append(',')
+                .append(escapeCsv(period.getTransferContent())).append(',')
+                .append(escapeCsv(period.getUncAttachmentUrl())).append("\n\n");
+        csv.append("occurred_at,student_id,student_name,course_id,course_title,gross_amount,platform_fee,teacher_amount,order_item_id\n");
+        for (RevenueSplitResponse row : rows) {
+            RevenueSplit split = splitRepo.findById(row.id()).orElse(null);
+            csv.append(row.occurredAt()).append(',')
+                    .append(row.studentId()).append(',')
+                    .append(escapeCsv(row.studentName())).append(',')
+                    .append(row.courseId()).append(',')
+                    .append(escapeCsv(row.courseTitle())).append(',')
+                    .append(row.grossAmount()).append(',')
+                    .append(row.platformFee()).append(',')
+                    .append(row.teacherAmount()).append(',')
+                    .append(split != null ? split.getOrderItemId() : "")
+                    .append('\n');
+        }
+        return csv.toString();
+    }
+
+    @Transactional(readOnly = true)
+    public String exportConfirmedPeriodExcel(UUID teacherId, UUID periodId) {
+        PayoutPeriod period = requirePaidTeacherPeriod(teacherId, periodId);
+        List<RevenueSplitResponse> rows = getConfirmedPeriodSplits(teacherId, periodId);
+        long totalGross = rows.stream().mapToLong(RevenueSplitResponse::grossAmount).sum();
+        long totalPlatformFee = rows.stream().mapToLong(RevenueSplitResponse::platformFee).sum();
+        long totalTeacherAmount = rows.stream().mapToLong(RevenueSplitResponse::teacherAmount).sum();
+
+        StringBuilder html = new StringBuilder();
+        html.append("""
+                <html>
+                <head>
+                  <meta charset="UTF-8">
+                  <style>
+                    table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px; }
+                    th, td { border: 1px solid #999; padding: 6px; }
+                    th { background: #f0f0f0; font-weight: bold; }
+                    .money { mso-number-format:"#,##0"; }
+                  </style>
+                </head>
+                <body>
+                """);
+        html.append("<h2>Bee Academy - Bảng kê kỳ chi trả giáo viên đã xác nhận</h2>");
+        html.append("<table>");
+        appendMetaRow(html, "Kỳ chi trả", period.getMonthYear());
+        appendMetaRow(html, "Trạng thái", period.getStatus().name());
+        appendMetaRow(html, "Ngày Admin xác nhận chuyển khoản", String.valueOf(period.getPaidAt()));
+        appendMetaRow(html, "Admin xác nhận", String.valueOf(period.getPaidByAdmin()));
+        appendMetaRow(html, "Mã giao dịch/UNC", period.getTransferRef());
+        appendMetaRow(html, "Nội dung chuyển khoản", period.getTransferContent());
+        appendMetaRow(html, "File chứng từ UNC", period.getUncAttachmentUrl());
+        appendMetaRow(html, "Thời hạn lưu trữ theo SRS", "Tối thiểu 5 năm");
+        html.append("</table><br>");
+
+        html.append("<table><thead><tr>")
+                .append("<th>Thời điểm giao dịch</th>")
+                .append("<th>Mã học sinh</th>")
+                .append("<th>Tên học sinh</th>")
+                .append("<th>Mã khóa học</th>")
+                .append("<th>Tên khóa học</th>")
+                .append("<th>Doanh thu gốc</th>")
+                .append("<th>Phí nền tảng</th>")
+                .append("<th>Tiền giáo viên nhận</th>")
+                .append("<th>Mã dòng đơn hàng</th>")
+                .append("</tr></thead><tbody>");
+        for (RevenueSplitResponse row : rows) {
+            RevenueSplit split = splitRepo.findById(row.id()).orElse(null);
+            html.append("<tr>")
+                    .append(td(row.occurredAt()))
+                    .append(td(row.studentId()))
+                    .append(td(row.studentName()))
+                    .append(td(row.courseId()))
+                    .append(td(row.courseTitle()))
+                    .append(money(row.grossAmount()))
+                    .append(money(row.platformFee()))
+                    .append(money(row.teacherAmount()))
+                    .append(td(split != null ? split.getOrderItemId() : null))
+                    .append("</tr>");
+        }
+        html.append("<tr>")
+                .append("<th colspan=\"5\">Tổng cộng</th>")
+                .append(money(totalGross))
+                .append(money(totalPlatformFee))
+                .append(money(totalTeacherAmount))
+                .append("<td></td>")
+                .append("</tr>");
+        html.append("</tbody></table></body></html>");
+        return html.toString();
+    }
+
+    private PayoutPeriod requirePaidTeacherPeriod(UUID teacherId, UUID periodId) {
+        PayoutPeriod period = periodRepo.findById(periodId)
+                .orElseThrow(() -> new com.beeacademy.backend.exception.ResourceNotFoundException(
+                        "PayoutPeriod", periodId));
+        if (!period.getTeacherId().equals(teacherId) || period.getStatus() != PayoutStatus.PAID) {
+            throw new com.beeacademy.backend.exception.BusinessException(
+                    "PAYOUT_PERIOD_NOT_CONFIRMED",
+                    "Chi xem duoc ky thanh toan da duoc Admin xac nhan.");
+        }
+        return period;
+    }
+
+    private String escapeCsv(String value) {
+        if (value == null) return "";
+        String escaped = value.replace("\"", "\"\"");
+        return "\"" + escaped + "\"";
+    }
+
+    private void appendMetaRow(StringBuilder html, String label, String value) {
+        html.append("<tr><th>").append(escapeHtml(label)).append("</th><td>")
+                .append(escapeHtml(value)).append("</td></tr>");
+    }
+
+    private String td(Object value) {
+        return "<td>" + escapeHtml(value != null ? value.toString() : "") + "</td>";
+    }
+
+    private String money(long value) {
+        return "<td class=\"money\">" + value + "</td>";
+    }
+
+    private String escapeHtml(String value) {
+        if (value == null) return "";
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     @Transactional
@@ -184,11 +350,13 @@ public class TeacherRevenueService {
         // Tránh phụ thuộc vào schema enrollments (có thể chưa migrate student_id).
         long uniqueStudents = allSplits.stream()
                 .map(RevenueSplit::getStudentId)
+                .filter(Objects::nonNull)
                 .distinct()
                 .count();
 
         // ── 3. Map courseId → số lượt mua — dùng cho bar chart ──────────────────
         Map<UUID, Long> courseEnrollmentCounts = allSplits.stream()
+                .filter(split -> split.getCourseId() != null)
                 .collect(Collectors.groupingBy(RevenueSplit::getCourseId, Collectors.counting()));
 
         // ── 4. Revenue splits: doanh thu tháng này / tháng trước ─────────────────
@@ -217,8 +385,10 @@ public class TeacherRevenueService {
         // ── 7. 8 giao dịch gần nhất — batch-load names để tránh N+1 ─────────────
         List<RevenueSplit> recentRaw = allSplits.stream().limit(8).toList();
 
-        Set<UUID> studentIds    = recentRaw.stream().map(RevenueSplit::getStudentId).collect(Collectors.toSet());
-        Set<UUID> splitCourseIds = recentRaw.stream().map(RevenueSplit::getCourseId).collect(Collectors.toSet());
+        Set<UUID> studentIds = recentRaw.stream().map(RevenueSplit::getStudentId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<UUID> splitCourseIds = recentRaw.stream().map(RevenueSplit::getCourseId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
 
         Map<UUID, String> studentNames = profileRepo.findAllById(studentIds).stream()
                 .collect(Collectors.toMap(Profile::getId,

@@ -15,6 +15,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
@@ -77,6 +78,13 @@ public class Profile {
 
     @Column(name = "bio")
     private String bio;
+
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
+
+    @Builder.Default
+    @Column(name = "parent_privacy_enabled", nullable = false)
+    private boolean parentPrivacyEnabled = true;
 
     @Column(name = "twitter_url")
     private String twitterUrl;

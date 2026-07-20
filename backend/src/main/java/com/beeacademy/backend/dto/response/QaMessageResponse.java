@@ -15,7 +15,10 @@ public record QaMessageResponse(
         String attachmentName,
         String attachmentType,
         Long attachmentSizeBytes,
-        Instant sentAt
+        String moderationStatus,
+        String moderationReason,
+        Instant sentAt,
+        Instant editedAt
 ) {
     public static QaMessageResponse fromEntity(QaMessage message) {
         String name = message.getAuthor().getFullName();
@@ -37,7 +40,10 @@ public record QaMessageResponse(
                 message.getAttachmentName(),
                 message.getAttachmentType(),
                 message.getAttachmentSizeBytes(),
-                message.getCreatedAt()
+                message.getModerationStatus(),
+                message.getModerationReason(),
+                message.getCreatedAt(),
+                message.getEditedAt()
         );
     }
 }

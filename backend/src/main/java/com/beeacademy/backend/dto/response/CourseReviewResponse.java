@@ -9,12 +9,16 @@ import java.util.UUID;
 public record CourseReviewResponse(
         UUID id,
         UUID courseId,
+        String courseTitle,
         UUID studentId,
         String studentName,
         String studentAvatarUrl,
         int rating,
         String comment,
         CourseReviewModerationStatus moderationStatus,
+        String moderationReason,
+        UUID moderatedBy,
+        Instant moderatedAt,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -23,12 +27,16 @@ public record CourseReviewResponse(
         return new CourseReviewResponse(
                 review.getId(),
                 review.getCourse().getId(),
+                review.getCourse().getTitle(),
                 review.getStudent().getId(),
                 review.getStudent().getFullName(),
                 review.getStudent().getAvatarUrl(),
                 review.getRating(),
                 review.getComment(),
                 review.getModerationStatus(),
+                review.getModerationReason(),
+                review.getModeratedBy(),
+                review.getModeratedAt(),
                 review.getCreatedAt(),
                 review.getUpdatedAt()
         );

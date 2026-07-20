@@ -7,9 +7,7 @@ import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Category;
 import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.model.QuestionBank;
-import com.beeacademy.backend.model.UserRole;
 import com.beeacademy.backend.repository.CategoryRepository;
-import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.repository.QuestionBankRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import lombok.RequiredArgsConstructor;
@@ -29,24 +27,22 @@ public class QuestionBankService {
 
     private final QuestionBankRepository questionBankRepository;
     private final CategoryRepository categoryRepository;
-    private final ProfileRepository profileRepository;
+    private final TeacherAccessService teacherAccessService;
 
     @Transactional
     public QuestionBankResponse createQuestionBank(AuthenticatedUser me, CreateQuestionBankRequest req) {
         if (req == null) {
-            throw new BusinessException("INVALID_REQUEST", "Dữ liệu ngân hàng câu hỏi không hợp lệ.");
+            throw new BusinessException("INVALID_REQUEST", "Du lieu ngan hang cau hoi khong hop le.");
         }
         String title = normalizeTitle(req.title());
         if (title == null) {
-            throw new BusinessException("QUESTION_BANK_TITLE_REQUIRED", "Tên ngân hàng không được trống.");
+            throw new BusinessException("QUESTION_BANK_TITLE_REQUIRED", "Ten ngan hang khong duoc trong.");
         }
         if (req.grade() == null || req.grade() < 1) {
-            throw new BusinessException("GRADE_REQUIRED", "Vui lòng chọn lớp.");
+            throw new BusinessException("GRADE_REQUIRED", "Vui long chon lop.");
         }
 
-        Profile teacher = profileRepository.findById(me.userId())
-                .orElseThrow(() -> new ResourceNotFoundException("Profile", me.userId()));
-        assertApprovedTeacher(me, teacher);
+        Profile teacher = teacherAccessService.requireApprovedTeacher(me);
         if (questionBankRepository.existsByTeacherIdAndTitleIgnoreCase(me.userId(), title)) {
             throw duplicateTitle();
         }
@@ -76,20 +72,51 @@ public class QuestionBankService {
                 .toList();
     }
 
+    @Transactional
+    public QuestionBankResponse updateQuestionBank(
+            AuthenticatedUser me, UUID questionBankId, CreateQuestionBankRequest req) {
+        if (req == null) {
+            throw new BusinessException("INVALID_REQUEST", "Du lieu ngan hang cau hoi khong hop le.");
+        }
+        teacherAccessService.requireApprovedTeacher(me);
+        QuestionBank bank = getOwnedQuestionBank(questionBankId, me.userId());
+        String title = normalizeTitle(req.title());
+        if (title == null) {
+            throw new BusinessException("QUESTION_BANK_TITLE_REQUIRED", "Ten ngan hang khong duoc trong.");
+        }
+        if (req.grade() == null || req.grade() < 1) {
+            throw new BusinessException("GRADE_REQUIRED", "Vui long chon lop.");
+        }
+        if (questionBankRepository.existsByTeacherIdAndTitleIgnoreCase(me.userId(), title, questionBankId)) {
+            throw duplicateTitle();
+        }
+        Category category = categoryRepository.findById(req.categoryId())
+                .orElseThrow(() -> new ResourceNotFoundException("Category", req.categoryId()));
+        bank.update(category, req.grade(), title, req.description());
+        QuestionBank saved = questionBankRepository.save(bank);
+        log.info("Teacher {} updated question bank {}", me.userId(), saved.getId());
+        return QuestionBankResponse.fromEntity(saved, 0L);
+    }
+
+    @Transactional
+    public QuestionBankResponse updateStatus(AuthenticatedUser me, UUID questionBankId, boolean active) {
+        teacherAccessService.requireApprovedTeacher(me);
+        QuestionBank bank = getOwnedQuestionBank(questionBankId, me.userId());
+        if (active) {
+            bank.activate();
+        } else {
+            bank.deactivate();
+        }
+        QuestionBank saved = questionBankRepository.save(bank);
+        log.info("Teacher {} {} question bank {}", me.userId(),
+                active ? "activated" : "deactivated", saved.getId());
+        return QuestionBankResponse.fromEntity(saved, 0L);
+    }
+
     @Transactional(readOnly = true)
     public QuestionBank getOwnedQuestionBank(UUID questionBankId, UUID teacherId) {
         return questionBankRepository.findByIdAndTeacherId(questionBankId, teacherId)
                 .orElseThrow(() -> new ResourceNotFoundException("QuestionBank", questionBankId));
-    }
-
-    private void assertApprovedTeacher(AuthenticatedUser me, Profile profile) {
-        if (!UserRole.TEACHER.toDbValue().equalsIgnoreCase(me.role())
-                || !profile.isApprovedTeacher()) {
-            throw new BusinessException(
-                    "TEACHER_NOT_APPROVED",
-                    "Giáo viên chưa được phê duyệt vai trò GV.",
-                    HttpStatus.FORBIDDEN);
-        }
     }
 
     private String normalizeTitle(String title) {
@@ -102,7 +129,7 @@ public class QuestionBankService {
     private BusinessException duplicateTitle() {
         return new BusinessException(
                 "QUESTION_BANK_TITLE_EXISTS",
-                "Tên ngân hàng đã tồn tại.",
+                "Ten ngan hang da ton tai.",
                 HttpStatus.CONFLICT);
     }
 }

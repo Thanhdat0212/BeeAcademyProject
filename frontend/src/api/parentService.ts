@@ -10,6 +10,7 @@
  * ============================================================================
  */
 import { apiClient, unwrap } from './client';
+import type { AxiosRequestConfig } from 'axios';
 import type {
   ApiResponse,
   LinkedStudentResponse,
@@ -21,6 +22,20 @@ import type {
   SendParentLinkInvitationPayload,
   UploadResponse
 } from '../types/api';
+
+export interface ParentReportFilters {
+  courseId?: string;
+  from?: string;
+  to?: string;
+}
+
+function reportFilterParams(filters?: ParentReportFilters) {
+  const params: Record<string, string> = {};
+  if (filters?.courseId) params.courseId = filters.courseId;
+  if (filters?.from) params.from = filters.from;
+  if (filters?.to) params.to = filters.to;
+  return params;
+}
 
 /**
  * GET /api/parent/children
@@ -71,16 +86,18 @@ export async function cancelLinkInvitation(studentId: string): Promise<void> {
  * DELETE /api/parent/children/{studentId}
  * Hủy liên kết giám sát tài khoản học sinh.
  */
-export async function unlinkStudent(studentId: string): Promise<LinkedStudentResponse> {
-  const res = await apiClient.delete<ApiResponse<LinkedStudentResponse>>(
-    `/api/parent/children/${encodeURIComponent(studentId)}`
-  );
-  return unwrap(res.data);
-}
-
-export async function confirmUnlinkStudent(studentId: string): Promise<LinkedStudentResponse> {
+export async function unlinkStudent(
+  studentId: string,
+  reason?: string,
+): Promise<LinkedStudentResponse> {
+  const operationId = crypto.randomUUID();
+  const retryConfig: AxiosRequestConfig & { networkRetryCount: number } = {
+    networkRetryCount: 2,
+  };
   const res = await apiClient.post<ApiResponse<LinkedStudentResponse>>(
-    `/api/parent/children/${encodeURIComponent(studentId)}/unlink-confirm`
+    `/api/parent/children/${encodeURIComponent(studentId)}/unlink`,
+    { operationId, reason: reason?.trim() || null },
+    retryConfig,
   );
   return unwrap(res.data);
 }
@@ -100,20 +117,46 @@ export async function getChildOverview(studentId: string): Promise<ChildOverview
  * GET /api/parent/children/{studentId}/progress-report
  * Lấy báo cáo chi tiết UC24 của con, gồm tiến độ theo khóa học và bảng điểm.
  */
-export async function getChildProgressReport(studentId: string): Promise<ChildProgressReportResponse> {
+export async function getChildProgressReport(
+  studentId: string,
+  filters?: ParentReportFilters,
+): Promise<ChildProgressReportResponse> {
   const res = await apiClient.get<ApiResponse<ChildProgressReportResponse>>(
-    `/api/parent/children/${encodeURIComponent(studentId)}/progress-report`
+    `/api/parent/children/${encodeURIComponent(studentId)}/progress-report`,
+    { params: reportFilterParams(filters) },
   );
   return unwrap(res.data);
+}
+
+export async function exportChildProgressReport(
+  studentId: string,
+  filters?: ParentReportFilters,
+): Promise<Blob> {
+  const res = await apiClient.get(
+    `/api/parent/children/${encodeURIComponent(studentId)}/progress-report/export`,
+    {
+      params: reportFilterParams(filters),
+      responseType: 'blob',
+      timeout: 60000,
+      headers: {
+        Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      },
+    },
+  );
+  return res.data;
 }
 
 /**
  * GET /api/parent/children/{studentId}/payment-history
  * Lấy lịch sử thanh toán UC26 của con, gồm giao dịch của học sinh/phụ huynh và tiến độ hiện tại.
  */
-export async function getChildPaymentHistory(studentId: string): Promise<ParentPaymentHistoryResponse> {
+export async function getChildPaymentHistory(
+  studentId: string,
+  filters?: ParentReportFilters,
+): Promise<ParentPaymentHistoryResponse> {
   const res = await apiClient.get<ApiResponse<ParentPaymentHistoryResponse>>(
-    `/api/parent/children/${encodeURIComponent(studentId)}/payment-history`
+    `/api/parent/children/${encodeURIComponent(studentId)}/payment-history`,
+    { params: reportFilterParams(filters) },
   );
   return unwrap(res.data);
 }

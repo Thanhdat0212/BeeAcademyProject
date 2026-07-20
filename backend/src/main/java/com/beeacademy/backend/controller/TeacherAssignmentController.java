@@ -1,6 +1,7 @@
 package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.request.CreateAssignmentRequest;
+import com.beeacademy.backend.dto.request.UpdateAssignmentPolicyRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.TeacherAssignmentResponse;
 import com.beeacademy.backend.security.CurrentUser;
@@ -11,6 +12,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -39,6 +41,16 @@ public class TeacherAssignmentController {
         return ApiResponse.ok(
                 assignmentService.createAssignment(CurrentUser.required(), request),
                 "Đã tạo bài tập");
+    }
+
+    @PatchMapping("/{assignmentId}/submission-policy")
+    public ApiResponse<TeacherAssignmentResponse> updateSubmissionPolicy(
+            @PathVariable UUID assignmentId,
+            @Valid @RequestBody UpdateAssignmentPolicyRequest request) {
+        return ApiResponse.ok(
+                assignmentService.updateSubmissionPolicy(
+                        assignmentId, CurrentUser.required(), request),
+                "Đã cập nhật chính sách nộp bài");
     }
 
     @DeleteMapping("/{assignmentId}")

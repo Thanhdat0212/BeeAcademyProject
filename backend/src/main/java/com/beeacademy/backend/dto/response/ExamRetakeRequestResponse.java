@@ -15,17 +15,27 @@ public record ExamRetakeRequestResponse(
         UUID studentId,
         String studentName,
         String status,
+        String examEnrollmentStatus,
         String requestedReason,
         Integer extraAttempts,
+        UUID decidedBy,
+        String approverRole,
         String decidedReason,
         Instant retakeExpireAt,
+        Integer requestCount,
+        Integer approvalCount,
+        Instant rejectedAt,
+        Instant cooldownUntil,
         Instant createdAt,
         Instant decidedAt,
         Integer attemptsUsed,
         Integer maxAttempts
 ) {
     public static ExamRetakeRequestResponse fromEntity(
-            ExamRetakeRequest request, int attemptsUsed, int maxAttempts) {
+            ExamRetakeRequest request,
+            String examEnrollmentStatus,
+            int attemptsUsed,
+            int maxAttempts) {
         return new ExamRetakeRequestResponse(
                 request.getId(),
                 request.getExamConfig().getId(),
@@ -38,10 +48,17 @@ public record ExamRetakeRequestResponse(
                         ? request.getStudent().getFullName()
                         : "Học sinh",
                 request.getStatus().name(),
+                examEnrollmentStatus,
                 request.getRequestedReason(),
                 request.getExtraAttempts(),
+                request.getDecidedBy(),
+                request.getApproverRole(),
                 request.getDecidedReason(),
                 request.getRetakeExpireAt(),
+                request.getRequestCount(),
+                request.getApprovalCount(),
+                request.getRejectedAt(),
+                request.getCooldownUntil(),
                 request.getCreatedAt(),
                 request.getDecidedAt(),
                 attemptsUsed,

@@ -18,6 +18,28 @@ public record ParentLinkInvitationResponse(
         Instant respondedAt,
         UUID unlinkRequestedById,
         String unlinkRequestedByRole,
-        Instant unlinkRequestedAt
+        Instant unlinkRequestedAt,
+        boolean acceptedForProcessing,
+        String neutralMessage
 ) {
+    public static ParentLinkInvitationResponse neutral(String studentEmail, String message) {
+        return new ParentLinkInvitationResponse(
+                null,
+                "",
+                studentEmail,
+                null,
+                "",
+                "",
+                null,
+                "pending",
+                null,
+                null,
+                false,
+                null,
+                null,
+                null,
+                null,
+                false,
+                message);
+    }
 }

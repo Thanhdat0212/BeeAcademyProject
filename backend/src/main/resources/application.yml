@@ -91,6 +91,11 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
   dev-mode: ${DEV_MODE:false}
   frontend-url: ${FRONTEND_URL:http://localhost:3000}
+  parent:
+    weekly-report:
+      inactive-days-threshold: ${PARENT_WEEKLY_INACTIVE_DAYS_THRESHOLD:5}
+      low-score-threshold: ${PARENT_WEEKLY_LOW_SCORE_THRESHOLD:5.0}
+      low-progress-threshold: ${PARENT_WEEKLY_LOW_PROGRESS_THRESHOLD:50}
   gemini:
     # API key Gemini — chỉ tồn tại ở backend, KHÔNG đặt VITE_ prefix ra client.
     # Lấy key tại: https://aistudio.google.com/app/apikey

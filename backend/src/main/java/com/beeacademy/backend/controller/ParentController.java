@@ -2,6 +2,7 @@ package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.request.SendParentLinkInvitationRequest;
 import com.beeacademy.backend.dto.request.SendParentTeacherMessageRequest;
+import com.beeacademy.backend.dto.request.RevokeParentStudentLinkRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.ChildOverviewResponse;
 import com.beeacademy.backend.dto.response.ChildProgressReportResponse;
@@ -15,7 +16,9 @@ import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.ParentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,9 +27,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -66,20 +71,14 @@ public class ParentController {
         return ApiResponse.ok(null, "Da huy loi moi lien ket dang cho hoc sinh xac nhan.");
     }
 
-    @DeleteMapping("/children/{studentId}")
-    public ApiResponse<LinkedStudentResponse> unlinkStudent(@PathVariable UUID studentId) {
+    @PostMapping("/children/{studentId}/unlink")
+    public ApiResponse<LinkedStudentResponse> revokeStudentLink(
+            @PathVariable UUID studentId,
+            @Valid @RequestBody RevokeParentStudentLinkRequest request) {
         AuthenticatedUser me = CurrentUser.required();
         return ApiResponse.ok(
-                parentService.unlinkStudent(me, studentId),
-                "Đã gửi yêu cầu hủy liên kết. Cần học sinh đồng ý để hoàn tất.");
-    }
-
-    @PostMapping("/children/{studentId}/unlink-confirm")
-    public ApiResponse<LinkedStudentResponse> confirmUnlinkStudent(@PathVariable UUID studentId) {
-        AuthenticatedUser me = CurrentUser.required();
-        return ApiResponse.ok(
-                parentService.confirmUnlinkStudent(me, studentId),
-                "Đã xác nhận hủy liên kết tài khoản con.");
+                parentService.revokeStudentLink(me, studentId, request),
+                "Đã hủy liên kết với học sinh.");
     }
 
     @GetMapping("/children/{studentId}/overview")
@@ -89,15 +88,43 @@ public class ParentController {
     }
 
     @GetMapping("/children/{studentId}/progress-report")
-    public ApiResponse<ChildProgressReportResponse> getChildProgressReport(@PathVariable UUID studentId) {
+    public ApiResponse<ChildProgressReportResponse> getChildProgressReport(
+            @PathVariable UUID studentId,
+            @RequestParam(required = false) UUID courseId,
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to) {
         AuthenticatedUser me = CurrentUser.required();
-        return ApiResponse.ok(parentService.getChildProgressReport(me, studentId));
+        return ApiResponse.ok(parentService.getChildProgressReport(me, studentId, courseId, from, to));
+    }
+
+    @GetMapping(
+            value = "/children/{studentId}/progress-report/export",
+            produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public ResponseEntity<byte[]> exportChildProgressReport(
+            @PathVariable UUID studentId,
+            @RequestParam(required = false) UUID courseId,
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to) {
+        AuthenticatedUser me = CurrentUser.required();
+        byte[] workbook = parentService.exportChildProgressReportExcel(me, studentId, courseId, from, to);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"parent-progress-" + studentId + ".xlsx\"")
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .contentLength(workbook.length)
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(workbook);
     }
 
     @GetMapping("/children/{studentId}/payment-history")
-    public ApiResponse<ParentPaymentHistoryResponse> getChildPaymentHistory(@PathVariable UUID studentId) {
+    public ApiResponse<ParentPaymentHistoryResponse> getChildPaymentHistory(
+            @PathVariable UUID studentId,
+            @RequestParam(required = false) UUID courseId,
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to) {
         AuthenticatedUser me = CurrentUser.required();
-        return ApiResponse.ok(parentService.getChildPaymentHistory(me, studentId));
+        return ApiResponse.ok(parentService.getChildPaymentHistory(me, studentId, courseId, from, to));
     }
 
     @GetMapping("/children/{studentId}/teacher-conversations")

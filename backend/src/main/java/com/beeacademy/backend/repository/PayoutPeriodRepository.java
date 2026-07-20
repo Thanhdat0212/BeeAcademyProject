@@ -18,6 +18,8 @@ public interface PayoutPeriodRepository extends JpaRepository<PayoutPeriod, UUID
 
     List<PayoutPeriod> findByTeacherIdOrderByMonthYearDesc(UUID teacherId);
 
+    List<PayoutPeriod> findByTeacherIdAndStatusOrderByMonthYearDesc(UUID teacherId, PayoutStatus status);
+
     /**
      * Số GV "trễ hạn": có kỳ chưa thanh toán thuộc tháng đã qua.
      * monthYear định dạng "yyyy-MM" nên so sánh chuỗi {@code <} đúng

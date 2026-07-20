@@ -25,6 +25,7 @@ public record ParentPaymentHistoryResponse(
             String payerName,
             String payerRole,
             UUID courseId,
+            UUID courseVersionId,
             String courseTitle,
             String teacherName,
             String categoryName,
@@ -35,7 +36,17 @@ public record ParentPaymentHistoryResponse(
             Instant createdAt,
             Instant paidAt,
             Integer currentProgressPct,
-            String invoiceCode
+            String invoiceCode,
+            InvoiceInfo invoiceInfo
     ) {
     }
+
+    public record InvoiceInfo(
+            String sellerName,
+            String sellerTaxCode,
+            String buyerName,
+            String legalDescription,
+            String currency,
+            Instant issuedAt
+    ) {}
 }

@@ -127,16 +127,15 @@ public final class CourseSpecifications {
 
             List<Predicate> tokenPredicates = new ArrayList<>(tokens.size());
             for (String token : tokens) {
-                String pattern = "%" + escapeLikeToken(token) + "%";
                 List<Predicate> fieldPredicates = new ArrayList<>();
-                fieldPredicates.add(cb.like(normalizedTitle, pattern, '\\'));
-                fieldPredicates.add(cb.like(normalizedCategoryName, pattern, '\\'));
-                fieldPredicates.add(cb.like(normalizedCategorySlug, pattern, '\\'));
+                fieldPredicates.add(wordPrefixLike(cb, normalizedTitle, token));
+                fieldPredicates.add(wordPrefixLike(cb, normalizedCategoryName, token));
+                fieldPredicates.add(wordPrefixLike(cb, normalizedCategorySlug, token));
 
                 if (!isSingleCharacterToken(token)) {
-                    fieldPredicates.add(cb.like(normalizedDescription, pattern, '\\'));
-                    fieldPredicates.add(cb.like(normalizedSlug, pattern, '\\'));
-                    fieldPredicates.add(cb.like(normalizedTeacherName, pattern, '\\'));
+                    fieldPredicates.add(wordPrefixLike(cb, normalizedDescription, token));
+                    fieldPredicates.add(wordPrefixLike(cb, normalizedSlug, token));
+                    fieldPredicates.add(wordPrefixLike(cb, normalizedTeacherName, token));
                 }
 
                 Integer gradeToken = parseGradeToken(token);
@@ -230,13 +229,12 @@ public final class CourseSpecifications {
 
             Expression<Integer> score = cb.literal(0);
             for (String token : tokens) {
-                String pattern = "%" + escapeLikeToken(token) + "%";
-                score = cb.sum(score, weightedMatch(cb, title, pattern, 6));
-                score = cb.sum(score, weightedMatch(cb, categoryName, pattern, 4));
-                score = cb.sum(score, weightedMatch(cb, categorySlug, pattern, 3));
-                score = cb.sum(score, weightedMatch(cb, teacherName, pattern, 3));
-                score = cb.sum(score, weightedMatch(cb, description, pattern, 2));
-                score = cb.sum(score, weightedMatch(cb, slug, pattern, 1));
+                score = cb.sum(score, weightedPredicate(cb, wordPrefixLike(cb, title, token), 6));
+                score = cb.sum(score, weightedPredicate(cb, wordPrefixLike(cb, categoryName, token), 4));
+                score = cb.sum(score, weightedPredicate(cb, wordPrefixLike(cb, categorySlug, token), 3));
+                score = cb.sum(score, weightedPredicate(cb, wordPrefixLike(cb, teacherName, token), 3));
+                score = cb.sum(score, weightedPredicate(cb, wordPrefixLike(cb, description, token), 2));
+                score = cb.sum(score, weightedPredicate(cb, wordPrefixLike(cb, slug, token), 1));
                 Integer gradeToken = parseGradeToken(token);
                 if (gradeToken != null) {
                     score = cb.sum(score, weightedPredicate(
@@ -246,15 +244,6 @@ public final class CourseSpecifications {
             query.orderBy(cb.desc(score), cb.desc(root.get("createdAt")));
             return cb.conjunction();
         };
-    }
-
-    private static Expression<Integer> weightedMatch(CriteriaBuilder cb,
-                                                       Expression<String> field,
-                                                       String pattern,
-                                                       int weight) {
-        return cb.<Integer>selectCase()
-                .when(cb.like(field, pattern, '\\'), weight)
-                .otherwise(0);
     }
 
     private static Expression<Integer> weightedPredicate(CriteriaBuilder cb,
@@ -319,12 +308,30 @@ public final class CourseSpecifications {
         safeField.value(field);
         safeField.value("");
         Expression<String> lowered = cb.lower(safeField);
-        return cb.function(
+        Expression<String> unaccented = cb.function(
                 "translate",
                 String.class,
                 lowered,
                 cb.literal(SEARCH_TRANSLATE_FROM),
                 cb.literal(SEARCH_TRANSLATE_TO)
+        );
+        return cb.function(
+                "regexp_replace",
+                String.class,
+                unaccented,
+                cb.literal("[^a-z0-9]+"),
+                cb.literal(" "),
+                cb.literal("g")
+        );
+    }
+
+    private static Predicate wordPrefixLike(CriteriaBuilder cb,
+                                            Expression<String> normalizedField,
+                                            String token) {
+        String escapedToken = escapeLikeToken(token);
+        return cb.or(
+                cb.like(normalizedField, escapedToken + "%", '\\'),
+                cb.like(normalizedField, "% " + escapedToken + "%", '\\')
         );
     }
 

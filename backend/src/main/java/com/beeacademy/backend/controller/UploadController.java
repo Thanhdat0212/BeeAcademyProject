@@ -4,6 +4,7 @@ import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.UploadResponse;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.ContentUploadService;
+import com.beeacademy.backend.service.TeacherAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -35,6 +36,7 @@ import java.util.UUID;
 public class UploadController {
 
     private final ContentUploadService uploadService;
+    private final TeacherAccessService teacherAccessService;
 
     /**
      * Upload video cho một bài giảng.
@@ -47,9 +49,11 @@ public class UploadController {
             @PathVariable UUID lessonId,
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "durationSec", required = false) Integer durationSec) {
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
         UploadResponse result = uploadService.uploadVideo(
                 courseId, chapterId, lessonId,
-                CurrentUser.required().userId(), file, durationSec);
+                me.userId(), file, durationSec);
         return ApiResponse.ok(result, "Upload video thành công");
     }
 
@@ -64,8 +68,10 @@ public class UploadController {
             @RequestParam(value = "name", required = false) String displayName,
             @RequestParam(value = "slot", required = false) String documentSlot) {
         String name = displayName != null ? displayName : file.getOriginalFilename();
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
         UploadResponse result = uploadService.uploadDocument(
-                lessonId, CurrentUser.required().userId(), name, documentSlot, file);
+                lessonId, me.userId(), name, documentSlot, file);
         return ApiResponse.ok(result, "Upload tài liệu thành công");
     }
 
@@ -74,8 +80,10 @@ public class UploadController {
     public ApiResponse<Void> deleteDocument(
             @PathVariable UUID lessonId,
             @PathVariable UUID documentId) {
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
         uploadService.deleteDocument(
-                lessonId, documentId, CurrentUser.required().userId());
+                lessonId, documentId, me.userId());
         return ApiResponse.ok(null, "Xóa tài liệu thành công");
     }
 
@@ -86,8 +94,10 @@ public class UploadController {
     @PostMapping("/course-thumbnail")
     public ApiResponse<UploadResponse> uploadCourseThumbnail(
             @RequestParam("file") MultipartFile file) {
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
         UploadResponse result = uploadService.uploadCourseThumbnail(
-                CurrentUser.required().userId(), file);
+                me.userId(), file);
         return ApiResponse.ok(result, "Upload anh bia thanh cong");
     }
 
@@ -98,24 +108,30 @@ public class UploadController {
     @PostMapping("/course-intro-video")
     public ApiResponse<UploadResponse> uploadCourseIntroVideo(
             @RequestParam("file") MultipartFile file) {
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
         UploadResponse result = uploadService.uploadCourseIntroVideo(
-                CurrentUser.required().userId(), file);
+                me.userId(), file);
         return ApiResponse.ok(result, "Upload video gioi thieu thanh cong");
     }
 
     @PostMapping("/question-image")
     public ApiResponse<UploadResponse> uploadQuestionImage(
             @RequestParam("file") MultipartFile file) {
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
         UploadResponse result = uploadService.uploadQuestionImage(
-                CurrentUser.required().userId(), file);
+                me.userId(), file);
         return ApiResponse.ok(result, "Upload anh cau hoi thanh cong");
     }
 
     @PostMapping("/question-audio")
     public ApiResponse<UploadResponse> uploadQuestionAudio(
             @RequestParam("file") MultipartFile file) {
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
         UploadResponse result = uploadService.uploadQuestionAudio(
-                CurrentUser.required().userId(), file);
+                me.userId(), file);
         return ApiResponse.ok(result, "Upload audio cau hoi thanh cong");
     }
 }

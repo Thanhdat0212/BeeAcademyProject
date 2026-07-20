@@ -2,8 +2,10 @@ package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.request.CreateQaMessageRequest;
 import com.beeacademy.backend.dto.request.CreateQaThreadRequest;
+import com.beeacademy.backend.dto.request.MarkQaThreadDuplicateRequest;
 import com.beeacademy.backend.dto.request.UpdateQaThreadStatusRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
+import com.beeacademy.backend.dto.response.QaKpiReportResponse;
 import com.beeacademy.backend.dto.response.QaThreadResponse;
 import com.beeacademy.backend.dto.response.UploadResponse;
 import com.beeacademy.backend.security.CurrentUser;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -43,6 +46,19 @@ public class QaController {
     @PreAuthorize("hasRole('student')")
     public ApiResponse<List<QaThreadResponse>> listStudentThreads() {
         return ApiResponse.ok(qaService.listStudentThreads(CurrentUser.required()));
+    }
+
+    @GetMapping("/student/courses/{courseId}/qa/public")
+    @PreAuthorize("hasRole('student')")
+    public ApiResponse<List<QaThreadResponse>> listCoursePublicThreads(@PathVariable UUID courseId) {
+        return ApiResponse.ok(
+                qaService.listCoursePublicThreads(courseId, CurrentUser.required()));
+    }
+
+    @GetMapping("/student/qa/{threadId}")
+    @PreAuthorize("hasRole('student')")
+    public ApiResponse<QaThreadResponse> getStudentThread(@PathVariable UUID threadId) {
+        return ApiResponse.ok(qaService.getStudentThread(threadId, CurrentUser.required()));
     }
 
     @PostMapping("/student/qa")
@@ -78,6 +94,46 @@ public class QaController {
         return ApiResponse.ok(
                 qaService.addTeacherMessage(threadId, CurrentUser.required(), req),
                 "Đã gửi câu trả lời");
+    }
+
+    @PutMapping("/teacher/qa/{threadId}/messages/{messageId}")
+    @PreAuthorize("hasRole('teacher')")
+    public ApiResponse<QaThreadResponse> editTeacherMessage(
+            @PathVariable UUID threadId,
+            @PathVariable UUID messageId,
+            @Valid @RequestBody CreateQaMessageRequest req) {
+        return ApiResponse.ok(
+                qaService.editTeacherMessage(threadId, messageId, CurrentUser.required(), req),
+                "Da cap nhat cau tra loi");
+    }
+
+    @PostMapping("/teacher/qa/{threadId}/duplicate")
+    @PreAuthorize("hasRole('teacher')")
+    public ApiResponse<QaThreadResponse> markDuplicate(
+            @PathVariable UUID threadId,
+            @Valid @RequestBody MarkQaThreadDuplicateRequest req) {
+        return ApiResponse.ok(
+                qaService.markDuplicate(threadId, req.duplicateOfThreadId(), CurrentUser.required()),
+                "Da danh dau cau hoi trung lap");
+    }
+
+    @GetMapping("/teacher/qa/report")
+    @PreAuthorize("hasRole('teacher')")
+    public ApiResponse<QaKpiReportResponse> getTeacherQaReport() {
+        return ApiResponse.ok(qaService.getTeacherKpiReport(CurrentUser.required()));
+    }
+
+    @GetMapping("/admin/qa")
+    @PreAuthorize("hasRole('admin')")
+    public ApiResponse<List<QaThreadResponse>> listAdminThreads(
+            @RequestParam(required = false) UUID courseId) {
+        return ApiResponse.ok(qaService.listAdminThreads(courseId, CurrentUser.required()));
+    }
+
+    @GetMapping("/admin/qa/{threadId}")
+    @PreAuthorize("hasRole('admin')")
+    public ApiResponse<QaThreadResponse> getAdminThread(@PathVariable UUID threadId) {
+        return ApiResponse.ok(qaService.getAdminThread(threadId, CurrentUser.required()));
     }
 
     @PutMapping("/teacher/qa/{threadId}/status")

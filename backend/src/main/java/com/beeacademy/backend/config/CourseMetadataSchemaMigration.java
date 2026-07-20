@@ -5,10 +5,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
+@Order(100)
 @RequiredArgsConstructor
 public class CourseMetadataSchemaMigration implements ApplicationRunner {
 
@@ -53,6 +55,20 @@ public class CourseMetadataSchemaMigration implements ApplicationRunner {
         jdbcTemplate.execute("""
                 CREATE INDEX IF NOT EXISTS idx_course_versions_course
                 ON public.course_versions (course_id, version_no DESC)
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE public.course_versions
+                    ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+                    ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ
+                """);
+        jdbcTemplate.execute("""
+                UPDATE public.course_versions cv
+                SET approved_at = COALESCE(c.published_at, cv.submitted_at)
+                FROM public.courses c
+                WHERE cv.course_id = c.id
+                  AND c.status::text = 'published'
+                  AND cv.version_no = c.submitted_version_no
+                  AND cv.approved_at IS NULL
                 """);
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS public.admin_notifications (

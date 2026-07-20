@@ -1,40 +1,40 @@
-import { useState, useEffect, useMemo, useRef, type SyntheticEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
 import {
-  ArrowLeft,
-  PlayCircle,
-  FileText,
-  CheckCircle2,
-  Lock,
-  ShoppingCart,
-  Video,
-  Menu,
-  X,
-  MessageSquare,
-  ClipboardList,
-  ChevronLeft,
-  Loader2,
-  Send,
   AlertCircle,
-  Plus,
-  Minus,
+  ArrowLeft,
+  CheckCircle2,
+  ChevronLeft,
+  ClipboardList,
   Clock,
-  Trash2,
-  Pencil,
+  FileText,
   GraduationCap,
-  Pause,
+  Loader2,
+  Lock,
+  Maximize,
+  Menu,
+  MessageSquare,
+  Minus,
+  PauseCircle,
+  Pencil,
+  PlayCircle,
+  Plus,
+  Send,
+  ShoppingCart,
+  Trash2,
   Volume2,
   VolumeX,
-  Maximize,
+  X,
 } from 'lucide-react';
-import EmbeddedVideoPlayer from '../../../components/EmbeddedVideoPlayer';
-import QaImagePicker from '../../../components/QaImagePicker';
-import type { Course, Lesson } from '../../../data/mockCourses';
-import { notify } from '../../../lib/toast';
-import { useCartStore } from '../../../store/useCartStore';
-import { useAuthStore } from '../../../store/useAuthStore';
-import { useCourseStore } from '../../../store/useCourseStore';
+import { AnimatePresence, motion } from 'motion/react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type SyntheticEvent,
+} from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { formatDurationSec } from '../../../api/adapter';
 import { apiClient } from '../../../api/client';
 import {
@@ -42,29 +42,65 @@ import {
   createCourseDiscussionThread,
   deleteCourseDiscussionReply,
   deleteCourseDiscussionThread,
-  listCourseDiscussionThreads,
   updateCourseDiscussionReply,
   updateCourseDiscussionThread,
+  type CourseDiscussionThread,
 } from '../../../api/courseDiscussionService';
-import { uploadQaImage } from '../../../api/qaService';
 import { completeCourseProgressItem, getCourseProgress } from '../../../api/courseProgressService';
-import { createStudentLessonNote, deleteStudentLessonNote, listStudentLessonNotes } from '../../../api/studentLessonNoteService';
-import { getStudentVideoProgress, saveStudentVideoProgress } from '../../../api/studentVideoProgressService';
-import type { StudentExam } from '../../../api/studentExamService';
-import { getStudentLearningContext } from '../../../api/studentLearningContextService';
+import {
+  createStudentQaThread,
+  uploadQaImage,
+  type QaVisibility,
+} from '../../../api/qaService';
 import { getStudentDocumentDownload } from '../../../api/studentDocumentService';
-import { flushOfflineLearningSyncQueue, queueCompletion, queueVideoProgress } from '../../../lib/offlineLearningSyncQueue';
-import type { VideoWatchedSegment } from '../../../api/studentVideoProgressService';
-import type { CourseDiscussionThread } from '../../../api/courseDiscussionService';
-import type { StudentLessonNote } from '../../../api/studentLessonNoteService';
+import { listStudentExams, type StudentExam } from '../../../api/studentExamService';
+import {
+  createStudentLessonNote,
+  deleteStudentLessonNote,
+  listStudentLessonNotes,
+  type StudentLessonNote,
+} from '../../../api/studentLessonNoteService';
+import {
+  getStudentVideoProgress,
+  saveStudentVideoProgress,
+  type VideoWatchedSegment,
+} from '../../../api/studentVideoProgressService';
+import EmbeddedVideoPlayer from '../../../components/EmbeddedVideoPlayer';
+import QaImagePicker from '../../../components/QaImagePicker';
+import {
+  flushOfflineLearningSyncQueue,
+  queueCompletion,
+  queueVideoProgress,
+} from '../../../lib/offlineLearningSyncQueue';
+import { notify } from '../../../lib/toast';
+import { useAuthStore } from '../../../store/useAuthStore';
+import { useCartStore } from '../../../store/useCartStore';
 import type { ChapterDetail } from '../../../types/api';
-import { CourseAssignmentsPanel } from './CourseAssignmentsPanel';
-import { CourseReviewsPanel } from './CourseReviewsPanel';
-import { QuizModal } from './QuizModal';
-import { SafeCourseImage, adaptLearningLesson, avatarFor, continuousWatchedEndSec, formatDiscussionDate, getCourseProgressStats, getLessonDisplayDuration, getLessonUnlockState, getOrderedVideoLessons, jwtSubject, mergeWatchedSegments, roleLabel, watchedDurationSec } from './shared';
+import type { Course, Lesson } from '../../../types/course';
+import {
+  adaptLearningLesson,
+  avatarFor,
+  continuousWatchedEndSec,
+  findContinueLearningLesson,
+  formatDiscussionDate,
+  getCourseProgressStats,
+  getGlobalLessonNumberById,
+  getLessonDisplayDuration,
+  getLessonUnlockState,
+  getOrderedVideoLessons,
+  jwtSubject,
+  mergeWatchedSegments,
+  roleLabel,
+  SafeCourseImage,
+  watchedDurationSec,
+} from './courseDetailUtils';
+import { useCourseDiscussion } from './hooks/useCourseDiscussion';
+import { useCourseProgress } from './hooks/useCourseProgress';
 
-
-export function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPreview }: {
+const QuizModal = lazy(() => import('./QuizModal'));
+const CourseReviewsPanel = lazy(() => import('./CourseReviewsPanel'));
+const CourseAssignmentsPanel = lazy(() => import('./CourseAssignmentsPanel'));
+export default function LearningView({ course, rawChapters, courseId, initialLessonId, onExitPreview }: {
   course: Course;
   rawChapters: ChapterDetail[];
   courseId: string;
@@ -91,20 +127,19 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
   const [studentExams, setStudentExams] = useState<StudentExam[]>([]);
   const [loadingStudentExams, setLoadingStudentExams] = useState(false);
 
-  // Lấy dữ liệu và actions từ Zustand store
-  const completedLessons = useCourseStore((state) => state.completedLessons);
-  const hydrateCourseProgress = useCourseStore((state) => state.hydrateCourseProgress);
-  const markLessonCompleted = useCourseStore((state) => state.markLessonCompleted);
-  const completedQuizzes = useCourseStore((state) => state.completedQuizzes);
-  const markQuizCompleted = useCourseStore((state) => state.markQuizCompleted);
-  const lessonDurations = useCourseStore((state) => state.lessonDurations);
-  const saveLessonDuration = useCourseStore((state) => state.saveLessonDuration);
-  const videoPositions = useCourseStore((state) => state.videoPositions);
-  const saveVideoPosition = useCourseStore((state) => state.saveVideoPosition);
-  const quizScores = useCourseStore((state) => state.quizScores);
-  const saveQuizScore = useCourseStore((state) => state.saveQuizScore);
-  const completedList = completedLessons[course.id] ?? [];
-  const completedQuizList = completedQuizzes[course.id] ?? [];
+  const {
+    completedList,
+    hydrateCourseProgress,
+    markLessonCompleted,
+    completedQuizList,
+    markQuizCompleted,
+    lessonDurations,
+    saveLessonDuration,
+    videoPositions,
+    saveVideoPosition,
+    quizScores,
+    saveQuizScore,
+  } = useCourseProgress(course.id, course.isEnrolled, accessToken);
 
   // State cục bộ cho ghi chú
   const [timedNoteInput, setTimedNoteInput] = useState('');
@@ -115,24 +150,12 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
   const [videoNoteOverlayOpen, setVideoNoteOverlayOpen] = useState(false);
   const [currentVideoTime, setCurrentVideoTime] = useState(0);
   const [currentVideoDuration, setCurrentVideoDuration] = useState(0);
-  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
-  const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [maxSeekablePosition, setMaxSeekablePosition] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  const [isVideoMuted, setIsVideoMuted] = useState(false);
+  const [videoLoadExceededSla, setVideoLoadExceededSla] = useState(false);
 
-  // State cục bộ cho Q&A
-  const [qaInput, setQaInput] = useState('');
-  const [qaImageFile, setQaImageFile] = useState<File | null>(null);
-  const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
-  const [discussionThreads, setDiscussionThreads] = useState<CourseDiscussionThread[]>([]);
-  const [loadingDiscussion, setLoadingDiscussion] = useState(false);
-  const [postingQuestion, setPostingQuestion] = useState(false);
-  const [postingReplyId, setPostingReplyId] = useState<string | null>(null);
-  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
-  const [editingQuestionText, setEditingQuestionText] = useState('');
-  const [editingReplyId, setEditingReplyId] = useState<string | null>(null);
-  const [editingReplyText, setEditingReplyText] = useState('');
-  const [savingDiscussionId, setSavingDiscussionId] = useState<string | null>(null);
   const watchedSegmentsRef = useRef<VideoWatchedSegment[]>([]);
   const lastObservedPositionRef = useRef<number | null>(null);
   const lastObservedAtRef = useRef(0);
@@ -143,8 +166,10 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
   const currentPositionRef = useRef(0);
   const currentDurationRef = useRef(0);
   const maxSeekablePositionRef = useRef(0);
+  const lastSeekWarningAtRef = useRef(0);
   const lastLocalProgressRef = useRef(-1);
   const lastRemoteSaveAtRef = useRef(0);
+  const videoReadyTimerRef = useRef<number | null>(null);
 
   const chapterSections = useMemo(() => (
     rawChapters.length > 0
@@ -183,6 +208,11 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
     () => getOrderedVideoLessons(chapterSections),
     [chapterSections],
   );
+  const lessonNumberById = useMemo(
+    () => getGlobalLessonNumberById(chapterSections),
+    [chapterSections],
+  );
+  const videoProgressStorageKey = `${user?.id ?? 'guest'}:${course.id}`;
   const requestedLesson = initialLessonId
     ? course.lessons?.find((lesson) => {
       if (lesson.id !== initialLessonId || lesson.type === 'quiz') {
@@ -192,6 +222,12 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
     })
     : null;
   const firstLesson = requestedLesson
+    ?? findContinueLearningLesson(
+      course,
+      chapterSections,
+      completedList,
+      videoPositions[videoProgressStorageKey] ?? {},
+    )
     ?? course.lessons?.find((lesson) =>
       lesson.type !== 'quiz' && getLessonUnlockState(course, lesson, orderedVideoLessons, completedList).canOpen
     )
@@ -206,8 +242,34 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
   const [activeLesson, setActiveLesson] = useState<Lesson | null>(firstLesson);
   const [downloadingDocumentId, setDownloadingDocumentId] = useState<string | null>(null);
   const [resumePositionSec, setResumePositionSec] = useState(0);
-  const videoProgressStorageKey = `${user?.id ?? 'guest'}:${course.id}`;
   const [activeTab, setActiveTab] = useState<'overview' | 'qa' | 'notes' | 'assignments' | 'reviews'>('overview');
+  const {
+    qaInput, setQaInput,
+    qaImageFile, setQaImageFile,
+    teacherQuestionTitle, setTeacherQuestionTitle,
+    teacherQuestionContent, setTeacherQuestionContent,
+    teacherQuestionVisibility, setTeacherQuestionVisibility,
+    teacherQuestionImageFile, setTeacherQuestionImageFile,
+    publicQaThreads, setPublicQaThreads,
+    loadingPublicQa,
+    sendingTeacherQuestion, setSendingTeacherQuestion,
+    replyInputs, setReplyInputs,
+    discussionThreads, setDiscussionThreads,
+    loadingDiscussion,
+    postingQuestion, setPostingQuestion,
+    postingReplyId, setPostingReplyId,
+    editingQuestionId, setEditingQuestionId,
+    editingQuestionText, setEditingQuestionText,
+    editingReplyId, setEditingReplyId,
+    editingReplyText, setEditingReplyText,
+    savingDiscussionId, setSavingDiscussionId,
+    upsertDiscussionThread,
+  } = useCourseDiscussion({
+    courseId: course.id,
+    isEnrolled: course.isEnrolled,
+    userRole: user?.role,
+    activeTab,
+  });
   const playableVideoUrl = usingVideoFallback && activeLesson?.videoFallbackUrl
     ? activeLesson.videoFallbackUrl
     : activeLesson?.url;
@@ -288,11 +350,6 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
     setExpandedChapterIds(new Set(chapterSections.slice(0, 1).map(chapter => chapter.id)));
   }, [chapterSections, course.id, firstLesson]);
 
-  // Một call learning-context lấy cả exams + progress thay cho 2 call riêng
-  // (listStudentExams + getCourseProgress) — DB ở region xa nên mỗi call bớt
-  // được là bớt ~0.5s. Đọc completedLessons/Quizzes qua getState() thay vì
-  // dependency để effect chỉ chạy khi đổi khóa học, không refetch mỗi lần
-  // hoàn thành một bài.
   useEffect(() => {
     if (!course.isEnrolled || !accessToken) {
       setStudentExams([]);
@@ -301,47 +358,13 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
 
     let cancelled = false;
     setLoadingStudentExams(true);
-    getStudentLearningContext(course.id)
-      .then(async ({ progress: initialProgress, exams }) => {
+    listStudentExams(course.id)
+      .then(exams => {
         if (!cancelled) setStudentExams(exams);
-
-        let progress = initialProgress;
-        const storeState = useCourseStore.getState();
-        const localLessonIds = storeState.completedLessons[course.id] ?? [];
-        const localQuizIds = storeState.completedQuizzes[course.id] ?? [];
-        const serverLessonIds = new Set(progress.completedLessonIds);
-        const serverQuizIds = new Set(progress.completedQuizIds);
-        const missingLessonIds = localLessonIds.filter(id => !serverLessonIds.has(id));
-        const missingQuizIds = localQuizIds.filter(id => !serverQuizIds.has(id));
-
-        if (missingLessonIds.length > 0 || missingQuizIds.length > 0) {
-          await Promise.allSettled([
-            ...missingLessonIds.map(itemId =>
-              completeCourseProgressItem(course.id, { itemId, itemType: 'lesson' as const }),
-            ),
-            ...missingQuizIds.map(itemId =>
-              completeCourseProgressItem(course.id, { itemId, itemType: 'quiz' as const }),
-            ),
-          ]);
-          progress = await getCourseProgress(course.id);
-        }
-
-        const nextLessonIds = progress.completedLessonIds;
-        const nextQuizIds = progress.completedQuizIds;
-        const hasSameLessons =
-          localLessonIds.length === nextLessonIds.length &&
-          localLessonIds.every(id => nextLessonIds.includes(id));
-        const hasSameQuizzes =
-          localQuizIds.length === nextQuizIds.length &&
-          localQuizIds.every(id => nextQuizIds.includes(id));
-
-        if (!cancelled && (!hasSameLessons || !hasSameQuizzes)) {
-          hydrateCourseProgress(course.id, progress.completedLessonIds, progress.completedQuizIds);
-        }
       })
       .catch(error => {
         if (!cancelled) {
-          console.warn('Không tải được dữ liệu học tập:', error);
+          console.warn('Không tải được danh sách bài kiểm tra:', error);
           setStudentExams([]);
         }
       })
@@ -352,7 +375,7 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
     return () => {
       cancelled = true;
     };
-  }, [accessToken, course.id, course.isEnrolled, hydrateCourseProgress]);
+  }, [accessToken, course.id, course.isEnrolled]);
 
   useEffect(() => {
     const localProgress = activeLesson
@@ -376,12 +399,36 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
     setCurrentVideoDuration(localProgress?.durationSec ?? 0);
     setMaxSeekablePosition(localMaxSeekablePosition);
     setIsVideoPlaying(false);
-    setIsVideoMuted(false);
-    setPlaybackRate(1);
     setResumePositionSec(localPosition);
     setTimedNoteInput('');
     setVideoNoteOverlayOpen(false);
   }, [activeLesson?.id, videoProgressStorageKey]);
+
+  useEffect(() => {
+    if (videoReadyTimerRef.current !== null) {
+      window.clearTimeout(videoReadyTimerRef.current);
+      videoReadyTimerRef.current = null;
+    }
+    setVideoLoadExceededSla(false);
+    if (!activeLesson || activeLesson.type !== 'video' || !playableVideoUrl || playableVideoUrl === '#') {
+      return;
+    }
+    videoReadyTimerRef.current = window.setTimeout(() => {
+      videoReadyTimerRef.current = null;
+      setVideoLoadExceededSla(true);
+      if (!usingVideoFallback && activeLesson.videoFallbackUrl
+          && activeLesson.videoFallbackUrl !== activeLesson.url) {
+        setUsingVideoFallback(true);
+        notify.info('Nguồn chính tải quá 3 giây. Đang chuyển sang nguồn dự phòng.');
+      }
+    }, 3_000);
+    return () => {
+      if (videoReadyTimerRef.current !== null) {
+        window.clearTimeout(videoReadyTimerRef.current);
+        videoReadyTimerRef.current = null;
+      }
+    };
+  }, [activeLesson?.id, playableVideoUrl, usingVideoFallback]);
 
   useEffect(() => {
     if (!activeLesson || activeLesson.type !== 'video' || user?.role !== 'student' || !course.isEnrolled) {
@@ -487,29 +534,6 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
     };
   }, [activeLesson, activeTab, course.id, user?.role, videoNoteOverlayOpen]);
 
-  useEffect(() => {
-    if (activeTab !== 'qa') return;
-
-    let cancelled = false;
-    setLoadingDiscussion(true);
-    listCourseDiscussionThreads(course.id)
-      .then(items => {
-        if (!cancelled) setDiscussionThreads(items);
-      })
-      .catch(error => {
-        if (!cancelled) {
-          notify.error(error instanceof Error ? error.message : 'Không tải được thảo luận');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingDiscussion(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, course.id]);
-
   // Tính toán tiến độ học tập thực tế dựa trên completedLessons
   const progressStats = useMemo(
     () => getCourseProgressStats(chapterSections, completedList, completedQuizList),
@@ -612,37 +636,24 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
     setCurrentVideoTime(normalizedPosition);
     setCurrentVideoDuration(normalizedDuration);
 
-    const now = Date.now();
+    const observedAt = Date.now();
     const previousPosition = lastObservedPositionRef.current;
-    const elapsedSec = lastObservedAtRef.current > 0
-      ? Math.max(0, (now - lastObservedAtRef.current) / 1000)
-      : 0;
-    const contentDelta = previousPosition == null ? 0 : normalizedPosition - previousPosition;
-    const maxContinuousDelta = Math.max(3, elapsedSec * playbackRate * 2 + 1);
-    const isForwardJump = previousPosition != null
-      && contentDelta > maxContinuousDelta
-      && normalizedPosition > maxSeekablePositionRef.current + 1;
-    if (isForwardJump) {
-      const clampedPosition = Math.max(0, maxSeekablePositionRef.current);
-      currentPositionRef.current = clampedPosition;
-      setCurrentVideoTime(clampedPosition);
-      lastObservedPositionRef.current = clampedPosition;
-      lastObservedAtRef.current = now;
-      return;
-    }
-
-    if (previousPosition != null && contentDelta >= 0 && contentDelta <= maxContinuousDelta) {
-      watchedSegmentsRef.current = mergeWatchedSegments(
-        watchedSegmentsRef.current,
-        [{ startSec: previousPosition, endSec: normalizedPosition }],
-        normalizedDuration,
-      );
-      updateMaxSeekablePosition(normalizedPosition);
-    } else if (previousPosition == null || normalizedPosition <= maxSeekablePositionRef.current + 1) {
-      updateMaxSeekablePosition(normalizedPosition);
+    const previousObservedAt = lastObservedAtRef.current;
+    if (previousPosition != null && previousObservedAt > 0) {
+      const advancedSeconds = normalizedPosition - previousPosition;
+      const elapsedSeconds = Math.max(0, (observedAt - previousObservedAt) / 1000);
+      const maximumNaturalAdvance = Math.max(2.5, elapsedSeconds * Math.max(0.5, playbackRate) + 1.25);
+      if (advancedSeconds > 0 && advancedSeconds <= maximumNaturalAdvance) {
+        watchedSegmentsRef.current = mergeWatchedSegments(
+          watchedSegmentsRef.current,
+          [{ startSec: previousPosition, endSec: normalizedPosition }],
+          normalizedDuration,
+        );
+        updateMaxSeekablePosition(continuousWatchedEndSec(watchedSegmentsRef.current));
+      }
     }
     lastObservedPositionRef.current = normalizedPosition;
-    lastObservedAtRef.current = now;
+    lastObservedAtRef.current = observedAt;
 
     const wholeSecond = Math.floor(normalizedPosition);
     if (Math.abs(wholeSecond - lastLocalProgressRef.current) >= 2) {
@@ -730,6 +741,7 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
       return;
     }
     const video = event.currentTarget;
+    handleVideoReady();
     saveLessonDuration(course.id, activeLesson.id, video.duration);
     currentDurationRef.current = video.duration;
     setCurrentVideoDuration(video.duration);
@@ -743,17 +755,23 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
   }
 
   function handleVideoTimeUpdate(event: SyntheticEvent<HTMLVideoElement>) {
-    if (isResettingSeekRef.current) {
+    if (event.currentTarget.seeking && !isResettingSeekRef.current) {
       return;
     }
-
     recordVideoProgress(event.currentTarget.currentTime, event.currentTarget.duration);
+  }
 
+  function handleVideoReady() {
+    if (videoReadyTimerRef.current !== null) {
+      window.clearTimeout(videoReadyTimerRef.current);
+      videoReadyTimerRef.current = null;
+    }
+    setVideoLoadExceededSla(false);
   }
 
   function handleVideoPlaybackError() {
     if (!usingVideoFallback && activeLesson?.videoFallbackUrl
-        && activeLesson.videoFallbackUrl !== activeLesson.url) {
+      && activeLesson.videoFallbackUrl !== activeLesson.url) {
       setUsingVideoFallback(true);
       setVideoUrlExpired(false);
       notify.info('Nguồn chính gặp sự cố. Đang chuyển sang nguồn video dự phòng.');
@@ -769,13 +787,18 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
       return;
     }
 
-    if (clampForwardSeek(video)) {
-      return;
-    }
-
-    currentPositionRef.current = video.currentTime;
-    lastObservedPositionRef.current = video.currentTime;
+    const allowedTime = Math.min(
+      Math.max(0, currentPositionRef.current),
+      Math.max(0, maxSeekablePositionRef.current),
+    );
+    isResettingSeekRef.current = true;
+    video.currentTime = allowedTime;
+    lastObservedPositionRef.current = allowedTime;
     lastObservedAtRef.current = Date.now();
+    setCurrentVideoTime(allowedTime);
+    window.setTimeout(() => {
+      isResettingSeekRef.current = false;
+    }, 0);
   }
 
   function toggleDirectVideoPlayback() {
@@ -800,6 +823,53 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
     if (container?.requestFullscreen) {
       void container.requestFullscreen();
     }
+  }
+
+  function blockVideoSeekInteraction(event: SyntheticEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const now = Date.now();
+    if (now - lastSeekWarningAtRef.current > 1500) {
+      lastSeekWarningAtRef.current = now;
+      notify.error('Không thể tua video bài giảng.');
+    }
+  }
+
+  function handleVideoPlay() {
+    setIsVideoPlaying(true);
+    lastObservedPositionRef.current = videoRef.current?.currentTime ?? currentPositionRef.current;
+    lastObservedAtRef.current = Date.now();
+  }
+
+  function handleVideoPause() {
+    setIsVideoPlaying(false);
+    persistCurrentVideoProgress();
+    lastObservedPositionRef.current = null;
+    lastObservedAtRef.current = 0;
+  }
+
+  function toggleVideoPlayback() {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play();
+    } else {
+      video.pause();
+    }
+  }
+
+  function toggleVideoMute() {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextMuted = !video.muted;
+    video.muted = nextMuted;
+    setIsVideoMuted(nextMuted);
+  }
+
+  function openVideoFullscreen() {
+    const video = videoRef.current;
+    if (!video) return;
+    void (video.parentElement ?? video).requestFullscreen?.();
   }
 
   function toggleChapter(chapterId: string) {
@@ -862,16 +932,30 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
     }
   }
 
-  function upsertDiscussionThread(thread: CourseDiscussionThread) {
-    setDiscussionThreads(prev => {
-      const exists = prev.some(item => item.id === thread.id);
-      const next = exists
-        ? prev.map(item => item.id === thread.id ? thread : item)
-        : [thread, ...prev];
-      return next.sort((a, b) =>
-        new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()
-      );
-    });
+  function handleSeekToNote(timeSec: number) {
+    const video = videoRef.current;
+    if (!video || !activeLesson) {
+      notify.error('Không thể tua video nhúng YouTube/Vimeo từ ghi chú.');
+      return;
+    }
+
+    const duration = Number.isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : currentDurationRef.current;
+    const targetTime = duration > 0
+      ? Math.min(Math.max(0, timeSec), duration)
+      : Math.max(0, timeSec);
+
+    isResettingSeekRef.current = true;
+    video.currentTime = targetTime;
+    currentPositionRef.current = targetTime;
+    updateMaxSeekablePosition(targetTime);
+    setCurrentVideoTime(targetTime);
+    if (duration > 0) setCurrentVideoDuration(duration);
+    saveVideoPosition(videoProgressStorageKey, activeLesson.id, targetTime, duration);
+    window.setTimeout(() => {
+      isResettingSeekRef.current = false;
+    }, 300);
   }
 
   const handleAddQuestion = async () => {
@@ -893,6 +977,57 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
       notify.error(error instanceof Error ? error.message : 'Không đăng được câu hỏi');
     } finally {
       setPostingQuestion(false);
+    }
+  };
+
+  const handleAskTeacher = async () => {
+    const title = teacherQuestionTitle.trim();
+    const content = teacherQuestionContent.trim();
+    if (!title) {
+      notify.error('Vui lòng nhập tiêu đề câu hỏi');
+      return;
+    }
+    if (content.length < 10) {
+      notify.error('Nội dung câu hỏi phải có ít nhất 10 ký tự');
+      return;
+    }
+    if (!activeLesson) {
+      notify.error('Vui lòng chọn bài học trước khi đặt câu hỏi');
+      return;
+    }
+
+    try {
+      setSendingTeacherQuestion(true);
+      const attachment = teacherQuestionImageFile
+        ? await uploadQaImage(teacherQuestionImageFile)
+        : undefined;
+      const thread = await createStudentQaThread({
+        courseId: course.id,
+        lessonId: activeLesson.id,
+        title,
+        content,
+        visibility: teacherQuestionVisibility,
+        attachment,
+      });
+      if (thread.visibility === 'public') {
+        setPublicQaThreads(previous => [
+          thread,
+          ...previous.filter(item => item.id !== thread.id),
+        ]);
+      }
+      setTeacherQuestionTitle('');
+      setTeacherQuestionContent('');
+      setTeacherQuestionVisibility('public');
+      setTeacherQuestionImageFile(null);
+      notify.success(
+        thread.visibility === 'private'
+          ? 'Đã gửi câu hỏi riêng tư tới giáo viên'
+          : 'Đã gửi câu hỏi và đăng công khai trong khóa học',
+      );
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : 'Không gửi được câu hỏi tới giáo viên');
+    } finally {
+      setSendingTeacherQuestion(false);
     }
   };
 
@@ -1094,9 +1229,9 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
             ) : activeLesson?.type === 'video' && playableVideoUrl && playableVideoUrl !== '#' ? (
               // Kiểm tra embed URL (YouTube/Vimeo) hay direct video
               playableVideoUrl.includes('youtube.com') ||
-              playableVideoUrl.includes('youtu.be') ||
-              playableVideoUrl.includes('vimeo.com') ||
-              playableVideoUrl.includes('/embed/') ? (
+                playableVideoUrl.includes('youtu.be') ||
+                playableVideoUrl.includes('vimeo.com') ||
+                playableVideoUrl.includes('/embed/') ? (
                 <div className="absolute inset-0">
                   <EmbeddedVideoPlayer
                     key={`${activeLesson.id}-${playbackRate}-${usingVideoFallback ? 'fallback' : 'primary'}`}
@@ -1109,6 +1244,7 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                     onPause={() => persistCurrentVideoProgress()}
                     onEnded={handleVideoEnded}
                     onError={handleVideoPlaybackError}
+                    onReady={handleVideoReady}
                   />
                   <label className="absolute bottom-3 right-3 z-10 flex items-center gap-1 rounded bg-black/70 px-2 py-1 text-xs font-semibold text-white">
                     Tốc độ
@@ -1126,117 +1262,33 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                 </div>
               ) : (
                 // <video> cho file upload (signed URL từ Supabase Storage, TTL 1 giờ)
-                <>
-                  <video
-                    ref={videoRef}
-                    key={`${activeLesson.id}-${usingVideoFallback ? 'fallback' : 'primary'}`}
-                    src={playableVideoUrl}
-                    className="absolute inset-0 h-full w-full cursor-pointer"
-                    controls={false}
-                    controlsList="nodownload noplaybackrate"
-                    disablePictureInPicture
-                    // preload="metadata": chỉ tải header video (duration, kích thước) thay vì buffer trước cả file
-                    preload="metadata"
-                    playsInline
-                    tabIndex={-1}
-                    onClick={toggleDirectVideoPlayback}
-                    onLoadedMetadata={handleVideoMetadataLoaded}
-                    onTimeUpdate={handleVideoTimeUpdate}
-                    onSeeking={handleVideoSeeking}
-                    onPlay={() => setIsVideoPlaying(true)}
-                    onPause={() => {
-                      setIsVideoPlaying(false);
-                      persistCurrentVideoProgress();
-                    }}
-                    onEnded={handleVideoEnded}
-                    onError={handleVideoPlaybackError}
-                  >
-                    {activeLesson.subtitleUrl && (
-                      <track
-                        kind="subtitles"
-                        src={activeLesson.subtitleUrl}
-                        srcLang="vi"
-                        label="Tiếng Việt"
-                        default
-                      />
-                    )}
-                  </video>
-
-                  <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-4 pb-3 pt-10 text-white">
-                    <div
-                      role="progressbar"
-                      aria-label="Tiến trình video"
-                      aria-valuemin={0}
-                      aria-valuemax={Math.max(1, Math.floor(currentVideoDuration))}
-                      aria-valuenow={Math.max(0, Math.floor(currentVideoTime))}
-                      tabIndex={-1}
-                      className="mb-3 h-2 w-full touch-none select-none overflow-hidden rounded-full bg-white/30"
-                      title="Tiến trình đã xem"
-                    >
-                      <div
-                        className="h-full rounded-full bg-primary transition-[width] duration-200"
-                        style={{
-                          width: `${currentVideoDuration > 0
-                            ? Math.min(100, (currentVideoTime / currentVideoDuration) * 100)
-                            : 0}%`,
-                        }}
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={toggleDirectVideoPlayback}
-                        className="rounded-full p-1.5 hover:bg-white/15"
-                        aria-label={isVideoPlaying ? 'Tạm dừng video' : 'Phát video'}
-                      >
-                        {isVideoPlaying
-                          ? <Pause className="h-5 w-5 fill-current" />
-                          : <PlayCircle className="h-5 w-5" />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={toggleDirectVideoMuted}
-                        className="rounded-full p-1.5 hover:bg-white/15"
-                        aria-label={isVideoMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
-                      >
-                        {isVideoMuted
-                          ? <VolumeX className="h-5 w-5" />
-                          : <Volume2 className="h-5 w-5" />}
-                      </button>
-                      <span className="font-mono text-xs font-semibold tabular-nums">
-                        {formatDurationSec(Math.floor(currentVideoTime))}
-                        {' / '}
-                        {formatDurationSec(Math.floor(currentVideoDuration))}
-                      </span>
-                      <label className="ml-auto flex items-center gap-1 text-xs font-semibold">
-                        Tốc độ
-                        <select
-                          value={playbackRate}
-                          onChange={(event) => {
-                            const nextRate = Number(event.target.value);
-                            setPlaybackRate(nextRate);
-                            if (videoRef.current) videoRef.current.playbackRate = nextRate;
-                          }}
-                          className="rounded bg-black/40 px-1.5 py-1 text-xs text-white outline-none"
-                          aria-label="Tốc độ phát video"
-                        >
-                          {[0.75, 1, 1.25, 1.5, 2].map(rate => (
-                            <option key={rate} value={rate}>{rate}x</option>
-                          ))}
-                        </select>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={openDirectVideoFullscreen}
-                        className="rounded-full p-1.5 hover:bg-white/15"
-                        aria-label="Xem toàn màn hình"
-                      >
-                        <Maximize className="h-5 w-5" />
-                      </button>
-                    </div>
-                  </div>
-                </>
+                <video
+                  ref={videoRef}
+                  key={`${activeLesson.id}-${usingVideoFallback ? 'fallback' : 'primary'}`}
+                  src={playableVideoUrl}
+                  className="absolute inset-0 w-full h-full"
+                  playsInline
+                  tabIndex={-1}
+                  disablePictureInPicture
+                  onLoadedMetadata={handleVideoMetadataLoaded}
+                  onTimeUpdate={handleVideoTimeUpdate}
+                  onSeeking={handleVideoSeeking}
+                  onPlay={handleVideoPlay}
+                  onPause={handleVideoPause}
+                  onEnded={handleVideoEnded}
+                  onError={handleVideoPlaybackError}
+                  onKeyDown={blockVideoSeekInteraction}
+                >
+                  {activeLesson.subtitleUrl && (
+                    <track
+                      kind="subtitles"
+                      src={activeLesson.subtitleUrl}
+                      srcLang="vi"
+                      label="Tiếng Việt"
+                      default
+                    />
+                  )}
+                </video>
               )
             ) : activeLesson?.type === 'video' ? (
               // Video chưa có URL — có thể chưa upload hoặc backend chưa trả signed URL
@@ -1270,14 +1322,14 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                       className="absolute inset-0 h-full w-full bg-white"
                     />
                   ) : (
-                  <button
-                    type="button"
-                    onClick={() => activeLesson.documents?.[0]?.id && handleDownloadDocument(activeLesson.documents[0].id)}
-                    disabled={!activeLesson.documents?.[0]?.id || downloadingDocumentId === activeLesson.documents[0].id}
-                    className="mt-4 px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold transition-colors relative z-10"
-                  >
-                    Mở tài liệu
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => activeLesson.documents?.[0]?.id && handleDownloadDocument(activeLesson.documents[0].id)}
+                      disabled={!activeLesson.documents?.[0]?.id || downloadingDocumentId === activeLesson.documents[0].id}
+                      className="mt-4 px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold transition-colors relative z-10"
+                    >
+                      Mở tài liệu
+                    </button>
                   )
                 ) : (
                   <p className="mt-4 text-sm text-white/60 relative z-10">Tài liệu đang được chuẩn bị</p>
@@ -1288,23 +1340,79 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
               <SafeCourseImage course={course} alt="Thumbnail" className="absolute inset-0 w-full h-full object-cover opacity-40" />
             )}
 
-            {synchronizedSlideDocument && (loadingSlidePreview || slidePreviewUrl) && (
-              <div className="absolute left-3 top-3 z-30 hidden w-[min(34%,360px)] overflow-hidden rounded-xl border border-white/30 bg-slate-950/95 shadow-2xl lg:block">
-                <div className="flex items-center justify-between border-b border-white/15 px-3 py-2 text-xs font-bold text-white">
-                  <span>Slide đồng bộ</span>
-                  <span>Trang {synchronizedSlidePage}</span>
-                </div>
-                {slidePreviewUrl ? (
-                  <iframe
-                    src={`${slidePreviewUrl}#page=${synchronizedSlidePage}&view=FitH`}
-                    title={`Slide đồng bộ ${activeLesson?.title ?? ''}`}
-                    className="h-52 w-full bg-white"
-                  />
-                ) : (
-                  <div className="flex h-52 items-center justify-center text-xs text-white/70">
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Đang tải slide...
+            {videoLoadExceededSla && !videoUrlExpired && (
+              <div className="absolute left-3 top-3 z-40 rounded-lg bg-amber-500/90 px-3 py-1.5 text-xs font-bold text-black">
+                Video tải quá 3 giây; hệ thống đang tối ưu nguồn phát.
+              </div>
+            )}
+
+            {isDirectVideo && activeLesson?.type === 'video' && activeLesson?.url && activeLesson.url !== '#' && !videoUrlExpired && (
+              <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/90 via-black/65 to-transparent px-4 pb-4 pt-12 text-white">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={toggleVideoPlayback}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/25"
+                    aria-label={isVideoPlaying ? 'Tạm dừng video' : 'Phát video'}
+                  >
+                    {isVideoPlaying ? <PauseCircle className="h-6 w-6" /> : <PlayCircle className="h-6 w-6" />}
+                  </button>
+
+                  <div className="shrink-0 font-mono text-xs font-semibold text-white/85">
+                    {formatDurationSec(Math.floor(currentVideoTime))}
                   </div>
-                )}
+
+                  <div
+                    className="relative h-5 min-w-0 flex-1 cursor-default select-none py-2"
+                    role="progressbar"
+                    aria-label="Tiến trình video"
+                    aria-valuemin={0}
+                    aria-valuemax={Math.max(0, Math.floor(currentVideoDuration))}
+                    aria-valuenow={Math.max(0, Math.floor(currentVideoTime))}
+                    tabIndex={-1}
+                    onClick={blockVideoSeekInteraction}
+                    onMouseDown={blockVideoSeekInteraction}
+                    onMouseUp={blockVideoSeekInteraction}
+                    onPointerDown={blockVideoSeekInteraction}
+                    onPointerUp={blockVideoSeekInteraction}
+                    onTouchStart={blockVideoSeekInteraction}
+                    onTouchEnd={blockVideoSeekInteraction}
+                    onKeyDown={blockVideoSeekInteraction}
+                  >
+                    <div className="h-1.5 overflow-hidden rounded-full bg-white/25">
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{
+                          width: `${currentVideoDuration > 0
+                            ? Math.min(100, Math.max(0, (currentVideoTime / currentVideoDuration) * 100))
+                            : 0}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 font-mono text-xs font-semibold text-white/70">
+                    {formatDurationSec(Math.floor(currentVideoDuration))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={toggleVideoMute}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+                    aria-label={isVideoMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
+                  >
+                    {isVideoMuted ? <VolumeX className="h-4.5 w-4.5" /> : <Volume2 className="h-4.5 w-4.5" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={openVideoFullscreen}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+                    aria-label="Xem toàn màn hình"
+                  >
+                    <Maximize className="h-4.5 w-4.5" />
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1391,9 +1499,14 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                         <div className="space-y-2">
                           {activeTimedNotes.map(note => (
                             <div key={note.id} className="flex items-start gap-2 rounded-xl bg-white/8 p-2.5">
-                              <span className="shrink-0 rounded-lg bg-amber-400/15 px-2 py-1 font-mono text-[10px] font-extrabold text-amber-200">
+                              <button
+                                type="button"
+                                onClick={() => handleSeekToNote(note.timeSec)}
+                                className="shrink-0 rounded-lg bg-amber-400/15 px-2 py-1 font-mono text-[10px] font-extrabold text-amber-200 transition-colors hover:bg-amber-400/25 focus:outline-none focus:ring-2 focus:ring-amber-300/70"
+                                title="Nhảy đến mốc thời gian này"
+                              >
                                 {formatDurationSec(note.timeSec)}
-                              </span>
+                              </button>
                               <p className="min-w-0 flex-1 whitespace-pre-wrap text-xs leading-relaxed text-white/90">
                                 {note.content}
                               </p>
@@ -1433,6 +1546,16 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                   <span className="text-primary">{activeLesson?.type === 'video' ? 'Video giảng' : 'Tài liệu lý thuyết'}</span>
                 </div>
               </div>
+              {course.isEnrolled && user?.role === 'student' && activeLesson && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('qa')}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-on-primary shadow-md shadow-primary/20 transition-colors hover:bg-primary/90"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  Hỏi giáo viên về bài này
+                </button>
+              )}
             </div>
 
             {/* Tab navigation với animated underline indicator (layoutId) */}
@@ -1448,18 +1571,18 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                 .filter(tab => tab.id !== 'assignments'
                   || (user?.role === 'student' && course.isEnrolled))
                 .map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`pb-4 font-bold text-sm md:text-base transition-colors relative ${activeTab === tab.id ? 'text-primary' : 'text-on-surface-variant hover:text-on-surface'
-                    }`}
-                >
-                  {tab.label}
-                  {activeTab === tab.id && (
-                    <motion.div layoutId="learningTabIndicator" className="absolute bottom-0 inset-x-0 h-1 bg-primary rounded-t-full" />
-                  )}
-                </button>
-              ))}
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`pb-4 font-bold text-sm md:text-base transition-colors relative ${activeTab === tab.id ? 'text-primary' : 'text-on-surface-variant hover:text-on-surface'
+                      }`}
+                  >
+                    {tab.label}
+                    {activeTab === tab.id && (
+                      <motion.div layoutId="learningTabIndicator" className="absolute bottom-0 inset-x-0 h-1 bg-primary rounded-t-full" />
+                    )}
+                  </button>
+                ))}
             </div>
 
             <div className="min-h-[200px]">
@@ -1478,10 +1601,10 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                               {activeLesson.completionRule === 'DOCUMENT_OPENED'
                                 ? 'Bài học được hoàn thành khi tài liệu được mở.'
                                 : activeLesson.completionRule === 'MARK_AS_COMPLETE'
-                                ? 'Hãy đánh dấu hoàn thành sau khi học xong nội dung.'
-                                : activeLesson.completionRule
-                                ? 'Bài học được hoàn thành sau khi bài tập đạt điều kiện.'
-                                : 'Bài học chưa được cấu hình điều kiện hoàn thành.'}
+                                  ? 'Hãy đánh dấu hoàn thành sau khi học xong nội dung.'
+                                  : activeLesson.completionRule
+                                    ? 'Bài học được hoàn thành sau khi bài tập đạt điều kiện.'
+                                    : 'Bài học chưa được cấu hình điều kiện hoàn thành.'}
                             </p>
                           </div>
                           {activeLesson.completionRule === 'MARK_AS_COMPLETE' && !completedList.includes(activeLesson.id) && (
@@ -1571,9 +1694,154 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                 )}
                 {activeTab === 'qa' && (
                   <motion.div key="qa" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
-                    {/* Form câu hỏi mới */}
+                    {course.isEnrolled && user?.role === 'student' && (
+                      <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/5 to-surface-container p-5 space-y-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <h4 className="font-extrabold text-on-surface">Hỏi giáo viên</h4>
+                            <p className="mt-1 text-xs text-on-surface-variant">
+                              Câu hỏi được gửi trực tiếp tới giáo viên phụ trách khóa học.
+                            </p>
+                            {activeLesson && (
+                              <p className="mt-1 text-xs font-semibold text-primary">Bài đang hỏi: {activeLesson.title}</p>
+                            )}
+                          </div>
+                          <Link to="/messages" className="text-xs font-bold text-primary hover:underline">
+                            Xem câu hỏi của tôi
+                          </Link>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <label className="md:col-span-2">
+                            <span className="mb-1.5 block text-xs font-bold text-on-surface-variant">Tiêu đề</span>
+                            <input
+                              value={teacherQuestionTitle}
+                              onChange={event => setTeacherQuestionTitle(event.target.value)}
+                              maxLength={180}
+                              placeholder="Ví dụ: Chưa hiểu phép biến đổi ở bài này"
+                              className="w-full rounded-xl border border-outline-variant/40 bg-surface px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary"
+                            />
+                          </label>
+                          <label>
+                            <span className="mb-1.5 block text-xs font-bold text-on-surface-variant">Phạm vi</span>
+                            <select
+                              value={teacherQuestionVisibility}
+                              onChange={event => setTeacherQuestionVisibility(event.target.value as QaVisibility)}
+                              className="w-full rounded-xl border border-outline-variant/40 bg-surface px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary"
+                            >
+                              <option value="public">Công khai trong khóa</option>
+                              <option value="private">Riêng tư</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <label className="block">
+                          <span className="mb-1.5 block text-xs font-bold text-on-surface-variant">Nội dung câu hỏi</span>
+                          <textarea
+                            value={teacherQuestionContent}
+                            onChange={event => setTeacherQuestionContent(event.target.value)}
+                            minLength={10}
+                            maxLength={5000}
+                            rows={4}
+                            placeholder="Mô tả cụ thể phần bạn chưa hiểu (tối thiểu 10 ký tự)..."
+                            className="w-full resize-none rounded-xl border border-outline-variant/40 bg-surface px-3 py-2.5 text-sm leading-relaxed text-on-surface outline-none focus:border-primary"
+                          />
+                        </label>
+                        <QaImagePicker
+                          file={teacherQuestionImageFile}
+                          onChange={setTeacherQuestionImageFile}
+                          disabled={sendingTeacherQuestion}
+                        />
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <p className="text-xs text-on-surface-variant">
+                            {teacherQuestionVisibility === 'private'
+                              ? 'Chỉ bạn, giáo viên phụ trách và Admin có thể xem.'
+                              : 'Học sinh đã ghi danh cùng khóa có thể xem câu hỏi và câu trả lời.'}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleAskTeacher}
+                            disabled={sendingTeacherQuestion}
+                            className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-on-primary shadow-md disabled:opacity-60"
+                          >
+                            {sendingTeacherQuestion ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                            Gửi tới giáo viên
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {course.isEnrolled && user?.role === 'student' && (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <h4 className="font-extrabold text-on-surface">Câu hỏi công khai trong khóa học</h4>
+                            <p className="mt-1 text-xs text-on-surface-variant">Chỉ hiển thị câu hỏi Public của học sinh đã học cùng khóa.</p>
+                          </div>
+                          <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">{publicQaThreads.length}</span>
+                        </div>
+                        {loadingPublicQa ? (
+                          <div className="flex justify-center py-10 text-primary"><Loader2 className="h-6 w-6 animate-spin" /></div>
+                        ) : publicQaThreads.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-outline-variant/40 py-10 text-center text-sm text-on-surface-variant">
+                            Chưa có câu hỏi công khai nào trong khóa học.
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {publicQaThreads.map(thread => {
+                              const firstMessage = thread.messages[0];
+                              const teacherReply = [...thread.messages]
+                                .reverse()
+                                .find(message => message.authorRole === 'teacher');
+                              return (
+                                <article key={thread.id} className="rounded-2xl border border-outline-variant/30 bg-surface p-5 shadow-sm">
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <h5 className="font-bold text-on-surface">{thread.title}</h5>
+                                      <p className="mt-1 text-xs text-on-surface-variant">
+                                        {thread.studentName} · {thread.lessonTitle ?? 'Hỏi chung về khóa học'}
+                                      </p>
+                                    </div>
+                                    <span className={`rounded-full px-2 py-1 text-[11px] font-bold ${
+                                      thread.status === 'pending'
+                                        ? 'bg-amber-500/10 text-amber-700'
+                                        : 'bg-emerald-500/10 text-emerald-700'
+                                    }`}>
+                                      {thread.status === 'pending' ? 'Chờ giáo viên' : thread.status === 'resolved' ? 'Đã giải quyết' : 'Đã trả lời'}
+                                    </span>
+                                  </div>
+                                  {firstMessage && (
+                                    <div className="mt-3 rounded-xl bg-surface-container/40 p-3">
+                                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-on-surface">{firstMessage.content}</p>
+                                      {firstMessage.attachmentUrl && firstMessage.attachmentType?.startsWith('image/') && (
+                                        <a href={firstMessage.attachmentUrl} target="_blank" rel="noreferrer" className="mt-3 block">
+                                          <img src={firstMessage.attachmentUrl} alt={firstMessage.attachmentName ?? 'Ảnh câu hỏi'} className="max-h-64 max-w-full rounded-xl object-contain" />
+                                        </a>
+                                      )}
+                                    </div>
+                                  )}
+                                  {teacherReply && (
+                                    <div className="mt-3 border-l-2 border-primary pl-3">
+                                      <p className="text-xs font-bold text-primary">Giáo viên trả lời</p>
+                                      <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-on-surface">{teacherReply.content}</p>
+                                    </div>
+                                  )}
+                                </article>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="border-t border-outline-variant/30 pt-6">
+                      <h4 className="font-extrabold text-on-surface">Thảo luận cộng đồng</h4>
+                      <p className="mt-1 text-xs text-on-surface-variant">Trao đổi mở với học sinh và giáo viên trong bài học hiện tại.</p>
+                    </div>
+
+                    {/* Form thảo luận cộng đồng — giữ nguyên module CourseDiscussion */}
                     <div className="bg-surface-container p-5 rounded-2xl border border-outline-variant/30 space-y-3">
-                      <h4 className="font-bold text-sm text-on-surface">Đặt câu hỏi thảo luận</h4>
+                      <h4 className="font-bold text-sm text-on-surface">Tạo chủ đề thảo luận</h4>
                       {activeLesson && (
                         <p className="text-xs text-on-surface-variant font-medium">
                           Bài hiện tại: <span className="text-on-surface">{activeLesson.title}</span>
@@ -1875,9 +2143,14 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                         <div className="space-y-2 pt-1">
                           {activeTimedNotes.map(note => (
                             <div key={note.id} className="flex items-start gap-3 rounded-xl bg-surface px-3 py-2.5 border border-outline-variant/30">
-                              <span className="shrink-0 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-extrabold text-primary">
+                              <button
+                                type="button"
+                                onClick={() => handleSeekToNote(note.timeSec)}
+                                className="shrink-0 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-extrabold text-primary transition-colors hover:bg-primary/20 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                title="Nhảy đến mốc thời gian này"
+                              >
                                 {formatDurationSec(note.timeSec)}
-                              </span>
+                              </button>
                               <p className="flex-1 text-sm text-on-surface whitespace-pre-wrap">{note.content}</p>
                               <button
                                 type="button"
@@ -1902,19 +2175,33 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                 )}
                 {activeTab === 'assignments' && user?.role === 'student' && course.isEnrolled && (
                   <motion.div key="assignments" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                    <CourseAssignmentsPanel courseId={courseId} />
+                    <Suspense fallback={<div className="py-12 text-center text-sm text-on-surface-variant">Đang tải bài tập...</div>}>
+                      <CourseAssignmentsPanel
+                        courseId={courseId}
+                        onProgressChanged={async () => {
+                          const latest = await getCourseProgress(course.id);
+                          hydrateCourseProgress(
+                            course.id,
+                            latest.completedLessonIds,
+                            latest.completedQuizIds,
+                          );
+                        }}
+                      />
+                    </Suspense>
                   </motion.div>
                 )}
                 {activeTab === 'reviews' && (
                   <motion.div key="reviews" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                    <CourseReviewsPanel
-                      courseId={course.id}
-                      fallbackRating={course.rating}
-                      fallbackReviewCount={course.reviewCount ?? 0}
-                      canSubmitReview={canSubmitReview}
-                      isOwnedCourse={course.isEnrolled}
-                      progressPct={course.progress ?? 0}
-                    />
+                    <Suspense fallback={<div className="py-12 text-center text-sm text-on-surface-variant">Đang tải đánh giá...</div>}>
+                      <CourseReviewsPanel
+                        courseId={course.id}
+                        fallbackRating={course.rating}
+                        fallbackReviewCount={course.reviewCount ?? 0}
+                        canSubmitReview={canSubmitReview}
+                        isOwnedCourse={course.isEnrolled}
+                        progressPct={course.progress ?? 0}
+                      />
+                    </Suspense>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1951,6 +2238,11 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                     completedVideoCount === videoLessonsInChapter.length;
                   const isChapterQuizCompleted = completedQuizList.includes(chapter.id);
                   const examsAfterChapter = examsByPlacementChapterId[chapter.id] ?? [];
+                  const currentLessonInChapter = chapter.lessons.find(lesson => lesson.id === activeLesson?.id);
+                  const chapterQuestionLesson = currentLessonInChapter ?? chapter.lessons.find(lesson =>
+                    lesson.type !== 'quiz'
+                    && getLessonUnlockState(course, lesson, orderedVideoLessons, completedList).canOpen
+                  );
 
                   return (
                     <div key={chapter.id} className="space-y-2">
@@ -1974,6 +2266,21 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                           </span>
                         </button>
 
+                        {course.isEnrolled && user?.role === 'student' && chapterQuestionLesson && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleLessonClick(chapterQuestionLesson);
+                              setTeacherQuestionTitle(previous => previous || `Thắc mắc về ${chapter.title}`);
+                              setActiveTab('qa');
+                            }}
+                            className="mx-2 mb-1 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-primary hover:bg-primary/10"
+                          >
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            Hỏi giáo viên về chương này
+                          </button>
+                        )}
+
                         <AnimatePresence initial={false}>
                           {isExpanded && (
                             <motion.div
@@ -1986,6 +2293,7 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                               <div className="space-y-1 pl-3 pt-1">
                                 {chapter.lessons.map((lesson, lessonIndex) => {
                                   const isActive = activeLesson?.id === lesson.id;
+                                  const lessonNumber = lessonNumberById.get(lesson.id) ?? lessonIndex + 1;
                                   const isCompleted = lesson.type === 'quiz'
                                     ? completedQuizList.includes(lesson.id)
                                     : completedList.includes(lesson.id);
@@ -2000,10 +2308,10 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                                       key={lesson.id}
                                       onClick={() => handleLessonClick(lesson)}
                                       className={`w-full text-left rounded-xl border px-3 py-2.5 flex gap-3 transition-all ${isLocked
-                                          ? 'bg-surface-container/40 border-transparent opacity-75 hover:opacity-100'
-                                          : isActive
-                                            ? 'bg-primary/10 border-primary/30 shadow-sm'
-                                            : 'bg-surface hover:bg-surface-container border-transparent'
+                                        ? 'bg-surface-container/40 border-transparent opacity-75 hover:opacity-100'
+                                        : isActive
+                                          ? 'bg-primary/10 border-primary/30 shadow-sm'
+                                          : 'bg-surface hover:bg-surface-container border-transparent'
                                         }`}
                                     >
                                       <div className="mt-0.5 flex-shrink-0">
@@ -2018,7 +2326,7 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                                       </div>
                                       <div className="min-w-0 flex-1">
                                         <p className={`text-sm font-semibold leading-snug line-clamp-2 ${isActive ? 'text-primary' : 'text-on-surface'}`}>
-                                          Bài {lessonIndex + 1}: {lesson.title.replace(/^Bài\s*\d+\s*[:.-]?\s*/i, '')}
+                                          Bài {lessonNumber}: {lesson.title.replace(/^Bài\s*\d+\s*[:.-]?\s*/i, '')}
                                         </p>
                                         <div className="mt-0.5 flex flex-wrap items-center gap-2">
                                           <span className="text-xs text-on-surface-variant">
@@ -2052,8 +2360,8 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
                                       className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 flex items-center gap-3 bg-surface hover:bg-amber-500/5 hover:border-amber-500/20 transition-all group"
                                     >
                                       <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${isChapterQuizCompleted
-                                          ? 'bg-green-500/10 text-green-600'
-                                          : 'bg-amber-500/10 text-amber-500 group-hover:bg-amber-500/20'
+                                        ? 'bg-green-500/10 text-green-600'
+                                        : 'bg-amber-500/10 text-amber-500 group-hover:bg-amber-500/20'
                                         }`}>
                                         {isChapterQuizCompleted
                                           ? <CheckCircle2 className="w-4 h-4" />
@@ -2127,14 +2435,30 @@ export function LearningView({ course, rawChapters, courseId, initialLessonId, o
       {/* QuizModal */}
       <AnimatePresence>
         {activeQuiz && (
-          <QuizModal
-            lesson={activeQuiz}
-            prevScore={quizScores[course.id]?.[activeQuiz.id]}
-            onClose={() => setActiveQuiz(null)}
-            onComplete={handleQuizComplete}
-          />
+          <Suspense fallback={<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 text-sm font-semibold text-white">Đang tải bài kiểm tra...</div>}>
+            <QuizModal
+              lesson={activeQuiz}
+              prevScore={quizScores[course.id]?.[activeQuiz.id]}
+              onClose={() => setActiveQuiz(null)}
+              onComplete={handleQuizComplete}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORT DEFAULT: CourseDetailPage
+//
+// Entry point duy nhất — đọc :id từ URL, fetch chi tiết từ BE (UC07),
+// phân nhánh render Marketing/Learning view.
+//
+// GIAI ĐOẠN 1C:
+//   - MarketingView render chi tiết từ API thật (mô tả + curriculum 2 cấp
+//     được flatten bởi adapter.flattenChaptersToLessons).
+//   - LearningView vẫn dùng dữ liệu Course đã adapt, nhưng logic enrollment
+//     tạm thời check qua purchasedIds (Zustand local) - sẽ refactor ở
+//     Module 3 khi có API enrollment thật.
+// ═══════════════════════════════════════════════════════════════════════════════
