@@ -16,7 +16,4 @@ public interface TeacherBankAccountRepository extends JpaRepository<TeacherBankA
 
     /** Batch-load TK ngân hàng cho danh sách GV — tránh N+1 ở bảng đối soát. */
     List<TeacherBankAccount> findByTeacherIdIn(Collection<UUID> teacherIds);
-
-    List<TeacherBankAccount> findByVerifyStatusOrderByUpdatedAtAsc(
-            com.beeacademy.backend.model.BankVerifyStatus verifyStatus);
 }

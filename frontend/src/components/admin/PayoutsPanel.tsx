@@ -12,14 +12,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Wallet, Calculator, TrendingUp, Search, Filter, Download,
-  Hash, Calendar, X, Loader2, Landmark, CheckCircle2, XCircle,
+  Hash, Calendar, X, Loader2, Landmark,
 } from 'lucide-react';
 import { notify } from '../../lib/toast';
-import { isApiError } from '../../api/client';
 import {
   getAdminPayouts, getAdminPayoutStats, confirmPayout,
-  getPendingBankAccounts, reviewBankAccount,
-  type AdminPayoutRow, type AdminPayoutStats, type AdminBankAccount,
+  type AdminPayoutRow, type AdminPayoutStats,
 } from '../../api/adminService';
 import { formatVnd, formatDate, formatMonthYear } from './format';
 
@@ -35,41 +33,21 @@ export default function PayoutsPanel() {
 
   const [modalRow, setModalRow] = useState<AdminPayoutRow | null>(null);
 
-  const [pendingBanks, setPendingBanks] = useState<AdminBankAccount[]>([]);
-  const [reviewingBankId, setReviewingBankId] = useState<string | null>(null);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [payouts, payoutStats, banks] = await Promise.all([
+      const [payouts, payoutStats] = await Promise.all([
         getAdminPayouts(),
         getAdminPayoutStats(),
-        getPendingBankAccounts(),
       ]);
       setRows(payouts);
       setStats(payoutStats);
-      setPendingBanks(banks);
     } catch {
       notify.error('Không tải được dữ liệu kế toán');
     } finally {
       setLoading(false);
     }
   }, []);
-
-  async function handleReviewBank(teacherId: string, approve: boolean) {
-    setReviewingBankId(teacherId);
-    try {
-      await reviewBankAccount(teacherId, approve);
-      setPendingBanks(prev => prev.filter(b => b.teacherId !== teacherId));
-      // Trạng thái TK đổi → refetch để bảng đối soát bỏ hold tương ứng.
-      getAdminPayouts().then(setRows).catch(() => {});
-      notify.success(approve ? 'Đã duyệt TK ngân hàng' : 'Đã từ chối TK ngân hàng');
-    } catch (err) {
-      notify.error(isApiError(err) ? err.message : 'Không xử lý được yêu cầu duyệt TK');
-    } finally {
-      setReviewingBankId(null);
-    }
-  }
 
   useEffect(() => { load(); }, [load]);
 
@@ -151,58 +129,6 @@ export default function PayoutsPanel() {
           hint="Tổng phí nền tảng giữ lại (all-time)"
         />
       </div>
-
-      {/* TK ngân hàng GV chờ duyệt — TK PENDING giữ (hold) chi trả */}
-      {pendingBanks.length > 0 && (
-        <div className="bg-surface-container-lowest border border-amber-300/60 rounded-2xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center gap-2">
-            <Landmark className="w-5 h-5 text-amber-600" />
-            <h2 className="text-base font-bold">
-              TK ngân hàng chờ duyệt
-              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600">
-                {pendingBanks.length}
-              </span>
-            </h2>
-          </div>
-          <p className="text-xs text-on-surface-variant">
-            Kỳ chi trả của các giáo viên này đang bị giữ lại cho tới khi TK được duyệt.
-          </p>
-          <div className="space-y-2">
-            {pendingBanks.map(bank => (
-              <div
-                key={bank.teacherId}
-                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-outline-variant/30 rounded-xl px-4 py-3"
-              >
-                <div>
-                  <p className="font-bold text-on-surface text-sm">{bank.teacherName}</p>
-                  <p className="text-xs text-on-surface-variant font-medium">
-                    {bank.bankName} · <span className="font-mono text-on-surface font-semibold">{bank.accountNumber}</span>
-                    {' '}({bank.accountHolder}){bank.branch ? ` · ${bank.branch}` : ''}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleReviewBank(bank.teacherId, true)}
-                    disabled={reviewingBankId === bank.teacherId}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold transition-colors disabled:opacity-50"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Duyệt
-                  </button>
-                  <button
-                    onClick={() => handleReviewBank(bank.teacherId, false)}
-                    disabled={reviewingBankId === bank.teacherId}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 text-red-600 border border-red-500/20 hover:bg-red-500/20 rounded-xl text-xs font-bold transition-colors disabled:opacity-50"
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                    Từ chối
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Bảng đối soát */}
       <div className="bg-surface-container-lowest border border-outline-variant/40 rounded-2xl p-6 shadow-sm space-y-5">
@@ -304,13 +230,11 @@ export default function PayoutsPanel() {
                         <span
                           title={!r.bankName
                             ? 'GV chưa có TK ngân hàng'
-                            : r.bankVerifyStatus === 'REJECTED'
-                              ? 'TK ngân hàng bị từ chối — GV cần cập nhật lại'
-                              : 'TK ngân hàng đang chờ duyệt'}
+                            : 'GV chưa xác minh TK bằng mã gửi về email — không tự duyệt hộ được'}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-100 text-amber-700"
                         >
                           <Landmark className="w-3.5 h-3.5" />
-                          Giữ — TK chưa duyệt
+                          Giữ — TK chưa xác minh
                         </span>
                       ) : (
                         <button

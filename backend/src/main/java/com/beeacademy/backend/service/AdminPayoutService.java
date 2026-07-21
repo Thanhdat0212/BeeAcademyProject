@@ -86,14 +86,14 @@ public class AdminPayoutService {
         if (period.isPaid()) {
             throw new BusinessException("ALREADY_PAID", "Kỳ này đã được xác nhận chuyển khoản.");
         }
-        // REQ-ADM-006 AC6: hold chi trả khi TK ngân hàng chưa được Admin duyệt.
+        // REQ-ADM-006 AC6: hold chi trả khi TK ngân hàng chưa được xác minh.
         TeacherBankAccount bankAccount = bankRepository.findByTeacherId(period.getTeacherId())
                 .orElseThrow(() -> new BusinessException("HOLD_BANK_INFO",
                         "Giáo viên chưa nhập TK ngân hàng — không thể xác nhận chuyển khoản."));
         if (bankAccount.getVerifyStatus() != BankVerifyStatus.VERIFIED) {
             throw new BusinessException("HOLD_BANK_INFO",
-                    "TK ngân hàng của giáo viên đang chờ duyệt hoặc bị từ chối. "
-                            + "Duyệt TK trước khi xác nhận chuyển khoản.");
+                    "TK ngân hàng của giáo viên chưa được xác minh. Giáo viên cần tự xác minh "
+                            + "bằng mã gửi về email tại trang TK ngân hàng.");
         }
         period.markPaid(adminId, req.transferRef(), req.transferContent(), req.uncAttachmentUrl());
         periodRepository.save(period);

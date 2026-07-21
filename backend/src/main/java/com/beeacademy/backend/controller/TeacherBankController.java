@@ -1,8 +1,10 @@
 package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.request.BankInfoRequest;
+import com.beeacademy.backend.dto.request.VerifyBankOtpRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.BankAuditLogResponse;
+import com.beeacademy.backend.dto.response.BankChangeRequestResponse;
 import com.beeacademy.backend.dto.response.BankInfoResponse;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.TeacherBankService;
@@ -29,12 +31,28 @@ public class TeacherBankController {
                 .orElse(ResponseEntity.ok(ApiResponse.ok(null)));
     }
 
-    @PutMapping
-    public ResponseEntity<ApiResponse<BankInfoResponse>> upsertBankInfo(
+    /**
+     * Bước 1: xin mã xác nhận gửi về email GV. Chưa ghi gì vào DB.
+     *
+     * <p>Gọi lại chính endpoint này để "gửi lại mã" — service tự chặn spam bằng
+     * cooldown 60 giây, nên không cần endpoint resend riêng.
+     */
+    @PostMapping("/change-requests")
+    public ResponseEntity<ApiResponse<BankChangeRequestResponse>> requestBankChange(
             @Valid @RequestBody BankInfoRequest req) {
         UUID teacherId = CurrentUser.required().userId();
-        BankInfoResponse result = bankService.upsertBankInfo(teacherId, req);
-        return ResponseEntity.ok(ApiResponse.ok(result));
+        BankChangeRequestResponse result = bankService.requestBankChange(teacherId, req);
+        return ResponseEntity.ok(ApiResponse.ok(result,
+                "Đã gửi mã xác nhận tới email " + result.maskedEmail()));
+    }
+
+    /** Bước 2: nhập mã đúng → TK được lưu và xác minh ngay. */
+    @PostMapping("/change-requests/verify")
+    public ResponseEntity<ApiResponse<BankInfoResponse>> confirmBankChange(
+            @Valid @RequestBody VerifyBankOtpRequest req) {
+        UUID teacherId = CurrentUser.required().userId();
+        BankInfoResponse result = bankService.confirmBankChange(teacherId, req.otpCode());
+        return ResponseEntity.ok(ApiResponse.ok(result, "Đã xác minh và lưu TK ngân hàng"));
     }
 
     @GetMapping("/audit-log")
