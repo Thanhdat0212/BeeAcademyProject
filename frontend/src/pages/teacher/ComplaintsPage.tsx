@@ -49,6 +49,7 @@ import {
   XCircle, Megaphone, Database, MessageSquare, AlertCircle, UserCircle, Lock, Star,
 } from 'lucide-react';
 import { AttachmentPicker, MessageAttachments } from '../../components/complaints/ComplaintAttachments';
+import BrandLogo from '../../components/BrandLogo';
 
 // ═══════════════════════════════════════════════════════════════════
 //  PHẦN 1 — TYPES (dùng từ complaintService — nguồn sự thật chung)
@@ -397,7 +398,7 @@ export default function TeacherComplaintsPage() {
       `}>
         <div className="p-6 flex items-center justify-between border-b border-outline-variant/20">
           <Link to="/teacher" className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary text-on-primary rounded-xl flex items-center justify-center font-extrabold text-lg shadow-md shadow-primary/20">B</div>
+            <BrandLogo size="sm" />
             <div>
               <p className="font-extrabold text-on-surface text-sm">Bee Academy</p>
               <p className="text-xs text-on-surface-variant font-medium">Cổng Giáo Viên</p>

@@ -32,6 +32,7 @@ import {
   GraduationCap, DollarSign, Clock, CheckCircle2,
   TrendingUp, Calendar, Receipt, ArrowRight, Megaphone, Database, UserCircle, Lock, Star, Download,
 } from 'lucide-react';
+import BrandLogo from '../../components/BrandLogo';
 
 type PayoutStatus = 'PENDING' | 'PROCESSING' | 'PAID';
 type RevenueSplit = RevenueSplitResponse;
@@ -276,7 +277,7 @@ export default function TeacherRevenuePage() {
       `}>
         <div className="p-6 flex items-center justify-between border-b border-outline-variant/20">
           <Link to="/teacher" className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary text-on-primary rounded-xl flex items-center justify-center font-extrabold text-lg shadow-md shadow-primary/20">B</div>
+            <BrandLogo size="sm" />
             <div>
               <p className="font-extrabold text-on-surface text-sm">Bee Academy</p>
               <p className="text-xs text-on-surface-variant font-medium">Cổng Giáo Viên</p>

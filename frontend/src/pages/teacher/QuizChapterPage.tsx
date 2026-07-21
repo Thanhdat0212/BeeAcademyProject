@@ -27,6 +27,7 @@ import {
   ChevronDown, Shuffle, AlertTriangle,
   Circle, ListChecks, Zap, TrendingUp, Minus, UserCircle, Lock, Star,
 } from 'lucide-react';
+import BrandLogo from '../../components/BrandLogo';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 
@@ -341,7 +342,7 @@ export default function QuizChapterPage() {
       <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-surface-container-lowest border-r border-outline-variant/30 flex flex-col transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:relative lg:translate-x-0 lg:flex`}>
         <div className="p-6 flex items-center justify-between border-b border-outline-variant/20">
           <Link to="/teacher" className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary text-on-primary rounded-xl flex items-center justify-center font-extrabold text-lg">B</div>
+            <BrandLogo size="sm" />
             <div>
               <p className="font-extrabold text-on-surface text-sm">Bee Academy</p>
               <p className="text-xs text-on-surface-variant">Cổng Giáo Viên</p>

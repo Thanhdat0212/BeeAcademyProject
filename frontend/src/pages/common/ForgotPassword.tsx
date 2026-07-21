@@ -5,6 +5,7 @@ import { ArrowLeft, Mail, Lock, CheckCircle, RefreshCw } from 'lucide-react';
 import { notify } from '../../lib/toast';
 import { requestPasswordResetOtp, verifyPasswordResetOtp } from '../../api/authService';
 import { isApiError } from '../../api/client';
+import BrandLogo from '../../components/BrandLogo';
 
 type Step = 1 | 2 | 3;
 
@@ -163,7 +164,7 @@ export default function ForgotPassword() {
               <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
 
               <div className="text-center mb-8 relative z-10">
-                <div className="w-12 h-12 bg-primary text-on-primary rounded-xl flex items-center justify-center font-bold text-2xl mx-auto mb-4 shadow-lg shadow-primary/20">B</div>
+                <BrandLogo size="lg" className="mx-auto mb-4" />
                 <h1 className="text-3xl font-extrabold mb-2 text-on-surface">Quên Mật Khẩu</h1>
                 <p className="text-on-surface-variant text-sm">Nhập email của bạn để nhận mã OTP khôi phục mật khẩu</p>
               </div>

@@ -13,6 +13,7 @@ import { adaptCourseSummary } from '../api/adapter';
 import { getStudentParentLinkInvitations } from '../api/studentParentLinkService';
 import { listUserNotifications, markUserNotificationRead } from '../api/notificationService';
 import type { StudentParentLinkInvitationResponse, UserNotification } from '../types/api';
+import BrandLogo from './BrandLogo';
 // ─── Highlight từ khớp trong text ────────────────────────────────────────────
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -449,9 +450,7 @@ export default function DashboardHeader() {
 
         {/* Logo */}
         <Link to="/courses" className="flex items-center gap-3 group flex-shrink-0">
-          <div className="w-10 h-10 bg-primary text-on-primary rounded-xl flex items-center justify-center font-bold text-xl shadow-lg shadow-primary/20 group-hover:scale-105 transition-transform">
-            B
-          </div>
+          <BrandLogo size="md" className="group-hover:scale-105 transition-transform" />
           <span className="text-2xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary hidden sm:block">
             Bee Academy
           </span>

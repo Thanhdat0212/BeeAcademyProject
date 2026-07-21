@@ -87,6 +87,7 @@ import {
   type BankQuestionType,
 } from './question-bank/questionBankUtils';
 import QuestionHistoryDialog from './question-bank/QuestionHistoryDialog';
+import BrandLogo from '../../components/BrandLogo';
 
 export default function QuestionBankPage() {
   const navigate = useNavigate();
@@ -274,7 +275,7 @@ export default function QuestionBankPage() {
       `}>
         <div className="p-6 flex items-center justify-between border-b border-outline-variant/20">
           <Link to="/teacher" className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary text-on-primary rounded-xl flex items-center justify-center font-extrabold text-lg shadow-md shadow-primary/20">B</div>
+            <BrandLogo size="sm" />
             <div>
               <p className="font-extrabold text-on-surface text-sm">Bee Academy</p>
               <p className="text-xs text-on-surface-variant font-medium">Cổng Giáo Viên</p>
