@@ -16,23 +16,30 @@ import java.util.UUID;
  *   <li>Tự do thay đổi shape mà không phá interface client với Supabase.</li>
  * </ul>
  *
- * @param id        UUID user (= profiles.id)
- * @param email     email từ {@code auth.users}
- * @param role      vai trò (student/parent/teacher/admin)
- * @param fullName  họ tên hiển thị
- * @param avatarUrl URL ảnh đại diện (null nếu chưa upload)
+ * @param id                 UUID user (= profiles.id)
+ * @param email              email từ {@code auth.users}
+ * @param role               vai trò (student/parent/teacher/admin)
+ * @param fullName           họ tên hiển thị
+ * @param avatarUrl          URL ảnh đại diện (null nếu chưa upload)
+ * @param mustChangePassword true khi Admin vừa cấp mật khẩu tạm - frontend
+ *                           dùng cờ này để ép user sang trang đổi mật khẩu
  */
 public record UserSummaryResponse(
         UUID id,
         String email,
         String role,
         String fullName,
-        String avatarUrl
+        String avatarUrl,
+        boolean mustChangePassword
 ) {
 
     /**
      * Map từ ProviderUser (response GoTrue) - dùng khi vừa register/login,
      * Profile có thể chưa được fetch.
+     *
+     * <p>{@code mustChangePassword} luôn false vì cờ này nằm ở bảng
+     * {@code profiles}, GoTrue không biết. Đường đi thật của cờ là
+     * {@code AuthService.enrichAuthTokenResponse()} - nó đọc profile từ DB.
      */
     public static UserSummaryResponse fromProvider(ProviderUser user) {
         return new UserSummaryResponse(
@@ -40,7 +47,8 @@ public record UserSummaryResponse(
                 user.email(),
                 user.extractRole(),
                 user.extractFullName(),
-                null
+                null,
+                false
         );
     }
 
@@ -54,7 +62,8 @@ public record UserSummaryResponse(
                 email,
                 profile.getRole() != null ? profile.getRole().toDbValue() : null,
                 profile.getFullName(),
-                profile.getAvatarUrl()
+                profile.getAvatarUrl(),
+                profile.isMustChangePassword()
         );
     }
 }

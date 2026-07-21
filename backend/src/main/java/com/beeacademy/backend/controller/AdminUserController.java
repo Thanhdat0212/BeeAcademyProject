@@ -1,14 +1,20 @@
 package com.beeacademy.backend.controller;
 
+import com.beeacademy.backend.dto.request.CreateTeacherAccountRequest;
 import com.beeacademy.backend.dto.response.AdminUserResponse;
 import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.PageResponse;
+import com.beeacademy.backend.dto.response.TemporaryPasswordResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.model.TeacherApprovalStatus;
 import com.beeacademy.backend.model.UserRole;
 import com.beeacademy.backend.repository.ProfileRepository;
+import com.beeacademy.backend.security.AuthenticatedUser;
+import com.beeacademy.backend.security.CurrentUser;
+import com.beeacademy.backend.service.AdminTeacherAccountService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -19,6 +25,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -36,6 +44,33 @@ import java.util.UUID;
 public class AdminUserController {
 
     private final ProfileRepository profileRepository;
+    private final AdminTeacherAccountService adminTeacherAccountService;
+
+    /**
+     * Tạo tài khoản giáo viên. Giáo viên không đăng ký công khai được — họ liên
+     * hệ Bee Academy qua mạng xã hội, Admin thẩm định rồi cấp tài khoản tại đây.
+     *
+     * <p>Response chứa mật khẩu tạm và <b>chỉ trả về đúng một lần</b>.
+     */
+    @PostMapping("/teachers")
+    public ApiResponse<TemporaryPasswordResponse> createTeacher(
+            @Valid @RequestBody CreateTeacherAccountRequest request) {
+        AuthenticatedUser me = CurrentUser.required();
+        TemporaryPasswordResponse created = adminTeacherAccountService.createTeacher(request, me.userId());
+        return ApiResponse.ok(created, created.emailSent()
+                ? "Đã tạo tài khoản giáo viên và gửi mật khẩu qua email."
+                : "Đã tạo tài khoản giáo viên nhưng KHÔNG gửi được email. Hãy gửi mật khẩu cho giáo viên qua Zalo/Facebook.");
+    }
+
+    /** Cấp lại mật khẩu tạm khi giáo viên báo mất mật khẩu qua kênh liên hệ ngoài. */
+    @PostMapping("/{userId}/reset-password")
+    public ApiResponse<TemporaryPasswordResponse> resetPassword(@PathVariable UUID userId) {
+        AuthenticatedUser me = CurrentUser.required();
+        TemporaryPasswordResponse reset = adminTeacherAccountService.resetPassword(userId, me.userId());
+        return ApiResponse.ok(reset, reset.emailSent()
+                ? "Đã cấp mật khẩu mới và gửi qua email."
+                : "Đã cấp mật khẩu mới nhưng KHÔNG gửi được email. Hãy gửi cho người dùng qua Zalo/Facebook.");
+    }
 
     /** Danh sách tất cả user, hỗ trợ filter role + search tên/email. */
     @GetMapping

@@ -11,9 +11,11 @@ public record AdminUserResponse(
         String  role,        // student | teacher | parent | admin
         String  avatarUrl,
         boolean isBlocked,
-        Instant createdAt
+        Instant createdAt,
+        String  teacherApprovalStatus,  // pending | approved | rejected - chỉ có nghĩa với role=teacher
+        boolean mustChangePassword      // true = Admin vừa cấp mật khẩu tạm, user chưa đổi
 ) {
-    /** Map từ native query Object[] row. */
+    /** Map từ native query Object[] row - thứ tự cột theo SELECT của findAllWithEmail. */
     public static AdminUserResponse fromRow(Object[] row) {
         return new AdminUserResponse(
                 row[0] instanceof UUID u ? u : UUID.fromString(row[0].toString()),
@@ -22,7 +24,9 @@ public record AdminUserResponse(
                 row[3] != null ? row[3].toString() : null,
                 row[2] != null ? row[2].toString() : null,
                 row[4] != null && Boolean.parseBoolean(row[4].toString()),
-                row[5] instanceof Instant i ? i : Instant.parse(row[5].toString())
+                row[5] instanceof Instant i ? i : Instant.parse(row[5].toString()),
+                row[7] != null ? row[7].toString() : null,
+                row[8] != null && Boolean.parseBoolean(row[8].toString())
         );
     }
 }

@@ -52,9 +52,13 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
     /**
      * Admin: danh sách user với tìm kiếm và filter role.
      * Join auth.users để lấy email.
+     *
+     * <p>{@code AdminUserResponse.fromRow} đọc kết quả theo CHỈ SỐ VỊ TRÍ —
+     * cột mới phải thêm vào cuối SELECT, không được chèn vào giữa.
      */
     @Query(value = """
-        SELECT id, full_name, avatar_url, role, is_blocked, created_at, email
+        SELECT id, full_name, avatar_url, role, is_blocked, created_at, email,
+               teacher_approval_status, must_change_password
         FROM public.profiles_with_email
         WHERE (:role = '' OR role = :role)
           AND (:search = ''

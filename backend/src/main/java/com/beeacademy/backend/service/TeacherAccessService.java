@@ -34,5 +34,15 @@ public class TeacherAccessService {
                     "Giáo viên chưa được phê duyệt nên chưa thể sử dụng chức năng này.",
                     HttpStatus.FORBIDDEN);
         }
+
+        // Mật khẩu tạm do Admin cấp đã đi qua kênh ngoài hệ thống (Zalo/Facebook/
+        // email) nên phải đổi trước khi chạm vào bất kỳ dữ liệu giảng dạy nào.
+        // Mọi tính năng giáo viên đều đi qua hàm này → đây là chốt chặn server-side.
+        if (teacher.isMustChangePassword()) {
+            throw new BusinessException(
+                    "MUST_CHANGE_PASSWORD",
+                    "Vui lòng đổi mật khẩu tạm trước khi sử dụng chức năng này.",
+                    HttpStatus.FORBIDDEN);
+        }
     }
 }

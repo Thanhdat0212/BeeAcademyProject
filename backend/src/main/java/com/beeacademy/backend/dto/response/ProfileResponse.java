@@ -49,7 +49,8 @@ public record ProfileResponse(
         String linkedinUrl,
         Instant createdAt,
         Instant updatedAt,
-        String parentLinkCode
+        String parentLinkCode,
+        boolean mustChangePassword
 ) {
 
     /**
@@ -75,7 +76,8 @@ public record ProfileResponse(
                 profile.getLinkedinUrl(),
                 profile.getCreatedAt(),
                 profile.getUpdatedAt(),
-                null
+                null,
+                profile.isMustChangePassword()
         );
     }
 }

@@ -104,6 +104,23 @@ public class Profile {
     private String teacherApprovalStatus = TeacherApprovalStatus.APPROVED.toDbValue();
 
     /**
+     * Bật khi Admin cấp mật khẩu tạm cho tài khoản (tạo mới hoặc cấp lại).
+     * Mật khẩu tạm đã đi qua kênh ngoài hệ thống (Zalo/Facebook/email) nên
+     * user phải đổi trước khi dùng bất kỳ chức năng nào.
+     */
+    @Builder.Default
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword = false;
+
+    /** Admin đã tạo tài khoản này - null nếu user tự đăng ký. */
+    @Column(name = "created_by_admin_id")
+    private UUID createdByAdminId;
+
+    /** Kênh liên hệ Admin dùng để trao tài khoản cho GV (link Facebook/Zalo/SĐT). */
+    @Column(name = "teacher_contact_note")
+    private String teacherContactNote;
+
+    /**
      * Khóa tạm do đăng nhập sai liên tiếp (REQ-AUTH-002) — tách biệt hoàn toàn
      * với {@link #isBlocked} (khóa vĩnh viễn do Admin thao tác).
      */
@@ -150,6 +167,41 @@ public class Profile {
                 .role(role)
                 .fullName(fullName)
                 .build();
+    }
+
+    /**
+     * Factory cho tài khoản giáo viên do Admin cấp.
+     *
+     * <p>Khác {@link #createNew}: role cố định TEACHER, trạng thái duyệt là
+     * APPROVED ngay (Admin cấp = đã thẩm định ngoài hệ thống, không bắt duyệt
+     * lại), và bật {@code mustChangePassword} vì mật khẩu tạm đã đi qua kênh
+     * ngoài hệ thống.
+     *
+     * @param authUserId  UUID từ {@code auth.users.id}
+     * @param fullName    họ tên GV
+     * @param adminId     Admin thực hiện thao tác - lưu để audit
+     * @param contactNote kênh liên hệ đã dùng để trao tài khoản (có thể null)
+     */
+    public static Profile createTeacherByAdmin(UUID authUserId,
+                                               String fullName,
+                                               UUID adminId,
+                                               String contactNote) {
+        Profile profile = createNew(authUserId, UserRole.TEACHER, fullName);
+        profile.approveTeacher();
+        profile.markMustChangePassword();
+        profile.createdByAdminId = adminId;
+        profile.teacherContactNote = contactNote;
+        return profile;
+    }
+
+    /** Admin vừa cấp mật khẩu tạm - buộc user đổi ở lần đăng nhập kế tiếp. */
+    public void markMustChangePassword() {
+        this.mustChangePassword = true;
+    }
+
+    /** User đã tự đặt mật khẩu mới - gỡ ràng buộc. */
+    public void clearMustChangePassword() {
+        this.mustChangePassword = false;
     }
 
     /**
