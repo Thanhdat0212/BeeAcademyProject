@@ -291,37 +291,87 @@ export interface UploadVideoOptions {
   onProgress?: (pct: number) => void;
 }
 
+interface SignedUpload {
+  uploadUrl: string;
+  storagePath: string;
+}
+
+// Backend chỉ ký một URL dùng một lần rồi đứng ngoài: byte của file đi thẳng từ
+// máy giáo viên lên Supabase Storage. Trước đây video 2GB đi xuyên qua Spring nên
+// một lượt upload là đủ làm cả site đứng.
+async function requestSignedUpload(signUrl: string, file: File): Promise<SignedUpload> {
+  const res = await apiClient.post<ApiResponse<SignedUpload>>(signUrl, {
+    filename: file.name,
+    contentType: file.type,
+    sizeBytes: file.size,
+  });
+  return unwrap(res.data);
+}
+
+// Dùng XHR thay vì fetch vì chỉ XHR báo được tiến độ upload — thanh % là thứ duy
+// nhất giữ giáo viên khỏi đóng tab giữa chừng khi đẩy file cả GB.
+function putFileToSignedUrl(uploadUrl: string, file: File,
+                            onProgress?: (pct: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl, true);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+
+    xhr.upload.onprogress = (e) => {
+      if (onProgress && e.lengthComputable && e.total > 0) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+      let message = `Tải tệp lên thất bại (mã ${xhr.status})`;
+      try {
+        const body = JSON.parse(xhr.responseText) as { message?: string };
+        if (body.message) message = body.message;
+      } catch {
+        // Storage trả HTML/empty khi lỗi hạ tầng — giữ message mặc định
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error('Mất kết nối khi tải tệp lên. Kiểm tra mạng rồi thử lại.'));
+    xhr.onabort = () => reject(new Error('Đã hủy tải tệp lên.'));
+
+    xhr.send(file);
+  });
+}
+
 export async function uploadVideo(
     courseId: string, chapterId: string, lessonId: string,
     file: File,
     options?: UploadVideoOptions): Promise<UploadResponse> {
-  const form = new FormData();
-  form.append('file', file);
-  if (options?.durationSec && options.durationSec > 0) {
-    form.append('durationSec', Math.floor(options.durationSec).toString());
-  }
-  const res = await apiClient.post<ApiResponse<UploadResponse>>(
-    `/api/upload/video/${courseId}/${chapterId}/${lessonId}`, form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: (e) => {
-        if (options?.onProgress && e.total) {
-          options.onProgress(Math.round(e.loaded / e.total * 100));
-        }
-      },
-    });
+  const base = `/api/upload/video/${courseId}/${chapterId}/${lessonId}`;
+  const ticket = await requestSignedUpload(`${base}/sign`, file);
+  await putFileToSignedUrl(ticket.uploadUrl, file, options?.onProgress);
+
+  const res = await apiClient.post<ApiResponse<UploadResponse>>(`${base}/confirm`, {
+    storagePath: ticket.storagePath,
+    durationSec: options?.durationSec && options.durationSec > 0
+      ? Math.floor(options.durationSec)
+      : null,
+  });
   return unwrap(res.data);
 }
 
 export async function uploadDocument(lessonId: string, file: File,
                                       slot: 'pdf' | 'slide',
                                       displayName?: string): Promise<UploadResponse> {
-  const form = new FormData();
-  form.append('file', file);
-  form.append('slot', slot);
-  if (displayName) form.append('name', displayName);
-  const res = await apiClient.post<ApiResponse<UploadResponse>>(
-    `/api/upload/document/${lessonId}`, form,
-    { headers: { 'Content-Type': 'multipart/form-data' } });
+  const base = `/api/upload/document/${lessonId}`;
+  const ticket = await requestSignedUpload(`${base}/sign`, file);
+  await putFileToSignedUrl(ticket.uploadUrl, file);
+
+  const res = await apiClient.post<ApiResponse<UploadResponse>>(`${base}/confirm`, {
+    storagePath: ticket.storagePath,
+    name: displayName ?? file.name,
+    slot,
+  });
   return unwrap(res.data);
 }
 
@@ -338,11 +388,13 @@ export async function uploadCourseThumbnail(file: File): Promise<UploadResponse>
   return unwrap(res.data);
 }
 
-export async function uploadCourseIntroVideo(file: File): Promise<UploadResponse> {
-  const form = new FormData();
-  form.append('file', file);
+export async function uploadCourseIntroVideo(
+    file: File,
+    onProgress?: (pct: number) => void): Promise<UploadResponse> {
+  const ticket = await requestSignedUpload('/api/upload/course-intro-video/sign', file);
+  await putFileToSignedUrl(ticket.uploadUrl, file, onProgress);
+
   const res = await apiClient.post<ApiResponse<UploadResponse>>(
-    '/api/upload/course-intro-video', form,
-    { headers: { 'Content-Type': 'multipart/form-data' } });
+    '/api/upload/course-intro-video/confirm', { storagePath: ticket.storagePath });
   return unwrap(res.data);
 }

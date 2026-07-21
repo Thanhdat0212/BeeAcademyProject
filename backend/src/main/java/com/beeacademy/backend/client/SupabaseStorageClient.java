@@ -2,6 +2,7 @@ package com.beeacademy.backend.client;
 
 import com.beeacademy.backend.config.SupabaseProperties;
 import com.beeacademy.backend.exception.BusinessException;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
@@ -222,8 +223,117 @@ public class SupabaseStorageClient {
                 + URLEncoder.encode(filename, StandardCharsets.UTF_8);
     }
 
+    /**
+     * Xin Supabase cấp URL cho phép browser upload THẲNG lên bucket, bỏ qua backend.
+     *
+     * <p>Backend không còn là ống dẫn cho file 2GB: nó chỉ ký một URL dùng một lần
+     * rồi trả về, còn luồng byte đi trực tiếp từ máy giáo viên tới Supabase.
+     * Token do Supabase phát hành gắn chặt với {@code objectPath} nên client
+     * không thể ghi sang path khác.
+     *
+     * <p>Supabase API: {@code POST /storage/v1/object/upload/sign/{bucket}/{path}}
+     * Response: {@code {"url": "/object/upload/sign/bucket/path?token=..."}}
+     *
+     * @return URL tuyệt đối để client {@code PUT} nội dung file lên
+     */
+    public String createSignedUploadUrl(String bucket, String objectPath) {
+        String uri = "/storage/v1/object/upload/sign/" + bucket + "/" + objectPath;
+        try {
+            SignedUploadUrlResponse response = restClient.post()
+                    .uri(uri)
+                    .header("apikey", serviceRoleKey)
+                    .header("Authorization", "Bearer " + serviceRoleKey)
+                    .retrieve()
+                    .body(SignedUploadUrlResponse.class);
+
+            if (response == null || response.url() == null) {
+                throw new BusinessException("SIGNED_UPLOAD_FAILED",
+                        "Không thể tạo đường dẫn tải lên. Vui lòng thử lại.");
+            }
+            String signedPath = response.url();
+            if (signedPath.startsWith("http")) return signedPath;
+            if (!signedPath.startsWith("/storage/v1")) {
+                signedPath = "/storage/v1" + signedPath;
+            }
+            return supabaseUrl + signedPath;
+
+        } catch (HttpClientErrorException ex) {
+            throw mapClientError(ex, "sign upload " + objectPath);
+        } catch (RestClientException ex) {
+            log.error("Lỗi khi tạo signed upload URL: {}", ex.getMessage());
+            throw new BusinessException("SIGNED_UPLOAD_FAILED",
+                    "Dịch vụ lưu trữ tạm thời không khả dụng. Vui lòng thử lại sau.",
+                    HttpStatus.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    /**
+     * Đọc metadata thật của object đã nằm trên Storage (size + MIME).
+     *
+     * <p>Cần thiết vì với direct upload, kích thước và content type mà client
+     * khai báo lúc xin chữ ký chỉ là lời khai — backend phải hỏi lại Supabase
+     * trước khi ghi nhận vào DB.
+     *
+     * <p>Dùng endpoint list thay vì info vì list ổn định qua các phiên bản
+     * storage-api và trả thẳng khối {@code metadata}.
+     *
+     * @return metadata của object, hoặc {@code null} nếu object không tồn tại
+     */
+    public ObjectStat statObject(String bucket, String objectPath) {
+        int lastSlash = objectPath.lastIndexOf('/');
+        String prefix   = lastSlash < 0 ? "" : objectPath.substring(0, lastSlash);
+        String filename = lastSlash < 0 ? objectPath : objectPath.substring(lastSlash + 1);
+
+        String uri = "/storage/v1/object/list/" + bucket;
+        try {
+            ListedObject[] items = restClient.post()
+                    .uri(uri)
+                    .header("apikey", serviceRoleKey)
+                    .header("Authorization", "Bearer " + serviceRoleKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new ListRequest(prefix, filename, 100, 0))
+                    .retrieve()
+                    .body(ListedObject[].class);
+
+            if (items == null) return null;
+            for (ListedObject item : items) {
+                if (filename.equals(item.name()) && item.metadata() != null) {
+                    return new ObjectStat(item.metadata().size(), item.metadata().mimetype());
+                }
+            }
+            return null;
+
+        } catch (HttpClientErrorException ex) {
+            throw mapClientError(ex, "stat " + objectPath);
+        } catch (RestClientException ex) {
+            log.error("Lỗi khi đọc metadata object {}/{}: {}", bucket, objectPath, ex.getMessage());
+            throw new BusinessException("STORAGE_UNAVAILABLE",
+                    "Dịch vụ lưu trữ tạm thời không khả dụng. Vui lòng thử lại sau.",
+                    HttpStatus.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    /** Metadata tối thiểu của một object trên Storage. */
+    public record ObjectStat(Long size, String mimetype) {}
+
     /** DTO nội bộ để parse response signed URL từ Supabase. */
     private record SignedUrlResponse(String signedURL) {}
+
+    /** DTO nội bộ để parse response signed UPLOAD URL từ Supabase. */
+    private record SignedUploadUrlResponse(String url) {}
+
+    private record ListRequest(String prefix, String search, int limit, int offset) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record ListedObject(String name, ObjectMetadata metadata) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record ObjectMetadata(Long size, String mimetype) {}
+
+    /** Public URL của object đã có sẵn trên bucket public (client tự upload, không qua backend). */
+    public String publicUrl(String bucket, String objectPath) {
+        return buildPublicUrl(bucket, objectPath);
+    }
 
     /**
      * Build public URL theo format chuẩn của Supabase Storage cho bucket public.

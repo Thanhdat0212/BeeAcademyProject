@@ -1,15 +1,22 @@
 package com.beeacademy.backend.controller;
 
+import com.beeacademy.backend.dto.request.ConfirmDocumentUploadRequest;
+import com.beeacademy.backend.dto.request.ConfirmUploadRequest;
+import com.beeacademy.backend.dto.request.ConfirmVideoUploadRequest;
+import com.beeacademy.backend.dto.request.SignedUploadRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
+import com.beeacademy.backend.dto.response.SignedUploadResponse;
 import com.beeacademy.backend.dto.response.UploadResponse;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.ContentUploadService;
 import com.beeacademy.backend.service.TeacherAccessService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -39,39 +46,66 @@ public class UploadController {
     private final TeacherAccessService teacherAccessService;
 
     /**
-     * Upload video cho một bài giảng.
-     * Path: /api/upload/video/{courseId}/{chapterId}/{lessonId}
+     * Xin URL để browser upload video bài giảng thẳng lên Supabase.
+     * Path: /api/upload/video/{courseId}/{chapterId}/{lessonId}/sign
      */
-    @PostMapping("/video/{courseId}/{chapterId}/{lessonId}")
-    public ApiResponse<UploadResponse> uploadVideo(
+    @PostMapping("/video/{courseId}/{chapterId}/{lessonId}/sign")
+    public ApiResponse<SignedUploadResponse> signVideoUpload(
             @PathVariable UUID courseId,
             @PathVariable UUID chapterId,
             @PathVariable UUID lessonId,
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "durationSec", required = false) Integer durationSec) {
+            @Valid @RequestBody SignedUploadRequest request) {
         var me = CurrentUser.required();
         teacherAccessService.requireApprovedTeacher(me);
-        UploadResponse result = uploadService.uploadVideo(
-                courseId, chapterId, lessonId,
-                me.userId(), file, durationSec);
+        SignedUploadResponse result = uploadService.createVideoUploadTicket(
+                courseId, chapterId, lessonId, me.userId(), request);
+        return ApiResponse.ok(result, "Đã tạo đường dẫn tải lên");
+    }
+
+    /**
+     * Báo đã upload xong video, xin gắn vào bài giảng.
+     * Path: /api/upload/video/{courseId}/{chapterId}/{lessonId}/confirm
+     */
+    @PostMapping("/video/{courseId}/{chapterId}/{lessonId}/confirm")
+    public ApiResponse<UploadResponse> confirmVideoUpload(
+            @PathVariable UUID courseId,
+            @PathVariable UUID chapterId,
+            @PathVariable UUID lessonId,
+            @Valid @RequestBody ConfirmVideoUploadRequest request) {
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
+        UploadResponse result = uploadService.confirmVideoUpload(
+                courseId, chapterId, lessonId, me.userId(), request);
         return ApiResponse.ok(result, "Upload video thành công");
     }
 
     /**
-     * Upload tài liệu đính kèm (PDF/slide) cho một bài giảng.
-     * Path: /api/upload/document/{lessonId}
+     * Xin URL để browser upload tài liệu (PDF/slide) thẳng lên Supabase.
+     * Path: /api/upload/document/{lessonId}/sign
      */
-    @PostMapping("/document/{lessonId}")
-    public ApiResponse<UploadResponse> uploadDocument(
+    @PostMapping("/document/{lessonId}/sign")
+    public ApiResponse<SignedUploadResponse> signDocumentUpload(
             @PathVariable UUID lessonId,
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "name", required = false) String displayName,
-            @RequestParam(value = "slot", required = false) String documentSlot) {
-        String name = displayName != null ? displayName : file.getOriginalFilename();
+            @Valid @RequestBody SignedUploadRequest request) {
         var me = CurrentUser.required();
         teacherAccessService.requireApprovedTeacher(me);
-        UploadResponse result = uploadService.uploadDocument(
-                lessonId, me.userId(), name, documentSlot, file);
+        SignedUploadResponse result = uploadService.createDocumentUploadTicket(
+                lessonId, me.userId(), request);
+        return ApiResponse.ok(result, "Đã tạo đường dẫn tải lên");
+    }
+
+    /**
+     * Báo đã upload xong tài liệu, xin lưu metadata.
+     * Path: /api/upload/document/{lessonId}/confirm
+     */
+    @PostMapping("/document/{lessonId}/confirm")
+    public ApiResponse<UploadResponse> confirmDocumentUpload(
+            @PathVariable UUID lessonId,
+            @Valid @RequestBody ConfirmDocumentUploadRequest request) {
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
+        UploadResponse result = uploadService.confirmDocumentUpload(
+                lessonId, me.userId(), request);
         return ApiResponse.ok(result, "Upload tài liệu thành công");
     }
 
@@ -102,16 +136,30 @@ public class UploadController {
     }
 
     /**
-     * Upload video gioi thieu khoa hoc.
-     * Path: /api/upload/course-intro-video
+     * Xin URL để browser upload video gioi thieu thang len Supabase.
+     * Path: /api/upload/course-intro-video/sign
      */
-    @PostMapping("/course-intro-video")
-    public ApiResponse<UploadResponse> uploadCourseIntroVideo(
-            @RequestParam("file") MultipartFile file) {
+    @PostMapping("/course-intro-video/sign")
+    public ApiResponse<SignedUploadResponse> signCourseIntroVideoUpload(
+            @Valid @RequestBody SignedUploadRequest request) {
         var me = CurrentUser.required();
         teacherAccessService.requireApprovedTeacher(me);
-        UploadResponse result = uploadService.uploadCourseIntroVideo(
-                me.userId(), file);
+        SignedUploadResponse result = uploadService.createIntroVideoUploadTicket(
+                me.userId(), request);
+        return ApiResponse.ok(result, "Da tao duong dan tai len");
+    }
+
+    /**
+     * Bao da upload xong video gioi thieu khoa hoc.
+     * Path: /api/upload/course-intro-video/confirm
+     */
+    @PostMapping("/course-intro-video/confirm")
+    public ApiResponse<UploadResponse> confirmCourseIntroVideoUpload(
+            @Valid @RequestBody ConfirmUploadRequest request) {
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
+        UploadResponse result = uploadService.confirmIntroVideoUpload(
+                me.userId(), request);
         return ApiResponse.ok(result, "Upload video gioi thieu thanh cong");
     }
 

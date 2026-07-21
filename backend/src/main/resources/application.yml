@@ -52,11 +52,14 @@ spring:
         physical_naming_strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
     open-in-view: false   # Tắt OSIV - tránh lazy load ngoài transaction (best practice)
 
-  # Upload: avatar (5MB) + video khóa học (2GB) + tài liệu (100MB)
+  # Upload: file lớn (video, tài liệu) đi THẲNG từ browser lên Supabase qua signed
+  # upload URL, không qua đây nữa. Chỉ còn avatar (5MB), ảnh/audio câu hỏi (20MB)
+  # và bài nộp của học sinh (25MB) đi xuyên backend — giữ trần thấp để một request
+  # lỗi không nuốt hết RAM/đĩa của server.
   servlet:
     multipart:
-      max-file-size: 2GB
-      max-request-size: 2GB
+      max-file-size: 30MB
+      max-request-size: 35MB
 
   # --------------------------------------------------------------------------
   # Mail: gửi OTP qua Gmail SMTP
