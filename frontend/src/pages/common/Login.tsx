@@ -7,6 +7,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { login as loginApi } from '../../api/authService';
 import { isApiError } from '../../api/client';
 import { resolveRoleHome } from '../../lib/utils';
+import BrandLogo from '../../components/BrandLogo';
 
 function buildGoogleOAuthUrl(): string | null {
   const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim().replace(/\/+$/, '');
@@ -58,6 +59,16 @@ export default function Login() {
       loginWithTokens(tokens);
 
       notify.dismiss(toastId);
+
+      // Tài khoản dùng mật khẩu tạm do Admin cấp → đi thẳng trang đổi mật khẩu,
+      // bỏ qua redirectTo (ProtectedRoute cũng chặn nhưng báo trước cho rõ ràng).
+      if (tokens.user?.mustChangePassword) {
+        notify.success('Vui lòng đổi mật khẩu tạm trước khi sử dụng hệ thống.');
+        navigate(tokens.user.role === 'teacher' ? '/teacher/account' : '/account',
+          { replace: true });
+        return;
+      }
+
       notify.success('Đăng nhập thành công!');
 
       // Chuyển hướng theo role — luôn áp dụng nếu user chưa có đích cụ thể.
@@ -92,9 +103,7 @@ export default function Login() {
         <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
 
         <div className="text-center mb-10 relative z-10">
-          <div className="w-12 h-12 bg-primary text-on-primary rounded-xl flex items-center justify-center font-bold text-2xl mx-auto mb-4 shadow-lg shadow-primary/20">
-            B
-          </div>
+          <BrandLogo size="lg" className="mx-auto mb-4" />
           <h1 className="text-3xl font-extrabold mb-2">Đăng Nhập</h1>
           <p className="text-on-surface-variant text-sm">Chào mừng bạn quay lại Bee Academy!</p>
         </div>

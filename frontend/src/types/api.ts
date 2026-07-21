@@ -52,6 +52,8 @@ export interface UserSummary {
   role: 'student' | 'parent' | 'teacher' | 'admin' | null;
   fullName: string | null;
   avatarUrl: string | null;
+  /** true khi Admin vừa cấp mật khẩu tạm — user bị ép sang trang đổi mật khẩu. */
+  mustChangePassword?: boolean;
 }
 
 export interface AuthTokenPayload {
@@ -234,11 +236,14 @@ export interface CourseReviewSummary {
 //  Request payloads (FE → BE)
 // ============================================================================
 
+/** Vai trò được phép đăng ký công khai — tài khoản giáo viên do Admin cấp. */
+export type PublicSignupRole = 'student' | 'parent';
+
 export interface RegisterPayload {
   email: string;
   password: string;
   fullName: string;
-  role: 'student' | 'parent' | 'teacher';
+  role: PublicSignupRole;
 }
 
 export interface LoginPayload {
@@ -249,7 +254,7 @@ export interface LoginPayload {
 export interface RequestOtpPayload {
   email: string;
   fullName: string;
-  role: 'student' | 'parent' | 'teacher';
+  role: PublicSignupRole;
 }
 
 export interface VerifyOtpPayload {

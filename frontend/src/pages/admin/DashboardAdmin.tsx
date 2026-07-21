@@ -46,13 +46,19 @@ import {
   getAdminPayoutStats,
   confirmPayout,
   broadcastNotification,
+  createTeacherAccount,
+  resetUserPassword,
+  updateTeacherApproval,
   type AdminOverview,
   type AdminPayoutRow,
   type AdminPayoutStats,
   type BroadcastTargetRole,
+  type TeacherApprovalStatus,
+  type TemporaryPasswordResult,
 } from '../../api/adminService';
 import ChartCard from '../../components/charts/ChartCard';
 import DistributionDonut from '../../components/charts/DistributionDonut';
+import BrandLogo from '../../components/BrandLogo';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // KIỂU DỮ LIỆU (Types & Interfaces)
@@ -115,6 +121,10 @@ interface AdminUser {
   avatarUrl: string | null;
   isBlocked: boolean;
   createdAt: string;
+  /** Chỉ có nghĩa với role=teacher. */
+  teacherApprovalStatus: TeacherApprovalStatus | null;
+  /** true = đang dùng mật khẩu tạm Admin cấp, chưa tự đổi. */
+  mustChangePassword: boolean;
 }
 
 interface UserStats { students: number; teachers: number; parents: number; total: number; }
@@ -307,6 +317,15 @@ export default function DashboardAdmin() {
   const [payoutStats,     setPayoutStats]     = useState<AdminPayoutStats | null>(null);
   const [loadingPayouts,  setLoadingPayouts]  = useState(false);
 
+  // Tạo tài khoản giáo viên (GV không đăng ký công khai được — Admin cấp)
+  const [teacherFormOpen, setTeacherFormOpen] = useState(false);
+  const [teacherForm, setTeacherForm] = useState({ email: '', fullName: '', phone: '', contactNote: '' });
+  const [creatingTeacher, setCreatingTeacher] = useState(false);
+  // Mật khẩu tạm chỉ về từ backend đúng 1 lần → giữ trong state để Admin copy,
+  // xoá khi đóng modal. Không lưu vào localStorage.
+  const [credentialModal, setCredentialModal] = useState<TemporaryPasswordResult | null>(null);
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+
   const loadUsers = useCallback(async (page = 0) => {
     setLoadingUsers(true);
     try {
@@ -437,6 +456,76 @@ export default function DashboardAdmin() {
       notify.success(`Đã ${newBlocked ? 'khóa' : 'mở khóa'} tài khoản ${target.fullName ?? target.email}`);
     } catch (err: unknown) {
       notify.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Không thực hiện được');
+    }
+  }
+
+  // Giáo viên liên hệ Bee Academy qua mạng xã hội → Admin thẩm định rồi tạo tài
+  // khoản tại đây. Mật khẩu tạm chỉ hiện 1 lần trong modal kết quả.
+  async function handleCreateTeacher(e: React.FormEvent) {
+    e.preventDefault();
+    if (creatingTeacher) return;
+    if (!teacherForm.email.trim() || !teacherForm.fullName.trim()) {
+      notify.error('Vui lòng nhập đủ email và họ tên');
+      return;
+    }
+
+    setCreatingTeacher(true);
+    try {
+      const created = await createTeacherAccount({
+        email: teacherForm.email.trim(),
+        fullName: teacherForm.fullName.trim(),
+        phone: teacherForm.phone.trim() || undefined,
+        contactNote: teacherForm.contactNote.trim() || undefined,
+      });
+      setTeacherFormOpen(false);
+      setTeacherForm({ email: '', fullName: '', phone: '', contactNote: '' });
+      setCredentialModal(created);
+      loadUsers(0);
+      loadUserStats();
+    } catch (err: unknown) {
+      notify.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Không tạo được tài khoản giáo viên');
+    } finally {
+      setCreatingTeacher(false);
+    }
+  }
+
+  async function handleResetPassword(user: AdminUser) {
+    if (updatingUserId) return;
+    if (!window.confirm(`Cấp mật khẩu mới cho ${user.fullName ?? user.email}? Mật khẩu cũ sẽ không dùng được nữa.`)) return;
+
+    setUpdatingUserId(user.id);
+    try {
+      const reset = await resetUserPassword(user.id);
+      setCredentialModal(reset);
+      loadUsers(userPage);
+    } catch (err: unknown) {
+      notify.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Không cấp lại được mật khẩu');
+    } finally {
+      setUpdatingUserId(null);
+    }
+  }
+
+  // Xử lý nốt các GV đã tự đăng ký trước khi hệ thống đóng đường đăng ký công khai.
+  async function handleTeacherApproval(user: AdminUser, status: TeacherApprovalStatus) {
+    if (updatingUserId) return;
+    setUpdatingUserId(user.id);
+    try {
+      await updateTeacherApproval(user.id, status);
+      setApiUsers(prev => prev.map(u => u.id === user.id ? { ...u, teacherApprovalStatus: status } : u));
+      notify.success(status === 'approved' ? 'Đã duyệt tài khoản giáo viên' : 'Đã từ chối tài khoản giáo viên');
+    } catch (err: unknown) {
+      notify.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Không cập nhật được trạng thái');
+    } finally {
+      setUpdatingUserId(null);
+    }
+  }
+
+  async function copyTemporaryPassword(password: string) {
+    try {
+      await navigator.clipboard.writeText(password);
+      notify.success('Đã copy mật khẩu');
+    } catch {
+      notify.error('Trình duyệt chặn copy — vui lòng bôi đen và copy thủ công');
     }
   }
 
@@ -725,9 +814,7 @@ export default function DashboardAdmin() {
         {/* LOGO BOX */}
         <div className="p-6 flex items-center justify-between border-b border-outline-variant/20">
           <button onClick={() => changeTab('overview')} className="flex items-center gap-3 text-left">
-            <div className="w-10 h-10 bg-primary text-on-primary rounded-xl flex items-center justify-center font-extrabold text-xl shadow-lg shadow-primary/20">
-              B
-            </div>
+            <BrandLogo size="md" />
             <div>
               <p className="font-extrabold text-sm leading-tight text-on-surface">Bee Academy</p>
               <p className="text-xs text-on-surface-variant font-medium">Bảng Quản Trị</p>
@@ -1199,6 +1286,12 @@ export default function DashboardAdmin() {
                         </select>
                         <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-on-surface-variant pointer-events-none" />
                       </div>
+                      <button
+                        onClick={() => setTeacherFormOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-on-primary rounded-xl text-sm font-bold hover:opacity-90 transition-opacity whitespace-nowrap"
+                      >
+                        <PlusCircle className="w-4 h-4" /> Tạo tài khoản giáo viên
+                      </button>
                     </div>
                   </div>
 
@@ -1253,16 +1346,53 @@ export default function DashboardAdmin() {
                                 {new Date(user.createdAt).toLocaleDateString('vi-VN')}
                               </td>
                               <td className="px-4 py-3.5">
-                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                  !user.isBlocked ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                                }`}>
-                                  <span className={`w-1.5 h-1.5 rounded-full ${!user.isBlocked ? 'bg-green-600' : 'bg-red-600'}`} />
-                                  {!user.isBlocked ? 'Hoạt động' : 'Bị khóa'}
-                                </span>
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                    !user.isBlocked ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                  }`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${!user.isBlocked ? 'bg-green-600' : 'bg-red-600'}`} />
+                                    {!user.isBlocked ? 'Hoạt động' : 'Bị khóa'}
+                                  </span>
+                                  {user.role === 'teacher' && user.teacherApprovalStatus === 'pending' && (
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">Chờ duyệt</span>
+                                  )}
+                                  {user.role === 'teacher' && user.teacherApprovalStatus === 'rejected' && (
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">Đã từ chối</span>
+                                  )}
+                                  {user.mustChangePassword && (
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700">Chờ đổi mật khẩu</span>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-6 py-3.5">
                                 {user.role !== 'admin' ? (
-                                  <div className="flex items-center justify-end">
+                                  <div className="flex items-center justify-end gap-1">
+                                    {user.role === 'teacher' && user.teacherApprovalStatus === 'pending' && (
+                                      <>
+                                        <button
+                                          onClick={() => handleTeacherApproval(user, 'approved')}
+                                          disabled={updatingUserId === user.id}
+                                          className="px-2 py-1 rounded-lg text-xs font-bold text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 transition-colors"
+                                        >
+                                          Duyệt
+                                        </button>
+                                        <button
+                                          onClick={() => handleTeacherApproval(user, 'rejected')}
+                                          disabled={updatingUserId === user.id}
+                                          className="px-2 py-1 rounded-lg text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 disabled:opacity-50 transition-colors"
+                                        >
+                                          Từ chối
+                                        </button>
+                                      </>
+                                    )}
+                                    <button
+                                      onClick={() => handleResetPassword(user)}
+                                      disabled={updatingUserId === user.id}
+                                      className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 disabled:opacity-50 transition-colors flex-shrink-0"
+                                      title="Cấp lại mật khẩu tạm"
+                                    >
+                                      <RotateCcw className="w-4 h-4" />
+                                    </button>
                                     <button
                                       onClick={() => handleToggleBlockUser(user.id)}
                                       className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
@@ -1872,6 +2002,151 @@ export default function DashboardAdmin() {
         )}
 
         {/* 3. MODAL XÁC NHẬN CHUYỂN KHOẢN GIÁO VIÊN (UC40) */}
+        {/* Modal tạo tài khoản giáo viên (UC35) */}
+        {teacherFormOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setTeacherFormOpen(false)}
+            />
+            <motion.form
+              onSubmit={handleCreateTeacher}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl w-full max-w-md p-6 shadow-2xl z-10 relative"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-primary/10 text-primary rounded-xl flex items-center justify-center">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-on-surface">Tạo tài khoản giáo viên</h3>
+                  <p className="text-[11px] text-on-surface-variant font-medium">Hệ thống sinh mật khẩu tạm và hiển thị một lần duy nhất.</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Email <span className="text-red-500">*</span></label>
+                  <input
+                    type="email" required value={teacherForm.email}
+                    onChange={e => setTeacherForm(f => ({ ...f, email: e.target.value }))}
+                    placeholder="giaovien@example.com"
+                    className="w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 focus:border-primary outline-none text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Họ và tên <span className="text-red-500">*</span></label>
+                  <input
+                    type="text" required minLength={2} value={teacherForm.fullName}
+                    onChange={e => setTeacherForm(f => ({ ...f, fullName: e.target.value }))}
+                    placeholder="Nguyễn Văn A"
+                    className="w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 focus:border-primary outline-none text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Số điện thoại</label>
+                  <input
+                    type="tel" value={teacherForm.phone}
+                    onChange={e => setTeacherForm(f => ({ ...f, phone: e.target.value }))}
+                    placeholder="0912345678"
+                    className="w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 focus:border-primary outline-none text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Kênh liên hệ</label>
+                  <input
+                    type="text" value={teacherForm.contactNote}
+                    onChange={e => setTeacherForm(f => ({ ...f, contactNote: e.target.value }))}
+                    placeholder="Link Facebook / Zalo đã trao đổi"
+                    className="w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 focus:border-primary outline-none text-sm"
+                  />
+                  <p className="text-[11px] text-on-surface-variant mt-1">Lưu lại để đối chiếu về sau khi cần xác minh danh tính giáo viên.</p>
+                </div>
+              </div>
+
+              <div className="flex gap-2 mt-5">
+                <button type="button" onClick={() => setTeacherFormOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-outline-variant/40 text-sm font-bold text-on-surface-variant hover:bg-surface-container transition-colors">
+                  Hủy
+                </button>
+                <button type="submit" disabled={creatingTeacher}
+                  className="flex-1 py-2.5 rounded-xl bg-primary text-on-primary text-sm font-bold hover:opacity-90 disabled:opacity-60 transition-opacity">
+                  {creatingTeacher ? 'Đang tạo...' : 'Tạo tài khoản'}
+                </button>
+              </div>
+            </motion.form>
+          </div>
+        )}
+
+        {/* Modal hiển thị mật khẩu tạm — chỉ hiện đúng một lần, đóng là mất */}
+        {credentialModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl w-full max-w-md p-6 shadow-2xl z-10 relative"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-green-500/10 text-green-600 rounded-xl flex items-center justify-center">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-on-surface">Mật khẩu tạm đã sẵn sàng</h3>
+                  <p className="text-[11px] text-on-surface-variant font-medium">{credentialModal.fullName ?? credentialModal.email}</p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-surface-container-low rounded-2xl border border-outline-variant/20 space-y-3">
+                <div>
+                  <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Email đăng nhập</p>
+                  <p className="font-mono text-sm text-on-surface mt-0.5 break-all">{credentialModal.email}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Mật khẩu tạm</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <code className="flex-1 px-3 py-2 bg-surface-container rounded-xl font-mono text-lg font-bold tracking-wider text-primary select-all break-all">
+                      {credentialModal.temporaryPassword}
+                    </code>
+                    <button
+                      onClick={() => copyTemporaryPassword(credentialModal.temporaryPassword)}
+                      className="px-3 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-opacity whitespace-nowrap"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className={`mt-4 p-3 rounded-2xl border flex gap-2 ${
+                credentialModal.emailSent
+                  ? 'bg-amber-50 border-amber-300 text-amber-800'
+                  : 'bg-red-50 border-red-300 text-red-800'
+              }`}>
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <p className="text-xs leading-relaxed">
+                  {credentialModal.emailSent
+                    ? 'Mật khẩu đã được gửi qua email và chỉ hiển thị ở đây một lần. Đóng cửa sổ này là không xem lại được.'
+                    : 'KHÔNG gửi được email. Hãy copy mật khẩu và gửi cho giáo viên qua Zalo/Facebook ngay bây giờ — đóng cửa sổ là không xem lại được.'}
+                  {' '}Giáo viên sẽ bị buộc đổi mật khẩu ở lần đăng nhập đầu tiên.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setCredentialModal(null)}
+                className="w-full mt-5 py-2.5 rounded-xl bg-primary text-on-primary text-sm font-bold hover:opacity-90 transition-opacity"
+              >
+                Tôi đã lưu mật khẩu
+              </button>
+            </motion.div>
+          </div>
+        )}
+
         {payoutModal.isOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div

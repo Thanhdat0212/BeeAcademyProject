@@ -55,6 +55,8 @@ export interface User {
   email: string;
   avatar?: string;
   role?: 'student' | 'parent' | 'teacher' | 'admin' | null;
+  /** Admin vừa cấp mật khẩu tạm — ProtectedRoute ép sang trang đổi mật khẩu. */
+  mustChangePassword?: boolean;
 }
 
 interface AuthState {
@@ -100,6 +102,7 @@ function toUiUser(summary: UserSummary | null): User | null {
     email: summary.email,
     avatar: summary.avatarUrl ?? undefined,
     role: summary.role,
+    mustChangePassword: summary.mustChangePassword ?? false,
   };
 }
 
