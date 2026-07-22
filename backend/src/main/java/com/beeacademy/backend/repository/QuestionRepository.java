@@ -5,13 +5,16 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import jakarta.persistence.LockModeType;
 
 /**
  * Truy vấn bảng {@code questions}.
@@ -24,6 +27,10 @@ import java.util.UUID;
  */
 @Repository
 public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSpecificationExecutor<Question> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT q FROM Question q WHERE q.id = :questionId")
+    Optional<Question> findByIdForUpdate(@Param("questionId") UUID questionId);
 
     // ─── Teacher side ────────────────────────────────────────────────────────
     //
@@ -121,7 +128,7 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
     @Query("SELECT q FROM Question q WHERE q.category.id = :categoryId " +
            "AND q.grade IN :grades " +
            "AND q.difficulty = :difficulty AND q.status = 'active' " +
-           "AND q.type IN ('multiple_choice', 'true_false')")
+           "AND q.type IN ('multiple_choice', 'true_false', 'image_question', 'audio_question')")
     List<Question> findActiveByCategoryAndGradesAndDifficulty(
             @Param("categoryId") UUID categoryId,
             @Param("grades") List<Integer> grades,
@@ -131,7 +138,8 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
            "WHERE q.teacher.id = :teacherId AND q.category.id = :categoryId " +
            "AND q.grade IN :grades " +
            "AND q.difficulty = :difficulty AND q.status = 'active' " +
-           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'essay', 'essay_short', 'essay_long')")
+           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'image_question', " +
+           "'essay', 'essay_short', 'essay_long')")
     List<Question> findActiveByTeacherAndCategoryAndGradesAndDifficulty(
             @Param("teacherId") UUID teacherId,
             @Param("categoryId") UUID categoryId,
@@ -141,7 +149,8 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
     @Query("SELECT DISTINCT q FROM Question q LEFT JOIN FETCH q.choices " +
            "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
            "AND q.difficulty = :difficulty AND q.status = 'active' " +
-           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'essay', 'essay_short', 'essay_long')")
+           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'image_question', " +
+           "'essay', 'essay_short', 'essay_long')")
     List<Question> findActiveByTeacherAndChapterAndDifficulty(
             @Param("teacherId") UUID teacherId,
             @Param("chapterId") UUID chapterId,
@@ -150,7 +159,8 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
     @Query("SELECT DISTINCT q FROM Question q LEFT JOIN FETCH q.choices " +
            "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
            "AND q.status = 'active' " +
-           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'essay', 'essay_short', 'essay_long')")
+           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'image_question', " +
+           "'essay', 'essay_short', 'essay_long')")
     List<Question> findActiveByTeacherAndChapter(
             @Param("teacherId") UUID teacherId,
             @Param("chapterId") UUID chapterId);
@@ -195,7 +205,8 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
     @Query("SELECT q.type, COUNT(q) FROM Question q " +
            "WHERE q.teacher.id = :teacherId AND q.chapter.id = :chapterId " +
            "AND q.status = 'active' " +
-           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'essay', 'essay_short', 'essay_long') " +
+           "AND q.type IN ('multiple_choice', 'true_false', 'fill_in_blank', 'image_question', " +
+           "'essay', 'essay_short', 'essay_long') " +
            "GROUP BY q.type")
     List<Object[]> countActiveByTypeForTeacherAndChapter(
             @Param("teacherId") UUID teacherId,
@@ -221,4 +232,17 @@ public interface QuestionRepository extends JpaRepository<Question, UUID>, JpaSp
     @Modifying
     @Query("UPDATE Question q SET q.chapter = null WHERE q.chapter.id IN :chapterIds")
     void detachFromChapters(@Param("chapterIds") List<UUID> chapterIds);
+
+    @Query("""
+           SELECT COUNT(q) > 0
+           FROM Question q
+           WHERE q.teacher.id = :teacherId
+             AND q.status = 'active'
+             AND LOWER(TRIM(q.content)) = LOWER(TRIM(:content))
+             AND (:excludeQuestionId IS NULL OR q.id <> :excludeQuestionId)
+           """)
+    boolean existsActiveDuplicateContent(
+            @Param("teacherId") UUID teacherId,
+            @Param("content") String content,
+            @Param("excludeQuestionId") UUID excludeQuestionId);
 }

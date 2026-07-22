@@ -5,15 +5,18 @@ import TeacherNotificationBell from '../../components/TeacherNotificationBell';
  * Bối cảnh v6.5:
  *   - GV bắt buộc phải có TK ngân hàng đã NHẬP (UC45) trước khi Admin xuất Excel thanh toán (UC39).
  *   - Mọi thay đổi TK đều phải GHI AUDIT LOG (UC46) — vì tiền bạc nhạy cảm, cần evidence khi có tranh chấp.
- *   - Trạng thái xác minh: Admin có thể cần xác minh thông tin trước khi dùng để chuyển tiền.
+ *   - Xác minh bằng MÃ GỬI VỀ EMAIL của chính GV, không còn chờ Admin duyệt.
  *
  * Luồng chính:
  *   1. Vào trang → thấy TK hiện tại ở chế độ READONLY (chỉ xem)
  *   2. Click "Cập nhật" → form chuyển sang chế độ EDIT, các field editable
  *   3. GV sửa thông tin + nhập "Lý do thay đổi" (tùy chọn)
- *   4. Click "Lưu thay đổi" → mở CONFIRM DIALOG (vì là tiền bạc, cần xác nhận kép)
- *   5. Xác nhận → commit + ghi 1 entry vào audit log
- *   6. Trạng thái xác minh reset về 'pending' vì Admin cần xác minh lại
+ *   4. Click "Lưu thay đổi" → CONFIRM DIALOG liệt kê thay đổi (tiền bạc, cần xác nhận kép)
+ *   5. Xác nhận → backend gửi mã 6 số về email GV. LÚC NÀY DB CHƯA ĐỔI GÌ.
+ *   6. GV nhập mã → backend mới ghi TK + ghi audit log + đặt trạng thái 'verified'
+ *
+ * Vì sao chưa ghi DB ở bước 5: bỏ ngang giữa chừng (hoặc người khác mượn session)
+ * thì TK đang dùng để nhận tiền vẫn nguyên vẹn, kỳ chi trả không bị treo oan.
  *
  * Bảng audit log ở dưới:
  *   - 1 row = 1 lần save (có thể chứa nhiều field đã đổi)
@@ -25,18 +28,27 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
+import { isApiError } from '../../api/client';
 import {
-  getBankInfo, upsertBankInfo, getBankAuditLog,
+  getBankInfo, requestBankChange, verifyBankChange, getBankAuditLog,
   parseChanges, type BankVerifyStatus, type BankAuditLogResponse,
 } from '../../api/bankService';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
-  Bell, LogOut, Menu, X, Save, Pencil,
+  LogOut, Menu, X, Save, Pencil,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, CheckCircle2, Clock, AlertTriangle,
   Eye, EyeOff, History, ChevronDown, ChevronRight,
   Megaphone, Database, UserCircle, Lock, Star,
+  Mail, ShieldCheck, RefreshCw,
 } from 'lucide-react';
+import BrandLogo from '../../components/BrandLogo';
+
+/** Phải khớp RESEND_COOLDOWN_SECONDS ở TeacherBankOtpService, nếu không nút "Gửi lại" mở sớm và ăn lỗi 429. */
+const RESEND_COOLDOWN_MS = 60_000;
+
+/** Các mã lỗi khiến yêu cầu bị huỷ hẳn ở server — nhập tiếp cũng vô ích, phải làm lại từ đầu. */
+const OTP_DEAD_CODES = ['BANK_OTP_EXPIRED', 'BANK_OTP_NOT_FOUND', 'BANK_OTP_TOO_MANY_ATTEMPTS'];
 
 type VerifyStatus = 'pending' | 'verified' | 'rejected';
 
@@ -123,7 +135,7 @@ function VerifyStatusBadge({ status }: { status: VerifyStatus }) {
   const config = {
     pending: {
       icon: <Clock className="w-3.5 h-3.5" />,
-      label: 'Chờ Admin xác minh',
+      label: 'Chưa xác minh',
       className: 'bg-amber-500/10 text-amber-600',
     },
     verified: {
@@ -184,6 +196,16 @@ export default function TeacherBankPage() {
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  // ── State của bước xác nhận bằng mã email ────────────────────────
+  const [dialogStep, setDialogStep] = useState<'confirm' | 'otp'>('confirm');
+  const [otpCode, setOtpCode] = useState('');
+  const [maskedEmail, setMaskedEmail] = useState('');
+  const [expiresAt, setExpiresAt] = useState(0);
+  const [lastSentAt, setLastSentAt] = useState(0);
+  const [verifying, setVerifying] = useState(false);
+  // Nhịp 1 giây để đồng hồ đếm ngược và nút "Gửi lại" tự cập nhật.
+  const [now, setNow] = useState(() => Date.now());
+
   const navigate = useNavigate();
   const location = useLocation();
   const logout = useAuthStore(state => state.logout);
@@ -207,6 +229,16 @@ export default function TeacherBankPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Chỉ chạy khi đang ở màn nhập mã — không để interval sống suốt vòng đời trang.
+  useEffect(() => {
+    if (!showConfirm || dialogStep !== 'otp') return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [showConfirm, dialogStep]);
+
+  const secondsLeft = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  const resendIn = Math.max(0, Math.ceil((lastSentAt + RESEND_COOLDOWN_MS - now) / 1000));
+
   function startEdit() {
     setForm(bank ?? EMPTY_BANK);
     setReasonInput('');
@@ -215,7 +247,7 @@ export default function TeacherBankPage() {
 
   function cancelEdit() {
     setMode('view');
-    setShowConfirm(false);
+    closeDialog();
   }
 
   function computeChanges(): FieldChange[] {
@@ -241,23 +273,67 @@ export default function TeacherBankPage() {
       notify.error('Số tài khoản chỉ được chứa chữ số');
       return;
     }
-    if (bank && computeChanges().length === 0) {
+    // TK chưa xác minh vẫn được phép gửi mã dù không sửa gì — đó là đường để
+    // xác minh lại TK cũ. Chỉ chặn khi TK đã verified mà không có thay đổi nào.
+    if (bank && bank.verifyStatus === 'verified' && computeChanges().length === 0) {
       notify.info('Không có thay đổi nào để lưu');
       return;
     }
+    setDialogStep('confirm');
     setShowConfirm(true);
   }
 
-  async function confirmSave() {
+  function closeDialog() {
+    setShowConfirm(false);
+    setDialogStep('confirm');
+    setOtpCode('');
+  }
+
+  /**
+   * Gửi mã xác nhận về email. Nhận payload qua tham số thay vì đọc `form` để
+   * luồng "xác minh TK hiện tại" không phải chờ setForm kịp cập nhật state.
+   */
+  async function sendOtp(payload: BankInfo, reason: string, isResend = false) {
     setSaving(true);
     try {
-      const result = await upsertBankInfo({
-        bankName: form.bankName,
-        accountNumber: form.accountNumber,
-        accountHolder: form.accountHolder,
-        branch: form.branch,
-        reason: reasonInput.trim() || undefined,
+      const res = await requestBankChange({
+        bankName: payload.bankName,
+        accountNumber: payload.accountNumber,
+        accountHolder: payload.accountHolder,
+        branch: payload.branch,
+        reason: reason.trim() || undefined,
       });
+      setMaskedEmail(res.maskedEmail);
+      setExpiresAt(new Date(res.expiresAt).getTime());
+      setLastSentAt(Date.now());
+      setNow(Date.now());
+      setOtpCode('');
+      setDialogStep('otp');
+      setShowConfirm(true);
+      notify.success(isResend ? 'Đã gửi lại mã xác nhận' : `Đã gửi mã xác nhận tới ${res.maskedEmail}`);
+    } catch (err) {
+      notify.error(isApiError(err) ? err.message : 'Không gửi được mã xác nhận. Vui lòng thử lại.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** TK cũ đang ở trạng thái chưa xác minh — gửi mã mà không đổi thông tin gì. */
+  function verifyExistingAccount() {
+    if (!bank) return;
+    setForm(bank);
+    setReasonInput('');
+    sendOtp(bank, '');
+  }
+
+  async function submitOtp() {
+    if (!/^\d{6}$/.test(otpCode)) {
+      notify.error('Mã xác nhận gồm 6 chữ số');
+      return;
+    }
+    setVerifying(true);
+    try {
+      const result = await verifyBankChange(otpCode);
       setBank({
         bankName: result.bankName,
         accountNumber: result.accountNumber,
@@ -267,13 +343,17 @@ export default function TeacherBankPage() {
       });
       const logs = await getBankAuditLog();
       setAuditLog(mapAuditLog(logs));
-      setShowConfirm(false);
+      closeDialog();
       setMode('view');
-      notify.success('Đã cập nhật TK ngân hàng. Admin sẽ xác minh lại.');
-    } catch {
-      notify.error('Không thể lưu thông tin. Vui lòng thử lại.');
+      notify.success('Đã xác minh và lưu TK ngân hàng');
+    } catch (err) {
+      notify.error(isApiError(err) ? err.message : 'Không xác minh được mã. Vui lòng thử lại.');
+      // Server đã huỷ yêu cầu → đóng dialog để GV bắt đầu lại, tránh gõ mã vào chỗ trống.
+      if (isApiError(err) && OTP_DEAD_CODES.includes(err.code)) {
+        closeDialog();
+      }
     } finally {
-      setSaving(false);
+      setVerifying(false);
     }
   }
 
@@ -308,7 +388,7 @@ export default function TeacherBankPage() {
       `}>
         <div className="p-6 flex items-center justify-between border-b border-outline-variant/20">
           <Link to="/teacher" className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary text-on-primary rounded-xl flex items-center justify-center font-extrabold text-lg shadow-md shadow-primary/20">B</div>
+            <BrandLogo size="sm" />
             <div>
               <p className="font-extrabold text-on-surface text-sm">Bee Academy</p>
               <p className="text-xs text-on-surface-variant font-medium">Cổng Giáo Viên</p>
@@ -408,13 +488,24 @@ export default function TeacherBankPage() {
               </div>
             )}
 
-            {/* Cảnh báo nếu pending */}
-            {bank?.verifyStatus === 'pending' && (
-              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-4 flex items-start gap-2">
+            {/* TK chưa xác minh — GV tự xác minh bằng mã gửi về email, không cần chờ Admin */}
+            {bank && bank.verifyStatus !== 'verified' && mode === 'view' && (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-4 flex items-start gap-2 flex-wrap">
                 <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-amber-700">
-                  TK đang chờ Admin xác minh. Khi được xác minh, bạn mới có thể nhận chuyển khoản cuối kỳ.
+                <p className="text-sm text-amber-700 flex-1 min-w-[16rem]">
+                  TK chưa được xác minh nên chưa dùng để nhận chuyển khoản cuối kỳ được.
+                  Bấm xác minh để nhận mã qua email.
                 </p>
+                <button
+                  onClick={verifyExistingAccount}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-60"
+                >
+                  {saving
+                    ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    : <ShieldCheck className="w-3.5 h-3.5" />}
+                  Xác minh qua email
+                </button>
               </div>
             )}
 
@@ -656,59 +747,146 @@ export default function TeacherBankPage() {
       </div>
 
       {/* ═════════════════════════════════════════════════════════════
-          CONFIRM DIALOG — Hiển thị overlay khi GV bấm "Lưu"
+          DIALOG 2 BƯỚC — (1) soát lại thay đổi → (2) nhập mã gửi về email
+
+          Bước 1 chỉ là rà soát phía client; DB chỉ đổi sau khi bước 2 thành công.
       ═════════════════════════════════════════════════════════════ */}
       <AnimatePresence>
         {showConfirm && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-            onClick={() => setShowConfirm(false)}
+            // Ở bước nhập mã, click ra ngoài KHÔNG đóng — lỡ tay là mất mã vừa gõ.
+            onClick={dialogStep === 'confirm' ? closeDialog : undefined}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
               onClick={e => e.stopPropagation()}  // chặn click thoát khi click vào dialog
               className="bg-surface-container-lowest rounded-2xl shadow-2xl max-w-lg w-full p-6"
             >
-              <div className="flex items-start gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center flex-shrink-0">
-                  <AlertTriangle className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-on-surface text-lg">Xác nhận thay đổi TK</h3>
-                  <p className="text-sm text-on-surface-variant mt-1">
-                    Thay đổi sẽ được ghi vào audit log và TK sẽ chờ Admin xác minh lại.
-                  </p>
-                </div>
-              </div>
-
-              {/* Liệt kê các thay đổi */}
-              <div className="bg-surface-container/50 rounded-xl p-4 mb-4 space-y-2 max-h-60 overflow-y-auto">
-                {computeChanges().map((c, idx) => (
-                  <div key={idx} className="text-sm">
-                    <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-0.5">{c.field}</p>
-                    <p className="text-red-500/80 line-through text-xs">{c.oldValue}</p>
-                    <p className="text-green-600 font-semibold">{c.newValue}</p>
+              {/* ── BƯỚC 1: soát lại thay đổi ───────────────────── */}
+              {dialogStep === 'confirm' && (
+                <>
+                  <div className="flex items-start gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-on-surface text-lg">Xác nhận thay đổi TK</h3>
+                      <p className="text-sm text-on-surface-variant mt-1">
+                        Hệ thống sẽ gửi mã xác nhận về email của bạn. Thông tin chỉ được lưu sau khi bạn nhập đúng mã.
+                      </p>
+                    </div>
                   </div>
-                ))}
-              </div>
 
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  onClick={() => setShowConfirm(false)}
-                  className="px-5 py-2.5 text-sm font-bold text-on-surface-variant hover:bg-surface-container rounded-xl transition-colors"
-                >
-                  Hủy
-                </button>
-                <button
-                  onClick={confirmSave}
-                  disabled={saving}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-60"
-                >
-                  {saving && <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />}
-                  Xác nhận lưu
-                </button>
-              </div>
+                  <div className="bg-surface-container/50 rounded-xl p-4 mb-4 space-y-2 max-h-60 overflow-y-auto">
+                    {!bank ? (
+                      <div className="text-sm space-y-1">
+                        <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wide">Thông tin sẽ được lưu</p>
+                        <p className="text-on-surface font-semibold">{form.bankName}</p>
+                        <p className="text-on-surface font-mono font-bold">{form.accountNumber}</p>
+                        <p className="text-on-surface font-semibold uppercase">{form.accountHolder}</p>
+                        <p className="text-on-surface-variant">{form.branch}</p>
+                      </div>
+                    ) : computeChanges().length === 0 ? (
+                      <p className="text-sm text-on-surface-variant">
+                        Không đổi thông tin nào — chỉ xác minh lại TK hiện tại.
+                      </p>
+                    ) : computeChanges().map((c, idx) => (
+                      <div key={idx} className="text-sm">
+                        <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-0.5">{c.field}</p>
+                        <p className="text-red-500/80 line-through text-xs">{c.oldValue}</p>
+                        <p className="text-green-600 font-semibold">{c.newValue}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={closeDialog}
+                      className="px-5 py-2.5 text-sm font-bold text-on-surface-variant hover:bg-surface-container rounded-xl transition-colors"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      onClick={() => sendOtp(form, reasonInput)}
+                      disabled={saving}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-60"
+                    >
+                      {saving
+                        ? <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                        : <Mail className="w-4 h-4" />}
+                      Gửi mã xác nhận
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* ── BƯỚC 2: nhập mã từ email ────────────────────── */}
+              {dialogStep === 'otp' && (
+                <>
+                  <div className="flex items-start gap-3 mb-5">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-on-surface text-lg">Nhập mã xác nhận</h3>
+                      <p className="text-sm text-on-surface-variant mt-1">
+                        Mã gồm 6 chữ số đã gửi tới <span className="font-bold text-on-surface">{maskedEmail}</span>.
+                      </p>
+                    </div>
+                  </div>
+
+                  <input
+                    type="text"
+                    value={otpCode}
+                    onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    onKeyDown={e => { if (e.key === 'Enter') submitOtp(); }}
+                    placeholder="000000"
+                    inputMode="numeric"
+                    autoFocus
+                    className="w-full px-4 py-3 mb-3 text-center text-2xl font-mono font-bold tracking-[0.5em] bg-surface-container border border-outline-variant rounded-xl focus:outline-none focus:border-primary text-on-surface placeholder:text-on-surface-variant/40"
+                  />
+
+                  <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+                    <p className="text-xs text-on-surface-variant">
+                      {secondsLeft > 0
+                        ? <>Mã hết hạn sau <span className="font-bold text-on-surface">
+                            {String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:
+                            {String(secondsLeft % 60).padStart(2, '0')}
+                          </span></>
+                        : <span className="text-red-500 font-semibold">Mã đã hết hạn, vui lòng gửi lại.</span>}
+                    </p>
+                    <button
+                      onClick={() => sendOtp(form, reasonInput, true)}
+                      disabled={saving || resendIn > 0}
+                      className="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline disabled:text-on-surface-variant disabled:no-underline disabled:cursor-not-allowed"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${saving ? 'animate-spin' : ''}`} />
+                      {resendIn > 0 ? `Gửi lại sau ${resendIn}s` : 'Gửi lại mã'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={closeDialog}
+                      className="px-5 py-2.5 text-sm font-bold text-on-surface-variant hover:bg-surface-container rounded-xl transition-colors"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      onClick={submitOtp}
+                      disabled={verifying || otpCode.length !== 6 || secondsLeft === 0}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-primary text-on-primary text-sm font-bold rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-60"
+                    >
+                      {verifying
+                        ? <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                        : <Save className="w-4 h-4" />}
+                      Xác nhận & lưu
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           </motion.div>
         )}

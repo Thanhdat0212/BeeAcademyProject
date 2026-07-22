@@ -15,7 +15,7 @@ import java.util.UUID;
 /**
  * Danh mục môn học (Toán học, Ngữ văn, Tiếng Anh, …).
  *
- * <p>Bảng đã có sẵn 8 row seed trên Supabase (toan-hoc, ngu-van, …),
+ * <p>Bảng được seed sẵn các môn học trên Supabase (toan-hoc, ngu-van, …),
  * Hibernate KHÔNG được sửa schema ({@code ddl-auto=none}).
  *
  * <p>{@code slug} là khoá tự nhiên dùng để filter từ URL (vd:

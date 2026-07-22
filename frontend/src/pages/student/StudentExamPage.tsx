@@ -22,10 +22,12 @@ import {
   getLatestExamRetakeRequest,
   getStudentExam,
   getStudentExamResult,
+  recordExamIntegrityEvent,
   requestExamRetake,
   saveStudentExamDraft,
   submitStudentExam,
   type ExamRetakeRequest,
+  type ExamIntegrityEventType,
   type StudentExam,
   type StudentExamAnswerImageUpload,
   type StudentExamQuestion,
@@ -41,6 +43,9 @@ const MAX_ANSWER_IMAGE_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_ANSWER_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const DEFAULT_FILE_UPLOAD_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'];
 const MAX_ANSWER_IMAGE_COUNT = 10;
+// Hộp thoại chọn file của hệ điều hành làm cửa sổ trình duyệt mất focus (và có thể
+// rớt fullscreen) — trong khoảng ân hạn này các tín hiệu đó không tính là gian lận.
+const FILE_PICKER_GRACE_MS = 120000;
 
 function formatPoints(value: number | null | undefined) {
   if (value == null) return '0';
@@ -147,6 +152,16 @@ function formatRemainingTime(totalSeconds: number) {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 interface PersistedExamDraft {
   examId: string;
   updatedAt: string;
@@ -201,9 +216,15 @@ export default function StudentExamPage() {
   const [retakeRequest, setRetakeRequest] = useState<ExamRetakeRequest | null>(null);
   const [retakeReason, setRetakeReason] = useState('');
   const [sendingRetake, setSendingRetake] = useState(false);
+  const [retakeClockMs, setRetakeClockMs] = useState(() => Date.now());
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [integrityViolations, setIntegrityViolations] = useState(0);
+  const [fullscreenActive, setFullscreenActive] = useState(() => Boolean(document.fullscreenElement));
   const autoSubmittingRef = useRef(false);
+  const submitLatestRef = useRef<(forceSubmit?: boolean) => Promise<void>>(async () => {});
+  const integrityEventQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastIntegritySignalAtRef = useRef(0);
+  const filePickerGraceUntilRef = useRef(0);
   const orderedQuestions = useMemo(
     () => orderQuestionsObjectiveFirst(exam?.questions ?? []),
     [exam],
@@ -236,6 +257,10 @@ export default function StudentExamPage() {
         setSubmitError('');
         setSubmission(null);
         setIntegrityViolations(0);
+        autoSubmittingRef.current = false;
+        integrityEventQueueRef.current = Promise.resolve();
+        lastIntegritySignalAtRef.current = 0;
+        filePickerGraceUntilRef.current = 0;
         setRemainingSeconds(persisted?.remainingSeconds ?? Math.max(0, data.durationMinutes * 60));
         if (persisted) {
           notify.success('Đã khôi phục bài làm nháp trên thiết bị này.');
@@ -296,6 +321,13 @@ export default function StudentExamPage() {
     if (!exam || loading || submission) return;
     setRemainingSeconds(prev => prev ?? Math.max(0, exam.durationMinutes * 60));
   }, [exam, loading, submission]);
+
+  useEffect(() => {
+    if (!retakeRequest?.cooldownUntil) return;
+    setRetakeClockMs(Date.now());
+    const timerId = window.setInterval(() => setRetakeClockMs(Date.now()), 1000);
+    return () => window.clearInterval(timerId);
+  }, [retakeRequest?.cooldownUntil]);
 
   useEffect(() => {
     if (!exam?.requireFullscreen || submission || document.fullscreenElement) return;
@@ -360,6 +392,26 @@ export default function StudentExamPage() {
       notify.error(isApiError(err) ? err.message : 'Không thể tải tệp đính kèm.');
     } finally {
       setUploadingImages(prev => ({ ...prev, [questionId]: false }));
+    }
+  }
+
+  function beginFilePickerGrace() {
+    filePickerGraceUntilRef.current = Date.now() + FILE_PICKER_GRACE_MS;
+    const closeGrace = () => {
+      window.removeEventListener('focus', closeGrace);
+      // Blur/fullscreenchange của hộp thoại có thể tới ngay sau khi cửa sổ nhận lại focus.
+      window.setTimeout(() => {
+        filePickerGraceUntilRef.current = 0;
+      }, 1500);
+    };
+    window.addEventListener('focus', closeGrace);
+  }
+
+  async function restoreFullscreen() {
+    try {
+      await document.documentElement.requestFullscreen?.();
+    } catch {
+      notify.error('Trình duyệt chặn bật fullscreen. Nhấn F11 để bật thủ công.');
     }
   }
 
@@ -456,6 +508,8 @@ export default function StudentExamPage() {
     }
   }
 
+  submitLatestRef.current = handleSubmitExam;
+
   async function handleSendRetakeRequest() {
     if (!courseId || sendingRetake) return;
     if (retakeReason.trim().length < 10) {
@@ -531,28 +585,66 @@ export default function StudentExamPage() {
   useEffect(() => {
     if (!exam?.requireFullscreen || submission) return;
 
-    const recordViolation = () => {
-      if (autoSubmittingRef.current || submission) return;
-      setIntegrityViolations(current => {
-        const next = current + 1;
-        if (next >= 3) {
-          autoSubmittingRef.current = true;
-          notify.error('Bạn đã rời tab/fullscreen quá 3 lần. Hệ thống sẽ tự nộp bài.');
-          window.setTimeout(() => handleSubmitExam(true), 0);
-        } else {
-          notify.error(`Cảnh báo chống gian lận ${next}/3: không rời tab hoặc fullscreen.`);
-        }
-        return next;
-      });
+    const recordViolation = (eventType: ExamIntegrityEventType) => {
+      if (!courseId || autoSubmittingRef.current || submission || submitting) return;
+
+      // Hộp thoại chọn file luôn kéo theo blur (và đôi khi thoát fullscreen) dù học sinh
+      // vẫn ở nguyên trang. Chỉ TAB_HIDDEN mới chứng minh được là đã rời tab thật.
+      if (eventType !== 'TAB_HIDDEN' && Date.now() < filePickerGraceUntilRef.current) return;
+
+      // A single tab switch often fires blur + visibility/fullscreen together.
+      // Coalesce those browser signals into one audited violation.
+      const now = Date.now();
+      if (now - lastIntegritySignalAtRef.current < 800) return;
+      lastIntegritySignalAtRef.current = now;
+
+      const eventId = window.crypto.randomUUID();
+      integrityEventQueueRef.current = integrityEventQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          let recorded;
+          try {
+            recorded = await recordExamIntegrityEvent(
+              courseId,
+              parsedSlotIndex,
+              eventId,
+              eventType,
+            );
+          } catch {
+            // Retry with the same idempotency key, so the server cannot double count it.
+            await new Promise(resolve => window.setTimeout(resolve, 800));
+            recorded = await recordExamIntegrityEvent(
+              courseId,
+              parsedSlotIndex,
+              eventId,
+              eventType,
+            );
+          }
+
+          setIntegrityViolations(recorded.violationCount);
+          if (recorded.autoSubmitRequired) {
+            autoSubmittingRef.current = true;
+            notify.error('Vi phạm chống gian lận lần thứ 4. Hệ thống sẽ tự nộp bài.');
+            window.setTimeout(() => submitLatestRef.current(true), 0);
+          } else {
+            notify.error(
+              `Cảnh báo chống gian lận ${recorded.violationCount}/3: không rời tab hoặc fullscreen.`,
+            );
+          }
+        })
+        .catch(() => {
+          notify.error('Không thể ghi nhận sự kiện chống gian lận. Vui lòng kiểm tra kết nối.');
+        });
     };
 
     const handleVisibility = () => {
-      if (document.hidden) recordViolation();
+      if (document.hidden) recordViolation('TAB_HIDDEN');
     };
     const handleFullscreen = () => {
-      if (!document.fullscreenElement) recordViolation();
+      setFullscreenActive(Boolean(document.fullscreenElement));
+      if (!document.fullscreenElement) recordViolation('FULLSCREEN_EXIT');
     };
-    const handleBlur = () => recordViolation();
+    const handleBlur = () => recordViolation('WINDOW_BLUR');
 
     document.addEventListener('visibilitychange', handleVisibility);
     document.addEventListener('fullscreenchange', handleFullscreen);
@@ -562,7 +654,7 @@ export default function StudentExamPage() {
       document.removeEventListener('fullscreenchange', handleFullscreen);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [exam?.requireFullscreen, submission, submitting]);
+  }, [courseId, exam?.requireFullscreen, parsedSlotIndex, submission, submitting]);
 
   useEffect(() => {
     if (!exam || loading || submitting || submission || remainingSeconds == null) return;
@@ -595,9 +687,18 @@ export default function StudentExamPage() {
   const isTimeUrgent = remainingSeconds != null && remainingSeconds <= 300;
   const displayTime = remainingSeconds == null
     ? exam
-      ? `${exam.durationMinutes} phut`
+      ? `${exam.durationMinutes} phút`
       : '--:--'
     : formatRemainingTime(remainingSeconds);
+  const cooldownUntilMs = retakeRequest?.cooldownUntil
+    ? new Date(retakeRequest.cooldownUntil).getTime()
+    : 0;
+  const retakeCooldownActive = cooldownUntilMs > retakeClockMs;
+  const retakeRequestLimitReached = (retakeRequest?.requestCount ?? 0) >= 3;
+  const canSendRetakeRequest = retakeRequest?.status !== 'PENDING'
+    && retakeRequest?.examEnrollmentStatus !== 'RETAKE_APPROVED'
+    && !retakeCooldownActive
+    && !retakeRequestLimitReached;
 
   return (
     <div className="min-h-screen bg-surface font-sans">
@@ -840,6 +941,7 @@ export default function StudentExamPage() {
                                   multiple
                                   disabled={Boolean(submission) || isUploading}
                                   className="hidden"
+                                  onClick={beginFilePickerGrace}
                                   onChange={event => {
                                     handleAddEssayImage(question, event.target.files);
                                     event.target.value = '';
@@ -944,6 +1046,7 @@ export default function StudentExamPage() {
                         <div className="space-y-2">
                           {question.options.map((option, optionIndex) => {
                             const checked = selected.includes(optionIndex);
+                            const optionImage = question.metadata?.optionImages?.[optionIndex];
                             return (
                               <button
                                 key={`${question.id}-${optionIndex}`}
@@ -965,8 +1068,15 @@ export default function StudentExamPage() {
                                   <span className="mt-1 flex-shrink-0 text-primary">
                                     {checked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                                   </span>
-                                  <span className="min-w-0 text-sm font-medium leading-relaxed text-on-surface">
+                                  <span className="min-w-0 flex-1 text-sm font-medium leading-relaxed text-on-surface">
                                     <LatexText content={option} />
+                                    {optionImage && (
+                                      <img
+                                        src={optionImage}
+                                        alt={`Đáp án ${OPTION_LABELS[optionIndex] ?? optionIndex + 1}`}
+                                        className="mt-2 max-h-40 rounded-xl border border-outline-variant/40 object-contain"
+                                      />
+                                    )}
                                   </span>
                                 </div>
                               </button>
@@ -1003,13 +1113,22 @@ export default function StudentExamPage() {
                   </p>
                   {exam.requireFullscreen && (
                     <p className={integrityViolations > 0 ? 'font-bold text-red-500' : ''}>
-                      Cảnh báo rời tab/fullscreen: {integrityViolations}/3
+                      Vi phạm rời tab/fullscreen: {Math.min(integrityViolations, 4)}/4
                     </p>
                   )}
                   {hasUploadingImages && (
                     <p className="font-bold text-amber-600">Đang tải ảnh đáp án, vui lòng đợi một chút.</p>
                   )}
                 </div>
+                {exam.requireFullscreen && !fullscreenActive && !submission && (
+                  <button
+                    type="button"
+                    onClick={restoreFullscreen}
+                    className="mt-3 w-full rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-extrabold text-amber-800 hover:bg-amber-100"
+                  >
+                    Bật lại toàn màn hình
+                  </button>
+                )}
                 {submitError && (
                   <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
                     {submitError}
@@ -1020,6 +1139,12 @@ export default function StudentExamPage() {
                     <p className="text-xs font-extrabold text-amber-800">
                       Yêu cầu mở thêm lượt làm bài
                     </p>
+                    {retakeRequest && (
+                      <p className="text-[11px] font-semibold text-amber-700">
+                        Yêu cầu {retakeRequest.requestCount}/3 · Đã duyệt {retakeRequest.approvalCount}/3 ·{' '}
+                        {retakeRequest.examEnrollmentStatus}
+                      </p>
+                    )}
                     {retakeRequest?.status === 'PENDING' ? (
                       <p className="text-xs font-semibold text-amber-700">
                         Yêu cầu của bạn đang chờ giáo viên duyệt. Bạn sẽ nhận thông báo khi có kết quả.
@@ -1027,15 +1152,21 @@ export default function StudentExamPage() {
                     ) : retakeRequest?.status === 'APPROVED' ? (
                       <p className="text-xs font-semibold text-green-700">
                         Yêu cầu gần nhất đã được duyệt (+{retakeRequest.extraAttempts} lượt).
-                        Nếu vẫn bị khóa, bạn đã dùng hết lượt được cấp — có thể gửi yêu cầu mới bên dưới.
+                        {retakeRequest.examEnrollmentStatus === 'RETAKE_APPROVED'
+                          ? ' Bạn có thể tiếp tục làm bài trong thời hạn được cấp.'
+                          : ' Lượt được cấp đã dùng hết hoặc hết hạn.'}
                       </p>
                     ) : retakeRequest?.status === 'REJECTED' ? (
                       <p className="text-xs font-semibold text-red-700">
                         Yêu cầu trước bị từ chối: {retakeRequest.decidedReason ?? 'không có lý do'}.
-                        Bạn có thể gửi lại yêu cầu mới bên dưới.
+                        {retakeCooldownActive && retakeRequest.cooldownUntil
+                          ? ` Có thể gửi lại sau ${formatDateTime(retakeRequest.cooldownUntil)}.`
+                          : retakeRequestLimitReached
+                            ? ' Bạn đã dùng hết 3 yêu cầu cho bài kiểm tra này.'
+                            : ' Bạn có thể gửi lại yêu cầu mới bên dưới.'}
                       </p>
                     ) : null}
-                    {retakeRequest?.status !== 'PENDING' && (
+                    {canSendRetakeRequest && (
                       <>
                         <textarea
                           value={retakeReason}

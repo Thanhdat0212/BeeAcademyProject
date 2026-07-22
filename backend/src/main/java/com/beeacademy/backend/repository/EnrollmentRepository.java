@@ -48,6 +48,8 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, UUID> {
 
     Optional<Enrollment> findByStudentIdAndCourseId(UUID studentId, UUID courseId);
 
+    List<Enrollment> findByCourseIdAndStudentIdIn(UUID courseId, List<UUID> studentIds);
+
     /** Tất cả enrollment thuộc một nhóm khóa học. */
     List<Enrollment> findByCourseIdIn(List<UUID> courseIds);
 

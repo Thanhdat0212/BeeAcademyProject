@@ -1,6 +1,11 @@
 package com.beeacademy.backend.service;
 
 import com.beeacademy.backend.client.SupabaseStorageClient;
+import com.beeacademy.backend.dto.request.ConfirmDocumentUploadRequest;
+import com.beeacademy.backend.dto.request.ConfirmUploadRequest;
+import com.beeacademy.backend.dto.request.ConfirmVideoUploadRequest;
+import com.beeacademy.backend.dto.request.SignedUploadRequest;
+import com.beeacademy.backend.dto.response.SignedUploadResponse;
 import com.beeacademy.backend.dto.response.UploadResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
@@ -10,8 +15,11 @@ import com.beeacademy.backend.model.Lesson;
 import com.beeacademy.backend.repository.CourseDocumentRepository;
 import com.beeacademy.backend.repository.CourseRepository;
 import com.beeacademy.backend.repository.LessonRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -19,11 +27,14 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Xử lý upload nội dung khóa học lên Supabase Storage (Phase 2).
@@ -77,36 +88,69 @@ public class ContentUploadService {
 
     private static final long MAX_VIDEO_BYTES = 2L * 1024 * 1024 * 1024; // 2 GB
     private static final long MAX_DOC_BYTES   = 100L * 1024 * 1024;      // 100 MB
-    private static final long MAX_SUBMISSION_BYTES = 20L * 1024 * 1024;  // 20 MB
+    private static final long MAX_SUBMISSION_BYTES = 25L * 1024 * 1024;  // UC16: 25 MB
     private static final long MAX_THUMBNAIL_BYTES = 5L * 1024 * 1024; // 5 MB
     private static final long MAX_QUESTION_IMAGE_BYTES = 5L * 1024 * 1024;
     private static final long MAX_QUESTION_AUDIO_BYTES = 20L * 1024 * 1024;
+
+    // Không cho phép dấu chấm ở giữa path → chặn "../" thoát ra khỏi thư mục được cấp vé.
+    private static final Pattern SAFE_OBJECT_PATH = Pattern.compile("^[0-9a-zA-Z/_-]+\\.[a-z0-9]{1,8}$");
+    private static final Pattern SAFE_EXTENSION   = Pattern.compile("^[a-z0-9]{1,8}$");
 
     private final SupabaseStorageClient  storageClient;
     private final CourseRepository       courseRepository;
     private final LessonRepository       lessonRepository;
     private final CourseDocumentRepository documentRepository;
+    private final JdbcTemplate           jdbcTemplate;
+    private final ObjectMapper           objectMapper;
 
     // ========================================================================
     // Video upload (Phase 2)
     // ========================================================================
 
     /**
-     * Upload video bài giảng lên private bucket.
+     * Cấp vé cho browser upload video bài giảng THẲNG lên Supabase.
      *
-     * <p>Path = {@code {courseId}/{chapterId}/{lessonId}/{uuid}.ext}
-     * — tạo object mới cho mỗi lần upload, rồi cleanup file cũ sau khi DB commit.
+     * <p>Backend chỉ kiểm tra quyền rồi ký URL — không nhận byte nào của file.
+     * Trước đây video 2GB đi xuyên qua Spring, chiếm thread và RAM của server
+     * suốt vài phút; giờ luồng byte đi thẳng từ máy giáo viên tới Storage.
+     *
+     * <p>Path = {@code {courseId}/{chapterId}/{lessonId}/{uuid}.ext} do backend
+     * quyết định, client không được chọn — đây là thứ chặn việc ghi đè file của
+     * khóa học khác.
+     */
+    @Transactional(readOnly = true)
+    public SignedUploadResponse createVideoUploadTicket(UUID courseId, UUID chapterId,
+                                                        UUID lessonId, UUID teacherId,
+                                                        SignedUploadRequest request) {
+        validateDeclaredFile(request, ALLOWED_VIDEO_MIME, MAX_VIDEO_BYTES,
+                             "video MP4, WebM hoặc QuickTime", "2GB");
+
+        Course course = courseRepository.findWithCategoryAndTeacherById(courseId)
+                .orElseThrow(() -> new ResourceNotFoundException("Course", courseId));
+        verifyOwner(course, teacherId);
+        lessonRepository.findByIdAndChapterId(lessonId, chapterId)
+                .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
+
+        String path = courseId + "/" + chapterId + "/" + lessonId + "/"
+                + UUID.randomUUID() + "." + safeExtension(request.filename(), "mp4");
+        String uploadUrl = storageClient.createSignedUploadUrl(VIDEO_BUCKET, path);
+
+        log.info("Cấp vé upload video: bucket={} path={}", VIDEO_BUCKET, path);
+        return new SignedUploadResponse(uploadUrl, path);
+    }
+
+    /**
+     * Ghi nhận video mà browser vừa upload xong vào bài giảng.
+     *
+     * <p>Kích thước và MIME client khai lúc xin vé chỉ là lời khai, nên ở đây
+     * phải hỏi lại Supabase metadata thật trước khi lưu DB.
      *
      * @return UploadResponse với storagePath (không có publicUrl — private bucket)
      */
     @Transactional
-    public UploadResponse uploadVideo(UUID courseId, UUID chapterId, UUID lessonId,
-                                       UUID teacherId, MultipartFile file,
-                                       Integer durationSec) {
-        validateFile(file, ALLOWED_VIDEO_MIME, MAX_VIDEO_BYTES,
-                     "video MP4, WebM hoặc QuickTime", "2GB");
-
-        // Load course để verify ownership
+    public UploadResponse confirmVideoUpload(UUID courseId, UUID chapterId, UUID lessonId,
+                                             UUID teacherId, ConfirmVideoUploadRequest request) {
         Course course = courseRepository.findWithCategoryAndTeacherById(courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Course", courseId));
         verifyOwner(course, teacherId);
@@ -116,26 +160,29 @@ public class ContentUploadService {
         Lesson lesson = lessonRepository.findByIdAndChapterId(lessonId, chapterId)
                 .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
 
-        String oldPath = lesson.getVideoStoragePath();
-        String ext  = getExtension(file.getOriginalFilename(), "mp4");
-        String path = courseId + "/" + chapterId + "/" + lessonId + "/"
-                + UUID.randomUUID() + "." + ext;
-
-        storageClient.upload(VIDEO_BUCKET, path,
-                             file.getContentType(), file.getResource(), file.getSize());
+        String path = requireObjectPathUnder(request.storagePath(),
+                courseId + "/" + chapterId + "/" + lessonId);
+        // Đăng ký trước khi kiểm tra: file sai loại/quá lớn sẽ bị xoá khi tx rollback,
+        // không để lại rác chiếm quota Storage.
         deleteUploadedObjectOnRollback(VIDEO_BUCKET, path);
+        var stat = requireUploadedObject(VIDEO_BUCKET, path, ALLOWED_VIDEO_MIME, MAX_VIDEO_BYTES,
+                                         "video MP4, WebM hoặc QuickTime", "2GB");
 
+        String oldPath = lesson.getVideoStoragePath();
         // Lưu kèm duration do trình duyệt đọc từ metadata video trước khi upload.
-        int normalizedDuration = durationSec != null && durationSec > 0 ? durationSec : 0;
+        int normalizedDuration = request.durationSec() != null && request.durationSec() > 0
+                ? request.durationSec() : 0;
         lesson.setVideoStoragePath(path, normalizedDuration);
         // BUG FIX: save lesson trực tiếp thay vì save cả Course aggregate
         // — tránh dirty-check toàn bộ chapters/lessons không liên quan
         lessonRepository.save(lesson);
+        auditContentChange(courseId, lessonId, "UPLOAD_VIDEO", "MAJOR", teacherId,
+                null, lessonAuditSnapshot(lesson));
         deleteVideoAfterCommit(oldPath);
 
-        log.info("Upload video thành công: bucket={} path={} size={}",
-                 VIDEO_BUCKET, path, file.getSize());
-        return new UploadResponse(path, null, file.getContentType(), file.getSize());
+        log.info("Ghi nhận video thành công: bucket={} path={} size={}",
+                 VIDEO_BUCKET, path, stat.size());
+        return new UploadResponse(path, null, stat.mimetype(), stat.size());
     }
 
     // ========================================================================
@@ -143,7 +190,29 @@ public class ContentUploadService {
     // ========================================================================
 
     /**
-     * Upload tài liệu (PDF/slide) lên private bucket và lưu metadata vào DB.
+     * Cấp vé cho browser upload tài liệu (PDF/slide) thẳng lên private bucket.
+     *
+     * <p>SECURITY: verify GV là chủ lesson NGAY TỪ BƯỚC KÝ — không cấp vé thì
+     * client không có cách nào ghi vào bucket.
+     */
+    @Transactional(readOnly = true)
+    public SignedUploadResponse createDocumentUploadTicket(UUID lessonId, UUID teacherId,
+                                                           SignedUploadRequest request) {
+        validateDeclaredFile(request, ALLOWED_DOC_MIME, MAX_DOC_BYTES,
+                             "PDF, PPTX hoặc DOCX", "100MB");
+        requireLessonOwnedBy(lessonId, teacherId);
+
+        // Path dùng randomUUID để tránh ghi đè khi upload nhiều file cùng lesson
+        String path = lessonId + "/" + UUID.randomUUID() + "."
+                + safeExtension(request.filename(), "pdf");
+        String uploadUrl = storageClient.createSignedUploadUrl(DOCS_BUCKET, path);
+
+        log.info("Cấp vé upload tài liệu: lessonId={} path={}", lessonId, path);
+        return new SignedUploadResponse(uploadUrl, path);
+    }
+
+    /**
+     * Lưu metadata tài liệu mà browser vừa upload xong.
      *
      * <p>BUG FIX so với phiên bản cũ:
      * <ol>
@@ -155,33 +224,20 @@ public class ContentUploadService {
      * @return UploadResponse không chứa public URL
      */
     @Transactional
-    public UploadResponse uploadDocument(UUID lessonId, UUID teacherId,
-                                          String displayName, String documentSlot,
-                                          MultipartFile file) {
-        validateFile(file, ALLOWED_DOC_MIME, MAX_DOC_BYTES,
-                     "PDF, PPTX hoặc DOCX", "100MB");
-
+    public UploadResponse confirmDocumentUpload(UUID lessonId, UUID teacherId,
+                                                ConfirmDocumentUploadRequest request) {
         // SECURITY FIX: verify GV là chủ lesson trước khi cho phép upload.
         // Trước đây không có check này → bất kỳ GV nào cũng upload được vào lesson của người khác.
-        Lesson lesson = lessonRepository.findById(lessonId)
-                .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
+        Lesson lesson = requireLessonOwnedBy(lessonId, teacherId);
 
-        // Lazy load: lesson.getChapter().getCourse() — OK vì đang trong @Transactional
-        UUID lessonOwnerId = lesson.getChapter().getCourse().getTeacher().getId();
-        if (!lessonOwnerId.equals(teacherId)) {
-            throw new BusinessException("FORBIDDEN",
-                    "Bạn không có quyền upload tài liệu cho bài giảng này.",
-                    org.springframework.http.HttpStatus.FORBIDDEN);
-        }
-
-        String ext      = getExtension(file.getOriginalFilename(), "pdf");
-        // Path dùng randomUUID để tránh ghi đè khi upload nhiều file cùng lesson
-        String path     = lessonId + "/" + UUID.randomUUID() + "." + ext;
-        String fileType = ext;
-
-        storageClient.upload(DOCS_BUCKET, path,
-                             file.getContentType(), file.getResource(), file.getSize());
+        String path = requireObjectPathUnder(request.storagePath(), lessonId.toString());
         deleteUploadedObjectOnRollback(DOCS_BUCKET, path);
+        var stat = requireUploadedObject(DOCS_BUCKET, path, ALLOWED_DOC_MIME, MAX_DOC_BYTES,
+                                         "PDF, PPTX hoặc DOCX", "100MB");
+
+        String displayName    = request.name();
+        String documentSlot   = request.slot();
+        String fileType       = safeExtension(path, "pdf");
 
         // DATA FIX: lưu CourseDocument vào DB để lesson detail có thể load lại được.
         // Hai vị trí cố định giúp frontend phân biệt tài liệu và slide sau khi reload.
@@ -193,13 +249,16 @@ public class ContentUploadService {
         };
         String name   = (displayName != null && !displayName.isBlank())
                         ? displayName.trim()
-                        : file.getOriginalFilename();
+                        : path.substring(path.lastIndexOf('/') + 1);
         CourseDocument doc = CourseDocument.create(lesson, name, null, path, DOCS_BUCKET,
-                                                   fileType, file.getSize(), position);
+                                                   fileType, stat.size(), position);
         documentRepository.save(doc);
+        Course course = lesson.getChapter().getCourse();
+        auditContentChange(course.getId(), lessonId, "UPLOAD_DOCUMENT", "MINOR", teacherId,
+                null, documentAuditSnapshot(doc));
 
-        log.info("Upload tài liệu private thành công: lessonId={} path={}", lessonId, path);
-        return new UploadResponse(path, null, fileType, file.getSize());
+        log.info("Ghi nhận tài liệu private thành công: lessonId={} path={}", lessonId, path);
+        return new UploadResponse(path, null, fileType, stat.size());
     }
 
     /**
@@ -210,7 +269,7 @@ public class ContentUploadService {
     public UploadResponse uploadAssignmentFile(UUID assignmentId, UUID studentId,
                                                 MultipartFile file) {
         validateFile(file, ALLOWED_SUBMISSION_MIME, MAX_SUBMISSION_BYTES,
-                     "PDF, DOCX, PPTX hoặc ảnh JPEG/PNG/WEBP", "20MB");
+                     "PDF, DOCX, PPTX hoặc ảnh JPEG/PNG/WEBP", "25MB");
 
         String ext  = getExtension(file.getOriginalFilename(), "pdf");
         String path = "assignment-submissions/" + assignmentId + "/" + studentId + "/"
@@ -242,8 +301,12 @@ public class ContentUploadService {
                     org.springframework.http.HttpStatus.FORBIDDEN);
         }
 
+        Map<String, Object> before = documentAuditSnapshot(document);
         documentRepository.delete(document);
         deleteLessonFilesAfterCommit(List.of(), List.of(document));
+        Course course = lesson.getChapter().getCourse();
+        auditContentChange(course.getId(), lessonId, "DELETE_DOCUMENT", "MINOR", teacherId,
+                before, null);
         log.info("Xóa tài liệu thành công: lessonId={} documentId={}", lessonId, documentId);
     }
 
@@ -271,20 +334,29 @@ public class ContentUploadService {
         return new UploadResponse(path, publicUrl, ext, file.getSize());
     }
 
-    @Transactional
-    public UploadResponse uploadCourseIntroVideo(UUID teacherId, MultipartFile file) {
-        validateFile(file, ALLOWED_VIDEO_MIME, MAX_VIDEO_BYTES,
-                     "video MP4, WebM hoac QuickTime", "2GB");
+    /** Cấp vé upload video giới thiệu — cũng có thể tới 2GB nên không cho đi qua backend. */
+    public SignedUploadResponse createIntroVideoUploadTicket(UUID teacherId,
+                                                             SignedUploadRequest request) {
+        validateDeclaredFile(request, ALLOWED_VIDEO_MIME, MAX_VIDEO_BYTES,
+                             "video MP4, WebM hoac QuickTime", "2GB");
 
-        String ext = getExtension(file.getOriginalFilename(), "mp4");
-        String path = "course-intros/" + teacherId + "/" + UUID.randomUUID() + "." + ext;
+        String path = "course-intros/" + teacherId + "/" + UUID.randomUUID() + "."
+                + safeExtension(request.filename(), "mp4");
+        String uploadUrl = storageClient.createSignedUploadUrl(PUBLIC_ASSET_BUCKET, path);
 
-        String publicUrl = storageClient.upload(PUBLIC_ASSET_BUCKET, path,
-                                                file.getContentType(), file.getResource(), file.getSize());
+        log.info("Cap ve upload course intro video: teacherId={} path={}", teacherId, path);
+        return new SignedUploadResponse(uploadUrl, path);
+    }
 
-        log.info("Upload course intro video thanh cong: teacherId={} path={} url={}",
+    public UploadResponse confirmIntroVideoUpload(UUID teacherId, ConfirmUploadRequest request) {
+        String path = requireObjectPathUnder(request.storagePath(), "course-intros/" + teacherId);
+        var stat = requireUploadedObject(PUBLIC_ASSET_BUCKET, path, ALLOWED_VIDEO_MIME,
+                                         MAX_VIDEO_BYTES, "video MP4, WebM hoac QuickTime", "2GB");
+        String publicUrl = storageClient.publicUrl(PUBLIC_ASSET_BUCKET, path);
+
+        log.info("Ghi nhan course intro video: teacherId={} path={} url={}",
                  teacherId, path, publicUrl);
-        return new UploadResponse(path, publicUrl, file.getContentType(), file.getSize());
+        return new UploadResponse(path, publicUrl, stat.mimetype(), stat.size());
     }
 
     @Transactional
@@ -302,6 +374,27 @@ public class ContentUploadService {
         log.info("Upload question image thanh cong: teacherId={} path={} url={}",
                 teacherId, path, publicUrl);
         return new UploadResponse(path, publicUrl, contentType, file.getSize());
+    }
+
+    /**
+     * Upload ảnh PNG do hệ thống tự sinh (ảnh tách từ PDF khi AI Scan) — nhận {@code byte[]}
+     * thay vì {@link MultipartFile} vì nguồn là ảnh đã giải mã sẵn trong bộ nhớ, không phải
+     * file người dùng gửi lên qua HTTP.
+     */
+    @Transactional
+    public UploadResponse uploadGeneratedQuestionImage(UUID teacherId, byte[] pngBytes) {
+        if (pngBytes == null || pngBytes.length == 0) {
+            throw new BusinessException("FILE_REQUIRED", "Ảnh trống.");
+        }
+        if (pngBytes.length > MAX_QUESTION_IMAGE_BYTES) {
+            throw new BusinessException("FILE_TOO_LARGE", "Ảnh vượt quá 5MB.");
+        }
+
+        String path = "question-assets/" + teacherId + "/images/" + UUID.randomUUID() + ".png";
+        String publicUrl = storageClient.upload(QUESTION_ASSET_BUCKET, path, "image/png", pngBytes);
+
+        log.info("Upload anh tach tu PDF thanh cong: teacherId={} path={}", teacherId, path);
+        return new UploadResponse(path, publicUrl, "image/png", (long) pngBytes.length);
     }
 
     @Transactional
@@ -401,6 +494,57 @@ public class ContentUploadService {
         return path == null || path.isBlank() ? null : bucket + "|" + path;
     }
 
+    private Map<String, Object> lessonAuditSnapshot(Lesson lesson) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", lesson.getId());
+        row.put("title", lesson.getTitle());
+        row.put("videoStoragePath", lesson.getVideoStoragePath());
+        row.put("hlsPlaylistUrl", lesson.getHlsPlaylistUrl());
+        row.put("videoProcessingStatus", lesson.getVideoProcessingStatus());
+        row.put("originalVideoRetentionUntil", lesson.getOriginalVideoRetentionUntil());
+        row.put("durationSec", lesson.getDurationSec());
+        return row;
+    }
+
+    private Map<String, Object> documentAuditSnapshot(CourseDocument document) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", document.getId());
+        row.put("lessonId", document.getLesson() != null ? document.getLesson().getId() : null);
+        row.put("name", document.getName());
+        row.put("fileType", document.getFileType());
+        row.put("storageBucket", document.getStorageBucket());
+        row.put("storagePath", document.getStoragePath());
+        row.put("fileSizeBytes", document.getFileSizeBytes());
+        row.put("position", document.getPosition());
+        return row;
+    }
+
+    private void auditContentChange(UUID courseId, UUID lessonId, String action,
+                                    String changeType, UUID actorId,
+                                    Map<String, Object> before, Map<String, Object> after) {
+        try {
+            jdbcTemplate.update("""
+                    INSERT INTO public.course_content_audit_logs
+                    (course_id, entity_type, entity_id, action, change_type, actor_id, before_state, after_state)
+                    VALUES (?, 'LESSON', ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+                    """,
+                    courseId, lessonId, action, changeType, actorId,
+                    toJsonOrNull(before), toJsonOrNull(after));
+        } catch (Exception ex) {
+            log.warn("Could not write upload audit log course={} lesson={} action={}",
+                    courseId, lessonId, action, ex);
+        }
+    }
+
+    private String toJsonOrNull(Map<String, Object> payload) {
+        if (payload == null) return null;
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
+    }
+
     private void deleteObjectQuietly(String bucket, String path) {
         try {
             storageClient.delete(bucket, path);
@@ -421,6 +565,83 @@ public class ContentUploadService {
         }
         log.warn("Không xác định được object path từ public URL: {}", publicUrl);
         return null;
+    }
+
+    /**
+     * Kiểm tra lời khai của client trước khi cấp vé upload.
+     *
+     * <p>Chỉ để từ chối sớm cho đỡ tốn công upload — không phải hàng rào bảo mật,
+     * vì client có thể khai sai. Hàng rào thật là {@link #requireUploadedObject}
+     * cộng với giới hạn MIME/size cấu hình ngay trên bucket Supabase.
+     */
+    private void validateDeclaredFile(SignedUploadRequest request, Set<String> allowedMime,
+                                      long maxBytes, String typeDesc, String sizeDesc) {
+        String mime = request.contentType() == null ? "" : request.contentType().trim().toLowerCase();
+        if (!allowedMime.contains(mime)) {
+            throw new BusinessException("INVALID_FILE_TYPE",
+                    "Chỉ chấp nhận " + typeDesc + ".");
+        }
+        if (request.sizeBytes() > maxBytes) {
+            throw new BusinessException("FILE_TOO_LARGE",
+                    "File không được vượt quá " + sizeDesc + ".");
+        }
+    }
+
+    /**
+     * Chặn client trỏ bừa sang object của người khác khi gọi confirm.
+     *
+     * <p>Path phải nằm đúng trong thư mục mà backend đã cấp vé, và không được
+     * chứa ký tự lạ — pattern loại luôn dấu chấm ở giữa nên {@code ../} không lọt.
+     */
+    private String requireObjectPathUnder(String storagePath, String requiredPrefix) {
+        String path = storagePath == null ? "" : storagePath.trim();
+        if (!SAFE_OBJECT_PATH.matcher(path).matches()
+                || !path.startsWith(requiredPrefix + "/")) {
+            throw new BusinessException("INVALID_STORAGE_PATH",
+                    "Đường dẫn tệp không hợp lệ.");
+        }
+        return path;
+    }
+
+    /** Hỏi Supabase metadata thật của object vừa upload và đối chiếu với giới hạn. */
+    private SupabaseStorageClient.ObjectStat requireUploadedObject(
+            String bucket, String path, Set<String> allowedMime, long maxBytes,
+            String typeDesc, String sizeDesc) {
+        SupabaseStorageClient.ObjectStat stat = storageClient.statObject(bucket, path);
+        if (stat == null) {
+            throw new BusinessException("UPLOAD_NOT_FOUND",
+                    "Không tìm thấy tệp vừa tải lên. Vui lòng tải lại.");
+        }
+        if (stat.size() != null && stat.size() > maxBytes) {
+            throw new BusinessException("FILE_TOO_LARGE",
+                    "File không được vượt quá " + sizeDesc + ".");
+        }
+        if (stat.mimetype() != null
+                && !allowedMime.contains(stat.mimetype().trim().toLowerCase())) {
+            throw new BusinessException("INVALID_FILE_TYPE",
+                    "Chỉ chấp nhận " + typeDesc + ".");
+        }
+        return stat;
+    }
+
+    private Lesson requireLessonOwnedBy(UUID lessonId, UUID teacherId) {
+        Lesson lesson = lessonRepository.findById(lessonId)
+                .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
+
+        // Lazy load: lesson.getChapter().getCourse() — OK vì đang trong @Transactional
+        UUID lessonOwnerId = lesson.getChapter().getCourse().getTeacher().getId();
+        if (!lessonOwnerId.equals(teacherId)) {
+            throw new BusinessException("FORBIDDEN",
+                    "Bạn không có quyền upload tài liệu cho bài giảng này.",
+                    org.springframework.http.HttpStatus.FORBIDDEN);
+        }
+        return lesson;
+    }
+
+    /** Phần mở rộng đã lọc sạch — tên file do client gửi không được lọt vào object path. */
+    private String safeExtension(String filename, String defaultExt) {
+        String ext = getExtension(filename, defaultExt);
+        return SAFE_EXTENSION.matcher(ext).matches() ? ext : defaultExt;
     }
 
     private void validateFile(MultipartFile file, Set<String> allowedMime,
@@ -461,7 +682,7 @@ public class ContentUploadService {
                                                long maxBytes, String typeDesc,
                                                String sizeDesc) {
         if (file == null || file.isEmpty()) {
-            throw new BusinessException("FILE_REQUIRED", "Vui lÃ²ng chá»n file Ä‘á»ƒ upload.");
+            throw new BusinessException("FILE_REQUIRED", "Vui lòng chọn file để upload.");
         }
         String mime = file.getContentType() == null ? "" : file.getContentType().trim().toLowerCase();
         String ext = getExtension(file.getOriginalFilename(), "").toLowerCase();
@@ -469,11 +690,11 @@ public class ContentUploadService {
         boolean extAllowed = !ext.isBlank() && allowedExtensions.contains(ext);
         if (!mimeAllowed && !extAllowed) {
             throw new BusinessException("INVALID_FILE_TYPE",
-                    "Chá»‰ cháº¥p nháº­n " + typeDesc + ".");
+                    "Chỉ chấp nhận " + typeDesc + ".");
         }
         if (file.getSize() > maxBytes) {
             throw new BusinessException("FILE_TOO_LARGE",
-                    "File khÃ´ng Ä‘Æ°á»£c vÆ°á»£t quÃ¡ " + sizeDesc + ".");
+                    "File không được vượt quá " + sizeDesc + ".");
         }
     }
 

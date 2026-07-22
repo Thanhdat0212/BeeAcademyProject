@@ -1,7 +1,9 @@
 package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.response.ApiResponse;
+import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.AiScanService;
+import com.beeacademy.backend.service.TeacherAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -25,9 +27,10 @@ import org.springframework.web.multipart.MultipartFile;
 public class AiScanController {
 
     private final AiScanService aiScanService;
+    private final TeacherAccessService teacherAccessService;
 
     /**
-     * Upload PDF → Gemini → trả raw text (JSON array câu hỏi).
+     * Upload PDF → Gemini → trả raw text (JSON array câu hỏi, có thể kèm ảnh tự ghép từ PDF).
      *
      * @param file file PDF tối đa 20 MB
      * @return raw text từ Gemini để frontend parse
@@ -36,7 +39,9 @@ public class AiScanController {
     @PreAuthorize("hasRole('teacher')")
     public ResponseEntity<ApiResponse<String>> scanPdf(
             @RequestParam("file") MultipartFile file) {
-        String rawText = aiScanService.scanPdf(file);
+        var me = CurrentUser.required();
+        teacherAccessService.requireApprovedTeacher(me);
+        String rawText = aiScanService.scanPdf(file, me.userId());
         return ResponseEntity.ok(ApiResponse.ok(rawText));
     }
 }

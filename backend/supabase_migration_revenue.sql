@@ -17,12 +17,17 @@ CREATE TABLE IF NOT EXISTS payout_periods (
     paid_by_admin   UUID         REFERENCES profiles(id),
     transfer_ref    VARCHAR(100),
     transfer_content TEXT,
+    unc_attachment_url VARCHAR(1000),
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     UNIQUE(teacher_id, month_year)
 );
 
+ALTER TABLE payout_periods ADD COLUMN IF NOT EXISTS unc_attachment_url VARCHAR(1000);
+
 CREATE INDEX IF NOT EXISTS idx_payout_periods_teacher_id ON payout_periods(teacher_id);
 CREATE INDEX IF NOT EXISTS idx_payout_periods_status     ON payout_periods(status);
+CREATE INDEX IF NOT EXISTS idx_payout_periods_teacher_status_month
+    ON payout_periods(teacher_id, status, month_year DESC);
 
 -- Mỗi giao dịch bán khóa học — 1 row = 1 HS mua 1 khóa
 CREATE TABLE IF NOT EXISTS revenue_splits (

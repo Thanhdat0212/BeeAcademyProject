@@ -1,62 +1,22 @@
-// ═══════════════════════════════════════════════════════════════════════════════
-// TRANG CHI TIẾT KHÓA HỌC — CourseDetailPage.tsx
-//
-// VỊ TRÍ TRONG HỆ THỐNG:
-//   URL: /courses/:id
-//   Người dùng đến từ: CoursesPage (click vào card khóa học)
-//   Người dùng đi đến:
-//     - Nếu chưa mua: thêm vào giỏ → CheckoutPage
-//     - Nếu đã mua: xem bài học trong LearningView
-//
-// LUỒNG PHÂN NHÁNH CHÍNH (CourseDetailPage — default export):
-//   1. Đọc :id từ URL params → tìm course trong MOCK_COURSES
-//   2. Kiểm tra quyền truy cập: isEnrolled = course.isEnrolled || purchasedIds.includes(id)
-//   3. Nếu isEnrolled=true  → render <LearningView>  (giao diện học bài)
-//      Nếu isEnrolled=false → render <MarketingView> (trang giới thiệu + mua)
-//
-// CÁC COMPONENT CON:
-//   - MarketingView: trang quảng cáo, thêm vào giỏ hàng
-//   - LearningView:  giao diện học, sidebar mục lục, quiz
-//   - QuizModal:     modal làm bài kiểm tra, 2 phase: quiz → results
-//   - ScoreCircle:   vòng tròn SVG hiển thị điểm số
-// ═══════════════════════════════════════════════════════════════════════════════
-
-import { useState, useEffect } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { BookOpen, RotateCcw, Loader2, AlertCircle } from 'lucide-react';
-import type { Course } from '../../data/mockCourses';
-import { notify } from '../../lib/toast';
-import { useCourseStore } from '../../store/useCourseStore';
-import { getCourseDetail as courseServiceGetDetail, recordCoursePreview } from '../../api/courseService';
+import { AlertCircle, BookOpen, Loader2, RotateCcw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { adaptCourseDetail } from '../../api/adapter';
 import { isApiError } from '../../api/client';
+import { getCourseDetail as courseServiceGetDetail, recordCoursePreview } from '../../api/courseService';
+import { notify } from '../../lib/toast';
+import { useCourseStore } from '../../store/useCourseStore';
 import type { ChapterDetail } from '../../types/api';
-import { LearningView } from './course-detail/LearningView';
-import { MarketingView } from './course-detail/MarketingView';
-import { RelatedCourses } from './course-detail/RelatedCourses';
-import { isDirectVideoUrl, preloadLessonDuration } from './course-detail/shared';
+import type { Course } from '../../types/course';
+import LearningView from './course-detail/LearningView';
+import MarketingView, { RelatedCourses } from './course-detail/MarketingView';
+import { useCourseVideoDurationPreload } from './course-detail/hooks/useCourseVideoDurationPreload';
 
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// EXPORT DEFAULT: CourseDetailPage
-//
-// Entry point duy nhất — đọc :id từ URL, fetch chi tiết từ BE (UC07),
-// phân nhánh render Marketing/Learning view.
-//
-// GIAI ĐOẠN 1C:
-//   - MarketingView render chi tiết từ API thật (mô tả + curriculum 2 cấp
-//     được flatten bởi adapter.flattenChaptersToLessons).
-//   - LearningView vẫn dùng dữ liệu Course đã adapt, nhưng logic enrollment
-//     tạm thời check qua purchasedIds (Zustand local) - sẽ refactor ở
-//     Module 3 khi có API enrollment thật.
-// ═══════════════════════════════════════════════════════════════════════════════
 export default function CourseDetailPage() {
   // Đọc :id từ URL /courses/:id — id là UUID của BE
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const purchasedIds = useCourseStore((state) => state.purchasedIds);
-  const lessonDurations = useCourseStore((state) => state.lessonDurations);
-  const saveLessonDuration = useCourseStore((state) => state.saveLessonDuration);
 
   // ── State fetch từ API ──────────────────────────────────────────────────
   const [course, setCourse] = useState<Course | null>(null);
@@ -101,34 +61,7 @@ export default function CourseDetailPage() {
   }, [id, purchasedIds, retryKey]);
 
   // ── Loading state ────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!course?.lessons?.length) {
-      return;
-    }
-
-    const storedDurations = lessonDurations[course.id] ?? {};
-    const candidates = course.lessons.filter((lesson) =>
-      lesson.type === 'video' &&
-      lesson.duration === '00:00' &&
-      lesson.url !== '#' &&
-      isDirectVideoUrl(lesson.url) &&
-      !storedDurations[lesson.id]
-    );
-
-    if (candidates.length === 0) {
-      return;
-    }
-
-    const cleanups = candidates.map((lesson) =>
-      preloadLessonDuration(lesson, (durationSec) => {
-        saveLessonDuration(course.id, lesson.id, durationSec);
-      })
-    );
-
-    return () => {
-      cleanups.forEach((cleanup) => cleanup());
-    };
-  }, [course, lessonDurations, saveLessonDuration]);
+  useCourseVideoDurationPreload(course);
 
   if (loading) {
     return (
@@ -271,4 +204,3 @@ export default function CourseDetailPage() {
     />
   );
 }
-

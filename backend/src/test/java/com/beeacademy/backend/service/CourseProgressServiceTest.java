@@ -3,12 +3,21 @@ package com.beeacademy.backend.service;
 import com.beeacademy.backend.dto.request.CompleteCourseProgressItemRequest;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.model.Enrollment;
+import com.beeacademy.backend.model.Course;
+import com.beeacademy.backend.model.ExamAttempt;
+import com.beeacademy.backend.model.ExamConfig;
+import com.beeacademy.backend.repository.ChapterRepository;
+import com.beeacademy.backend.repository.AssignmentSubmissionRepository;
 import com.beeacademy.backend.repository.CourseProgressItemRepository;
 import com.beeacademy.backend.repository.CourseRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
 import com.beeacademy.backend.repository.ExamAttemptRepository;
+import com.beeacademy.backend.repository.ExamConfigRepository;
 import com.beeacademy.backend.repository.LessonRepository;
+import com.beeacademy.backend.repository.OrderItemRepository;
+import com.beeacademy.backend.repository.QuizAttemptRepository;
 import com.beeacademy.backend.repository.QuizConfigRepository;
+import com.beeacademy.backend.repository.StudentVideoProgressRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,14 +27,18 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.math.BigDecimal;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,10 +61,31 @@ class CourseProgressServiceTest {
     private QuizConfigRepository quizConfigRepository;
 
     @Mock
+    private QuizAttemptRepository quizAttemptRepository;
+
+    @Mock
+    private ChapterRepository chapterRepository;
+
+    @Mock
     private ExamAttemptRepository examAttemptRepository;
 
     @Mock
+    private ExamConfigRepository examConfigRepository;
+
+    @Mock
+    private OrderItemRepository orderItemRepository;
+
+    @Mock
     private CertificateService certificateService;
+
+    @Mock
+    private CourseVersionSnapshotService courseVersionSnapshotService;
+
+    @Mock
+    private AssignmentSubmissionRepository assignmentSubmissionRepository;
+
+    @Mock
+    private StudentVideoProgressRepository studentVideoProgressRepository;
 
     @InjectMocks
     private CourseProgressService service;
@@ -61,7 +95,7 @@ class CourseProgressServiceTest {
         UUID studentId = UUID.randomUUID();
         UUID courseId = UUID.randomUUID();
         UUID lessonId = UUID.randomUUID();
-        Enrollment enrollment = Enrollment.create(studentId, courseId);
+        Enrollment enrollment = Enrollment.create(studentId, courseId, UUID.randomUUID());
 
         when(courseRepository.existsById(courseId)).thenReturn(true);
         when(enrollmentRepository.existsByStudentIdAndCourseId(studentId, courseId)).thenReturn(true);
@@ -72,6 +106,8 @@ class CourseProgressServiceTest {
         when(progressRepository.countByStudentIdAndCourseId(studentId, courseId)).thenReturn(1L);
         when(enrollmentRepository.findByStudentIdAndCourseId(studentId, courseId)).thenReturn(Optional.of(enrollment));
         when(progressRepository.findByStudentIdAndCourseId(studentId, courseId)).thenReturn(List.of());
+
+        Instant updateStartedAt = Instant.now();
 
         var response = service.completeItem(
                 courseId,
@@ -86,6 +122,7 @@ class CourseProgressServiceTest {
         assertThat(captor.getValue().getItemId()).isEqualTo(lessonId);
         assertThat(captor.getValue().getItemType()).isEqualTo("lesson");
         assertThat(enrollment.getProgressPct()).isEqualTo(25);
+        assertThat(enrollment.getProgressUpdatedAt()).isAfterOrEqualTo(updateStartedAt);
         assertThat(response.progressPct()).isEqualTo(25);
     }
 
@@ -94,7 +131,7 @@ class CourseProgressServiceTest {
         UUID studentId = UUID.randomUUID();
         UUID courseId = UUID.randomUUID();
         UUID chapterId = UUID.randomUUID();
-        Enrollment enrollment = Enrollment.create(studentId, courseId);
+        Enrollment enrollment = Enrollment.create(studentId, courseId, UUID.randomUUID());
 
         when(courseRepository.existsById(courseId)).thenReturn(true);
         when(enrollmentRepository.existsByStudentIdAndCourseId(studentId, courseId)).thenReturn(true);
@@ -154,6 +191,72 @@ class CourseProgressServiceTest {
 
         assertThat(progress).containsEntry(courseA, 50);
         assertThat(progress).containsEntry(courseB, 0);
+    }
+
+    @Test
+    void learningProgressDoesNotMixRequiredExamsFromAnotherCourseVersion() {
+        UUID studentId = UUID.randomUUID();
+        UUID courseId = UUID.randomUUID();
+        UUID enrollmentVersionId = UUID.randomUUID();
+        UUID anotherVersionId = UUID.randomUUID();
+        Enrollment enrollment = mock(Enrollment.class);
+        Course course = mock(Course.class);
+        ExamConfig matchingConfig = examConfig(course, enrollmentVersionId, 0);
+        ExamConfig otherVersionConfig = examConfig(course, anotherVersionId, 1);
+        ExamAttempt matchingAttempt = passedAttempt(matchingConfig, 82.5);
+        ExamAttempt otherVersionAttempt = mock(ExamAttempt.class);
+        when(otherVersionAttempt.getExamConfig()).thenReturn(otherVersionConfig);
+
+        when(enrollment.getCourseId()).thenReturn(courseId);
+        when(enrollment.getCourseVersionId()).thenReturn(enrollmentVersionId);
+        when(course.getId()).thenReturn(courseId);
+        when(course.getTitle()).thenReturn("Khóa học kiểm thử");
+        when(course.getSlug()).thenReturn("khoa-hoc-kiem-thu");
+        when(enrollmentRepository.findByStudentId(studentId)).thenReturn(List.of(enrollment));
+        when(orderItemRepository.findPaidCourseIdsByStudent(studentId, "paid")).thenReturn(List.of());
+        when(courseRepository.findByIdIn(List.of(courseId))).thenReturn(List.of(course));
+        when(progressRepository.countCompletedByStudentAndCourseIds(studentId, List.of(courseId)))
+                .thenReturn(List.of());
+        when(courseRepository.countProgressItemsByCourseIds(List.of(courseId))).thenReturn(List.of());
+        when(courseVersionSnapshotService.findMetrics(enrollmentVersionId)).thenReturn(Optional.empty());
+        when(examConfigRepository.findByCourseIds(List.of(courseId)))
+                .thenReturn(List.of(matchingConfig, otherVersionConfig));
+        when(examAttemptRepository.findByStudentAndCourseIds(studentId, List.of(courseId)))
+                .thenReturn(List.of(otherVersionAttempt, matchingAttempt));
+        when(progressRepository.findByStudentIdAndCourseIdIn(studentId, List.of(courseId))).thenReturn(List.of());
+        when(quizConfigRepository.findByCourseIds(List.of(courseId))).thenReturn(List.of());
+        when(quizAttemptRepository.findSubmittedByStudentAndCourseIds(studentId, List.of(courseId)))
+                .thenReturn(List.of());
+        when(chapterRepository.findWithLessonsByCourseIdIn(List.of(courseId))).thenReturn(List.of());
+
+        var response = service.getLearningProgress(student(studentId));
+
+        var detail = response.courses().getFirst();
+        assertThat(detail.courseVersionId()).isEqualTo(enrollmentVersionId);
+        assertThat(detail.requiredExams()).hasSize(4);
+        assertThat(detail.requiredExams().get(0).status()).isEqualTo("passed");
+        assertThat(detail.requiredExams().get(0).scorePercent()).isEqualTo(82.5);
+        assertThat(detail.requiredExams().get(1).status()).isEqualTo("not_configured");
+        assertThat(detail.passedRequiredExams()).isEqualTo(1);
+        assertThat(detail.allRequiredExamsPassed()).isFalse();
+    }
+
+    private ExamConfig examConfig(Course course, UUID courseVersionId, int slotIndex) {
+        ExamConfig config = mock(ExamConfig.class);
+        when(config.getId()).thenReturn(UUID.randomUUID());
+        when(config.getCourse()).thenReturn(course);
+        when(config.getCourseVersionId()).thenReturn(courseVersionId);
+        when(config.getSlotIndex()).thenReturn(slotIndex);
+        return config;
+    }
+
+    private ExamAttempt passedAttempt(ExamConfig config, double scorePercent) {
+        ExamAttempt attempt = mock(ExamAttempt.class);
+        when(attempt.getExamConfig()).thenReturn(config);
+        when(attempt.getSubmittedAt()).thenReturn(Instant.parse("2026-07-17T08:00:00Z"));
+        when(attempt.getPassed()).thenReturn(true);
+        when(attempt.getEffectiveScorePercent()).thenReturn(BigDecimal.valueOf(scorePercent));
+        return attempt;
     }
 
     private AuthenticatedUser student(UUID studentId) {

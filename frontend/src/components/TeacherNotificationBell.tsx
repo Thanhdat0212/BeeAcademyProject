@@ -63,7 +63,7 @@ export default function TeacherNotificationBell() {
       setNotifications(nextNotifications);
       setUnreadCount(nextUnreadCount);
     } catch (error) {
-      console.error('Khong the tai thong bao giao vien:', error);
+      console.error('Không thể tải thông báo giáo viên:', error);
       setNotifications([]);
       setUnreadCount(0);
     } finally {
@@ -113,7 +113,7 @@ export default function TeacherNotificationBell() {
       try {
         await markUserNotificationRead(notification.id);
       } catch (error) {
-        console.error('Khong the danh dau thong bao da doc:', error);
+        console.error('Không thể đánh dấu thông báo đã đọc:', error);
       }
       setNotifications(items =>
         items.map(item => item.id === notification.id ? { ...item, read: true } : item)

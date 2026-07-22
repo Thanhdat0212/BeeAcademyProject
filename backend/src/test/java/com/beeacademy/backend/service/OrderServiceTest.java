@@ -4,6 +4,8 @@ import com.beeacademy.backend.dto.request.CreateOrderRequest;
 import com.beeacademy.backend.dto.response.OrderResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.model.Enrollment;
+import com.beeacademy.backend.model.Course;
+import com.beeacademy.backend.model.CourseVersion;
 import com.beeacademy.backend.model.Order;
 import com.beeacademy.backend.model.OrderItem;
 import com.beeacademy.backend.model.OrderStatus;
@@ -48,6 +50,7 @@ class OrderServiceTest {
     @Mock OrderRepository orderRepository;
     @Mock OrderItemRepository orderItemRepository;
     @Mock CourseRepository courseRepository;
+    @Mock PublishedCourseVersionResolver publishedCourseVersionResolver;
     @Mock EnrollmentRepository enrollmentRepository;
     @Mock TeacherRevenueService teacherRevenueService;
     @Mock RewardService rewardService;
@@ -65,6 +68,14 @@ class OrderServiceTest {
         order.getItems().add(item);
         lenient().when(orderItemRepository.findByOrderId(order.getId()))
                 .thenReturn(List.of(item));
+        Course course = org.mockito.Mockito.mock(Course.class);
+        CourseVersion version = org.mockito.Mockito.mock(CourseVersion.class);
+        lenient().when(course.getId()).thenReturn(COURSE_ID);
+        lenient().when(course.getSubmittedVersionNo()).thenReturn(1);
+        lenient().when(courseRepository.findById(COURSE_ID)).thenReturn(Optional.of(course));
+        lenient().when(version.getId()).thenReturn(UUID.randomUUID());
+        lenient().when(version.isApproved()).thenReturn(true);
+        lenient().when(publishedCourseVersionResolver.resolve(course)).thenReturn(version);
         return order;
     }
 
@@ -79,7 +90,6 @@ class OrderServiceTest {
                 .thenReturn(Optional.of(order));
         when(enrollmentRepository.existsByStudentIdAndCourseId(STUDENT_ID, COURSE_ID))
                 .thenReturn(false);
-        when(courseRepository.findById(COURSE_ID)).thenReturn(Optional.empty());
 
         orderService.handlePayOSWebhook(order.getOrderCode());
 
@@ -118,7 +128,6 @@ class OrderServiceTest {
                 .thenReturn(Optional.of(order));
         when(enrollmentRepository.existsByStudentIdAndCourseId(STUDENT_ID, COURSE_ID))
                 .thenReturn(true);
-        when(courseRepository.findById(COURSE_ID)).thenReturn(Optional.empty());
 
         orderService.handlePayOSWebhook(order.getOrderCode());
 
@@ -136,7 +145,6 @@ class OrderServiceTest {
                 .thenReturn(Optional.of(order));
         when(enrollmentRepository.existsByStudentIdAndCourseId(STUDENT_ID, COURSE_ID))
                 .thenReturn(false);
-        when(courseRepository.findById(COURSE_ID)).thenReturn(Optional.empty());
 
         orderService.handlePayOSWebhook(order.getOrderCode());
 
@@ -157,7 +165,6 @@ class OrderServiceTest {
         when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
         when(enrollmentRepository.existsByStudentIdAndCourseId(STUDENT_ID, COURSE_ID))
                 .thenReturn(false);
-        when(courseRepository.findById(COURSE_ID)).thenReturn(Optional.empty());
         when(courseRepository.findByIdIn(any())).thenReturn(List.of());
         doReturn("PAID").when(orderService).fetchPayOSStatus(order.getOrderCode());
 
@@ -252,7 +259,6 @@ class OrderServiceTest {
                 .thenReturn(Optional.of(order));
         when(enrollmentRepository.existsByStudentIdAndCourseId(STUDENT_ID, COURSE_ID))
                 .thenReturn(false);
-        when(courseRepository.findById(COURSE_ID)).thenReturn(Optional.empty());
         when(courseRepository.findByIdIn(any())).thenReturn(List.of());
         doReturn("PAID").when(orderService).fetchPayOSStatus(order.getOrderCode());
 

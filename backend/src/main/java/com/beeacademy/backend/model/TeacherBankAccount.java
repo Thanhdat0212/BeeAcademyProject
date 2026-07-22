@@ -69,11 +69,8 @@ public class TeacherBankAccount {
         this.verifyStatus = BankVerifyStatus.PENDING;
     }
 
+    /** Gọi sau khi GV nhập đúng mã gửi về email — không còn khâu Admin duyệt. */
     public void approveVerification() {
         this.verifyStatus = BankVerifyStatus.VERIFIED;
-    }
-
-    public void rejectVerification() {
-        this.verifyStatus = BankVerifyStatus.REJECTED;
     }
 }

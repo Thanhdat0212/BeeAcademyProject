@@ -36,6 +36,7 @@
 
         <java-jwt.version>4.4.0</java-jwt.version>
         <spring-dotenv.version>4.0.0</spring-dotenv.version>
+        <apache-poi.version>5.2.5</apache-poi.version>
     </properties>
 
     <dependencies>
@@ -111,6 +112,15 @@
             <version>1.3.39</version>
         </dependency>
 
+        <!-- ===== AI Scan: đọc vị trí text + ảnh nhúng trong PDF đề thi để tự ghép ảnh vào câu hỏi.
+             openpdf (ở trên) chỉ dùng để TẠO PDF (certificate), không có API đọc vị trí ảnh nhúng
+             trong PDF có sẵn — cần PDFBox riêng cho việc này. ===== -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+
         <dependency>
             <groupId>com.google.zxing</groupId>
             <artifactId>core</artifactId>
@@ -121,6 +131,13 @@
             <groupId>com.google.zxing</groupId>
             <artifactId>javase</artifactId>
             <version>3.5.3</version>
+        </dependency>
+
+        <!-- ===== Native XLSX reports ===== -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${apache-poi.version}</version>
         </dependency>
 
         <!-- ===== Test ===== -->

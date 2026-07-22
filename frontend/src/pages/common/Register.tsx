@@ -1,12 +1,15 @@
 import { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Mail, Lock, User, CheckCircle, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Mail, Lock, User, CheckCircle, RefreshCw, GraduationCap, Facebook } from 'lucide-react';
 import { notify } from '../../lib/toast';
 import { requestOtp, verifyOtp } from '../../api/authService';
 import { isApiError } from '../../api/client';
+import BrandLogo from '../../components/BrandLogo';
 
-type Role = 'student' | 'parent' | 'teacher';
+// Vai trò giáo viên KHÔNG đăng ký công khai được: giáo viên liên hệ Bee Academy
+// qua mạng xã hội, Admin thẩm định rồi tự tạo tài khoản và cấp mật khẩu tạm.
+type Role = 'student' | 'parent';
 type Step = 1 | 2 | 3;
 
 export default function Register() {
@@ -152,7 +155,7 @@ export default function Register() {
               <div className="absolute top-0 left-0 w-32 h-32 bg-secondary/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2" />
 
               <div className="text-center mb-8 relative z-10">
-                <div className="w-12 h-12 bg-primary text-on-primary rounded-xl flex items-center justify-center font-bold text-2xl mx-auto mb-4 shadow-lg shadow-primary/20">B</div>
+                <BrandLogo size="lg" className="mx-auto mb-4" />
                 <h1 className="text-3xl font-extrabold mb-2">Đăng Ký</h1>
                 <p className="text-on-surface-variant text-sm">Tạo tài khoản để bắt đầu học tập!</p>
               </div>
@@ -194,13 +197,13 @@ export default function Register() {
                 {/* Vai trò */}
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-on-surface ml-1">Bạn là</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(['student', 'parent', 'teacher'] as Role[]).map(r => (
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['student', 'parent'] as Role[]).map(r => (
                       <button type="button" key={r} onClick={() => setRole(r)}
                         className={`py-2.5 rounded-xl border text-sm font-semibold transition-all ${
                           role === r ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/50 hover:border-primary'
                         }`}>
-                        {r === 'student' ? 'Học sinh' : r === 'parent' ? 'Phụ huynh' : 'Giáo viên'}
+                        {r === 'student' ? 'Học sinh' : 'Phụ huynh'}
                       </button>
                     ))}
                   </div>
@@ -212,7 +215,40 @@ export default function Register() {
                 </button>
               </form>
 
-              <div className="mt-8 text-center text-sm text-on-surface-variant relative z-10">
+              <div className="mt-8 pt-6 border-t border-outline-variant/40 relative z-10">
+                <div className="flex gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <GraduationCap className="w-[18px] h-[18px] text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-on-surface">Đăng ký giảng dạy</p>
+                    <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
+                      Tài khoản giáo viên do Bee Academy cấp sau khi xác minh hồ sơ.
+                      Liên hệ với chúng tôi để được hướng dẫn.
+                    </p>
+                    <div className="flex flex-col gap-2 mt-3">
+                      <a
+                        href="https://www.facebook.com/thanh.at.980298?locale=vi_VN"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2.5 min-h-11 px-4 rounded-xl bg-surface-container border border-outline-variant/40 text-xs font-bold text-on-surface hover:bg-surface-container-high hover:border-primary/40 transition-colors"
+                      >
+                        <Facebook className="w-4 h-4 text-primary flex-shrink-0" />
+                        <span className="truncate">Nhắn qua Facebook</span>
+                      </a>
+                      <a
+                        href="mailto:thanhdatvv05@gmail.com"
+                        className="inline-flex items-center gap-2.5 min-h-11 px-4 rounded-xl bg-surface-container border border-outline-variant/40 text-xs font-bold text-on-surface hover:bg-surface-container-high hover:border-primary/40 transition-colors"
+                      >
+                        <Mail className="w-4 h-4 text-primary flex-shrink-0" />
+                        <span className="truncate">thanhdatvv05@gmail.com</span>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 text-center text-sm text-on-surface-variant relative z-10">
                 Đã có tài khoản? <Link to="/login" className="text-primary font-bold hover:underline">Đăng nhập</Link>
               </div>
             </motion.div>

@@ -1,6 +1,8 @@
 package com.beeacademy.backend.controller;
 
 import com.beeacademy.backend.dto.response.ApiResponse;
+import com.beeacademy.backend.dto.request.ExamIntegrityEventRequest;
+import com.beeacademy.backend.dto.response.ExamIntegrityEventResponse;
 import com.beeacademy.backend.dto.response.ExamRetakeRequestResponse;
 import com.beeacademy.backend.dto.response.StudentExamResponse;
 import com.beeacademy.backend.dto.request.ExamRetakeRequestCreate;
@@ -54,7 +56,7 @@ public class StudentExamController {
             @RequestPart("file") MultipartFile file) {
         return ApiResponse.ok(
                 examService.uploadStudentExamAnswerImage(courseId, CurrentUser.required(), file),
-                "Tai anh dap an thanh cong");
+                "Tải ảnh đáp án thành công");
     }
 
     @PostMapping("/{slotIndex}/submit")
@@ -64,7 +66,7 @@ public class StudentExamController {
             @Valid @RequestBody SubmitExamRequest request) {
         return ApiResponse.ok(
                 examService.submitStudentExam(courseId, slotIndex, CurrentUser.required(), request),
-                "Nop bai kiem tra thanh cong");
+                "Nộp bài kiểm tra thanh cong");
     }
 
     @GetMapping("/{slotIndex}/result")
@@ -80,7 +82,18 @@ public class StudentExamController {
             @PathVariable Integer slotIndex,
             @Valid @RequestBody SaveExamDraftRequest request) {
         examService.saveStudentExamDraft(courseId, slotIndex, CurrentUser.required(), request);
-        return ApiResponse.ok(null, "Da luu nhap bai kiem tra");
+        return ApiResponse.ok(null, "Đã lưu nháp bài kiểm tra");
+    }
+
+    @PostMapping("/{slotIndex}/integrity-events")
+    public ApiResponse<ExamIntegrityEventResponse> recordIntegrityEvent(
+            @PathVariable UUID courseId,
+            @PathVariable Integer slotIndex,
+            @Valid @RequestBody ExamIntegrityEventRequest request) {
+        return ApiResponse.ok(
+                examService.recordStudentExamIntegrityEvent(
+                        courseId, slotIndex, CurrentUser.required(), request),
+                "Đã ghi nhận sự kiện chống gian lận");
     }
 
     @PostMapping("/{slotIndex}/retake-requests")
@@ -90,7 +103,7 @@ public class StudentExamController {
             @Valid @RequestBody ExamRetakeRequestCreate request) {
         return ApiResponse.ok(
                 examRetakeService.requestRetake(courseId, slotIndex, CurrentUser.required(), request),
-                "Da gui yeu cau mo them luot lam bai");
+                "Đã gửi yêu cầu mở thêm lượt làm bài");
     }
 
     @GetMapping("/{slotIndex}/retake-requests/latest")

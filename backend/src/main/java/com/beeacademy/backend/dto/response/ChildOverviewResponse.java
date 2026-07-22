@@ -26,4 +26,7 @@ public class ChildOverviewResponse {
     private double latestQuizScore;
     private double latestExamScore;
     private List<Double> weeklyActivityHours; // Mảng chứa số giờ học của 7 ngày (T2 - CN)
+    private boolean detailAccessAllowed;
+    private boolean sensitiveDataMasked;
+    private String detailAccessReason;
 }

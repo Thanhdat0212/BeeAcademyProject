@@ -5,7 +5,7 @@ import { RefreshCw, LogIn, Mail, Facebook } from 'lucide-react';
 import { useSystemStore } from '../../store/useSystemStore';
 
 const TIPS = [
-  'Mẹo nhỏ: ôn lại 10 phút mỗi ngày hiệu quả hơn học dồn 2 tiếng cuối tuần đó!',
+  'Meo nhỏ: ôn lại 10 phút mỗi ngày hiệu quả hơn học dồn 2 tiếng cuối tuần đó!',
   'Bạn có biết? Một con ong phải bay khoảng 4.5 triệu km mới tạo ra 1kg mật.',
   'Trong lúc chờ, hãy thử ôn lại một chương bạn thấy khó nhất nhé.',
   'Ong mật giao tiếp với nhau bằng một "điệu nhảy" để chỉ đường đến hoa.',

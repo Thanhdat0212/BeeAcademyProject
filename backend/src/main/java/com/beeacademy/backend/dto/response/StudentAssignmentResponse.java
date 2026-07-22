@@ -10,6 +10,13 @@ public record StudentAssignmentResponse(
         String description,
         Integer maxScore,
         Instant dueAt,
+        Integer maxAttempts,
+        Boolean allowLateSubmission,
+        Integer latePenaltyPercent,
+        Boolean acceptingSubmissions,
+        String submissionAvailability,
+        Boolean canSubmit,
+        Integer remainingAttempts,
         UUID chapterId,
         String chapterTitle,
         UUID lessonId,
@@ -24,8 +31,12 @@ public record StudentAssignmentResponse(
             Integer score,
             String feedback,
             Instant submittedAt,
+            Instant expectedGradedBy,
             Instant gradedAt,
-            boolean late
+            boolean late,
+            Integer attemptNumber,
+            Integer appliedLatePenaltyPercent,
+            Integer rawScore
     ) {
     }
 }

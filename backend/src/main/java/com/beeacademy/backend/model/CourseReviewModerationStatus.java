@@ -1,6 +1,6 @@
 package com.beeacademy.backend.model;
 
-/** Trang thai hien thi cua danh gia khoa hoc theo REQ-LRN-007. */
+/** Trạng thái hiển thị của đánh giá khóa học theo REQ-LRN-007. */
 public enum CourseReviewModerationStatus {
     PUBLISHED,
     PENDING_MODERATION,

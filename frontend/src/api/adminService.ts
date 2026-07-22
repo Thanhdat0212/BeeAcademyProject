@@ -168,30 +168,6 @@ export async function confirmPayout(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Duyệt TK ngân hàng GV — TK PENDING giữ (hold) chi trả cho tới khi Admin duyệt
-//  GET   /api/admin/bank-accounts/pending
-//  PATCH /api/admin/bank-accounts/:teacherId/review
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface AdminBankAccount {
-  teacherId: string;
-  teacherName: string;
-  bankName: string;
-  accountNumber: string;
-  accountHolder: string;
-  branch: string | null;
-  verifyStatus: BankVerifyStatus;
-  updatedAt: string;
-}
-
-export async function getPendingBankAccounts(): Promise<AdminBankAccount[]> {
-  const res = await apiClient.get<ApiResponse<AdminBankAccount[]>>(
-    '/api/admin/bank-accounts/pending',
-  );
-  return unwrap(res.data) ?? [];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 //  Báo cáo & Thống kê (UC37) — biểu đồ time-series + phân bố
 //  GET /api/admin/analytics/{revenue-trend,enrollment-trend,user-growth,courses-by-category}
 //  GET /api/admin/users/stats — phân bố vai trò người dùng
@@ -253,16 +229,61 @@ export async function getAdminUserStats(): Promise<AdminUserStats> {
   return unwrap(res.data);
 }
 
-export async function reviewBankAccount(
-  teacherId: string,
-  approve: boolean,
-  note?: string,
-): Promise<AdminBankAccount> {
-  const res = await apiClient.patch<ApiResponse<AdminBankAccount>>(
-    `/api/admin/bank-accounts/${teacherId}/review`,
-    { approve, note },
+// ─────────────────────────────────────────────────────────────────────────────
+//  Quản lý tài khoản giáo viên (UC35)
+//  Giáo viên không đăng ký công khai được — họ liên hệ Bee Academy qua mạng xã
+//  hội, Admin thẩm định rồi tạo tài khoản và cấp mật khẩu tạm tại đây.
+//  POST  /api/admin/users/teachers
+//  POST  /api/admin/users/:id/reset-password
+//  PATCH /api/admin/users/:id/teacher-approval
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CreateTeacherAccountPayload {
+  email: string;
+  fullName: string;
+  phone?: string;
+  contactNote?: string;
+}
+
+/**
+ * Mật khẩu tạm chỉ xuất hiện đúng một lần trong response này — không có endpoint
+ * nào đọc lại được. UI phải hiển thị ngay cho Admin copy.
+ */
+export interface TemporaryPasswordResult {
+  id: string;
+  email: string;
+  fullName: string | null;
+  temporaryPassword: string;
+  /** false = SMTP lỗi, Admin bắt buộc gửi tay qua Zalo/Facebook. */
+  emailSent: boolean;
+}
+
+export type TeacherApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export async function createTeacherAccount(
+  payload: CreateTeacherAccountPayload,
+): Promise<TemporaryPasswordResult> {
+  const res = await apiClient.post<ApiResponse<TemporaryPasswordResult>>(
+    '/api/admin/users/teachers',
+    payload,
   );
   return unwrap(res.data);
+}
+
+export async function resetUserPassword(userId: string): Promise<TemporaryPasswordResult> {
+  const res = await apiClient.post<ApiResponse<TemporaryPasswordResult>>(
+    `/api/admin/users/${userId}/reset-password`,
+  );
+  return unwrap(res.data);
+}
+
+export async function updateTeacherApproval(
+  userId: string,
+  status: TeacherApprovalStatus,
+): Promise<void> {
+  await apiClient.patch(`/api/admin/users/${userId}/teacher-approval`, null, {
+    params: { status },
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

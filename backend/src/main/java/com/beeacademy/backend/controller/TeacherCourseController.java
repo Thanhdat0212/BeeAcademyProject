@@ -3,6 +3,7 @@ package com.beeacademy.backend.controller;
 import com.beeacademy.backend.dto.request.CreateChapterRequest;
 import com.beeacademy.backend.dto.request.CreateCourseRequest;
 import com.beeacademy.backend.dto.request.CreateLessonRequest;
+import com.beeacademy.backend.dto.request.CourseVersionMigrationRequest;
 import com.beeacademy.backend.dto.request.ReorderChaptersRequest;
 import com.beeacademy.backend.dto.request.ReorderLessonsRequest;
 import com.beeacademy.backend.dto.request.UpdateChapterRequest;
@@ -10,6 +11,7 @@ import com.beeacademy.backend.dto.request.UpdateCourseRequest;
 import com.beeacademy.backend.dto.request.UpdateLessonRequest;
 import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.CourseReviewSummaryResponse;
+import com.beeacademy.backend.dto.response.CourseVersionMigrationResponse;
 import com.beeacademy.backend.dto.response.PageResponse;
 import com.beeacademy.backend.dto.response.TeacherChapterResponse;
 import com.beeacademy.backend.dto.response.TeacherCourseDetailResponse;
@@ -17,6 +19,7 @@ import com.beeacademy.backend.dto.response.TeacherCourseResponse;
 import com.beeacademy.backend.dto.response.TeacherLessonResponse;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.CourseReviewService;
+import com.beeacademy.backend.service.CourseVersionMigrationService;
 import com.beeacademy.backend.service.TeacherCourseService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +55,7 @@ public class TeacherCourseController {
 
     private final TeacherCourseService courseService;
     private final CourseReviewService courseReviewService;
+    private final CourseVersionMigrationService courseVersionMigrationService;
 
     // ── Course ────────────────────────────────────────────────────────────────
 
@@ -113,6 +117,16 @@ public class TeacherCourseController {
     }
 
     // ── Chapter ───────────────────────────────────────────────────────────────
+
+    @PostMapping("/courses/{courseId}/versions/migrate-enrollments")
+    public ApiResponse<CourseVersionMigrationResponse> migrateEnrollments(
+            @PathVariable UUID courseId,
+            @Valid @RequestBody CourseVersionMigrationRequest request) {
+        return ApiResponse.ok(
+                courseVersionMigrationService.migrate(
+                        courseId, request, CurrentUser.required()),
+                "Đã chuyển phiên bản cho học sinh và gửi thông báo liên quan");
+    }
 
     @PostMapping("/courses/{courseId}/chapters")
     public ApiResponse<TeacherChapterResponse> addChapter(

@@ -17,7 +17,7 @@
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { AuthTokenPayload, UserSummary } from '../types/api';
+import type { AuthTokenPayload, ParentLinkStatus, UserSummary } from '../types/api';
 import * as parentService from '../api/parentService';
 
 
@@ -34,7 +34,7 @@ export interface LinkedStudent {
   avatar?: string;
   code: string;
   grade: string;
-  linkStatus?: 'pending' | 'accepted' | 'rejected';
+  linkStatus?: ParentLinkStatus;
   unlinkRequestedById?: string | null;
   unlinkRequestedByRole?: 'parent' | 'student' | null;
   unlinkRequestedAt?: string | null;
@@ -55,6 +55,8 @@ export interface User {
   email: string;
   avatar?: string;
   role?: 'student' | 'parent' | 'teacher' | 'admin' | null;
+  /** Admin vừa cấp mật khẩu tạm — ProtectedRoute ép sang trang đổi mật khẩu. */
+  mustChangePassword?: boolean;
 }
 
 interface AuthState {
@@ -85,7 +87,7 @@ interface AuthState {
   fetchLinkedStudents: () => Promise<void>;
 
   /** Gỡ liên kết học sinh */
-  unlinkStudent: (studentId: string) => Promise<boolean | string>;
+  unlinkStudent: (studentId: string, reason?: string) => Promise<boolean | string>;
 }
  
 // ---------------------------------------------------------------------------
@@ -100,6 +102,7 @@ function toUiUser(summary: UserSummary | null): User | null {
     email: summary.email,
     avatar: summary.avatarUrl ?? undefined,
     role: summary.role,
+    mustChangePassword: summary.mustChangePassword ?? false,
   };
 }
 
@@ -178,11 +181,11 @@ export const useAuthStore = create<AuthState>()(
 
 
 
-      unlinkStudent: async (studentId) => {
+      unlinkStudent: async (studentId, reason) => {
         try {
-          const updated = await parentService.unlinkStudent(studentId);
+          const updated = await parentService.unlinkStudent(studentId, reason);
           set((state) => ({
-            linkedStudents: updated.linkStatus === 'rejected'
+            linkedStudents: updated.linkStatus && ['rejected', 'expired', 'revoked'].includes(updated.linkStatus)
               ? state.linkedStudents.filter((s) => s.id !== studentId)
               : state.linkedStudents.map((student) => student.id === studentId
                 ? {

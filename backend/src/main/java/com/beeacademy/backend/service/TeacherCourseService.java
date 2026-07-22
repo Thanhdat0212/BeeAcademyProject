@@ -24,6 +24,7 @@ import com.beeacademy.backend.model.Course;
 import com.beeacademy.backend.model.CourseDocument;
 import com.beeacademy.backend.model.CourseStatus;
 import com.beeacademy.backend.model.CourseVersion;
+import com.beeacademy.backend.model.ExamConfig;
 import com.beeacademy.backend.model.Lesson;
 import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.repository.AdminNotificationRepository;
@@ -38,6 +39,7 @@ import com.beeacademy.backend.repository.EnrollmentRepository;
 import com.beeacademy.backend.repository.LessonRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.repository.QuestionRepository;
+import com.beeacademy.backend.repository.QuizConfigRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,6 +47,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -90,6 +93,7 @@ public class TeacherCourseService {
     private final CourseRepository          courseRepository;
     private final CategoryRepository        categoryRepository;
     private final ProfileRepository         profileRepository;
+    private final QuizConfigRepository      quizConfigRepository;
     private final ChapterRepository         chapterRepository;
     private final LessonRepository          lessonRepository;
     private final CourseDocumentRepository  documentRepository;
@@ -97,9 +101,12 @@ public class TeacherCourseService {
     private final EnrollmentRepository      enrollmentRepository;
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final CourseVersionRepository   courseVersionRepository;
+    private final ExamConfigVersionService  examConfigVersionService;
     private final AdminNotificationRepository notificationRepository;
     private final ContentUploadService      contentUploadService;
+    private final TeacherAccessService      teacherAccessService;
     private final ObjectMapper              objectMapper;
+    private final JdbcTemplate              jdbcTemplate;
 
     // ========================================================================
     // Course CRUD
@@ -112,7 +119,7 @@ public class TeacherCourseService {
     @Transactional
     public TeacherCourseResponse createCourse(AuthenticatedUser me,
                                                CreateCourseRequest req) {
-        Profile  teacher  = loadProfile(me.userId());
+        Profile  teacher  = teacherAccessService.requireApprovedTeacher(me);
         Category category = loadCategory(req.categoryId());
 
         // Validate: giá gốc trong khoảng 99.000–1.000.000₫ (UseCase v6.5)
@@ -160,6 +167,7 @@ public class TeacherCourseService {
     @Transactional
     public PageResponse<TeacherCourseResponse> listMyCourses(AuthenticatedUser me,
                                                                Pageable pageable) {
+        teacherAccessService.requireApprovedTeacher(me);
         Specification<Course> spec = (root, q, cb) ->
                 cb.equal(root.get("teacher").get("id"), me.userId());
         Page<Course> page = courseRepository.findAll(spec, pageable);
@@ -188,6 +196,7 @@ public class TeacherCourseService {
     /** Chi tiết khóa học + chapters + lessons + lịch sử duyệt. */
     @Transactional
     public TeacherCourseDetailResponse getCourseDetail(UUID courseId, AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         List<Chapter> chapters = chapterRepository.findWithLessonsByCourseId(courseId);
         syncCourseCounters(course, chapters.size(), countLessons(chapters));
@@ -210,6 +219,7 @@ public class TeacherCourseService {
     @Transactional
     public TeacherCourseResponse updateCourse(UUID courseId, AuthenticatedUser me,
                                                UpdateCourseRequest req) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course   course   = loadAndVerifyOwner(courseId, me.userId());
         assertCourseInfoEditable(course);
 
@@ -252,6 +262,7 @@ public class TeacherCourseService {
     @Transactional
     public TeacherCourseResponse updateThumbnail(UUID courseId, AuthenticatedUser me,
                                                  org.springframework.web.multipart.MultipartFile file) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         var uploaded = contentUploadService.uploadCourseThumbnail(me.userId(), file);
         course.setThumbnailUrl(uploaded.publicUrl());
@@ -263,6 +274,7 @@ public class TeacherCourseService {
     /** Xóa khóa học — chỉ khi DRAFT. */
     @Transactional
     public void deleteCourse(UUID courseId, AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         if (course.getStatus() != CourseStatus.DRAFT) {
             throw new BusinessException("CANNOT_DELETE",
@@ -291,12 +303,18 @@ public class TeacherCourseService {
     /** Nộp khóa học để Admin duyệt. */
     @Transactional
     public TeacherCourseResponse submitForReview(UUID courseId, AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
 
         // BUG FIX: load chapters một lần duy nhất — trước đây query 2 lần cùng một kết quả
         List<Chapter> chapters = chapterRepository.findWithLessonsByCourseId(courseId);
 
         // Validate: khóa học phải có ít nhất 1 chương
+        if (chapters.size() < 4) {
+            throw new BusinessException("COURSE_MIN_CHAPTERS_REQUIRED",
+                    "Khóa học phải có tối thiểu 4 chương trước khi nộp duyệt.");
+        }
+
         if (chapters.isEmpty()) {
             throw new BusinessException("EMPTY_COURSE",
                     "Khóa học phải có ít nhất 1 chương trước khi nộp duyệt.");
@@ -310,12 +328,20 @@ public class TeacherCourseService {
                     "Mỗi chương phải có ít nhất 1 bài giảng.");
         }
 
+        chapters.stream()
+                .flatMap(chapter -> chapter.getLessons().stream())
+                .forEach(lesson -> validateCompletionRuleForLesson(lesson, false));
+        List<ExamConfig> submittedExams = examConfigVersionService.ensureDraftSet(courseId);
+        validateRequiredExamCoverage(chapters, submittedExams);
+
         int nextVersion = courseVersionRepository.findMaxVersionNo(courseId) + 1;
         course.markSubmittedVersion(nextVersion);
         course.submitForReview();
         Course saved = courseRepository.save(course);
-        courseVersionRepository.save(CourseVersion.create(
-                saved, saved.getTeacher(), nextVersion, buildCourseSnapshotJson(saved, chapters)));
+        CourseVersion version = courseVersionRepository.save(CourseVersion.create(
+                saved, saved.getTeacher(), nextVersion,
+                buildCourseSnapshotJson(saved, chapters, submittedExams)));
+        examConfigVersionService.publishDrafts(courseId, version.getId());
         notificationRepository.save(AdminNotification.courseSubmitted(saved, saved.getTeacher()));
         log.info("GV {} nộp khóa học {} để duyệt", me.userId(), courseId);
         return TeacherCourseResponse.fromEntity(saved, enrollmentRepository.countByCourseId(saved.getId()));
@@ -329,6 +355,7 @@ public class TeacherCourseService {
     @Transactional
     public TeacherChapterResponse addChapter(UUID courseId, AuthenticatedUser me,
                                               CreateChapterRequest req) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
@@ -340,6 +367,8 @@ public class TeacherCourseService {
         Chapter saved   = chapterRepository.save(chapter);
         refreshCourseCounts(courseId);
         log.info("Thêm chương '{}' vào khóa học {}", req.title(), courseId);
+        auditContentChange(courseId, "CHAPTER", saved.getId(), "CREATE", "MAJOR",
+                me.userId(), null, chapterAuditSnapshot(saved));
         return TeacherChapterResponse.fromEntity(saved);
     }
 
@@ -347,6 +376,7 @@ public class TeacherCourseService {
     public TeacherChapterResponse updateChapter(UUID courseId, UUID chapterId,
                                                  AuthenticatedUser me,
                                                  UpdateChapterRequest req) {
+        teacherAccessService.requireApprovedTeacher(me);
         // loadAndVerifyOwner trả Course đã load — dùng lại để assertEditable,
         // không cần courseRepository.findById() lần 2 (tránh 1 DB round-trip thừa).
         Course course = loadAndVerifyOwner(courseId, me.userId());
@@ -356,12 +386,17 @@ public class TeacherCourseService {
         Chapter chapter = chapterRepository.findByIdAndCourseId(chapterId, courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Chapter", chapterId));
 
+        Map<String, Object> before = chapterAuditSnapshot(chapter);
         chapter.update(req.title(), req.description(), req.position());
-        return TeacherChapterResponse.fromEntity(chapterRepository.save(chapter));
+        Chapter saved = chapterRepository.save(chapter);
+        auditContentChange(courseId, "CHAPTER", saved.getId(), "UPDATE", "MINOR",
+                me.userId(), before, chapterAuditSnapshot(saved));
+        return TeacherChapterResponse.fromEntity(saved);
     }
 
     @Transactional
     public void deleteChapter(UUID courseId, UUID chapterId, AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
@@ -369,6 +404,7 @@ public class TeacherCourseService {
         Chapter chapter = chapterRepository.findByIdAndCourseId(chapterId, courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Chapter", chapterId));
 
+        Map<String, Object> before = chapterAuditSnapshot(chapter);
         List<Lesson> lessons = lessonRepository.findByChapterIdOrderByPositionAsc(chapterId);
         List<CourseDocument> documents = loadDocumentsForLessons(lessons);
         documentRepository.deleteAll(documents);
@@ -381,6 +417,8 @@ public class TeacherCourseService {
         chapterRepository.delete(chapter);
         contentUploadService.deleteLessonFilesAfterCommit(lessons, documents);
         refreshCourseCounts(courseId);
+        auditContentChange(courseId, "CHAPTER", chapterId, "DELETE", "MAJOR",
+                me.userId(), before, null);
         log.info("Xóa chương {} khỏi khóa học {}", chapterId, courseId);
     }
 
@@ -393,6 +431,7 @@ public class TeacherCourseService {
     public TeacherLessonResponse addLesson(UUID courseId, UUID chapterId,
                                             AuthenticatedUser me,
                                             CreateLessonRequest req) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
@@ -410,8 +449,11 @@ public class TeacherCourseService {
             lesson.setVideoEmbedUrl(req.videoEmbedUrl());
         }
 
+        validateCompletionRuleForLesson(lesson, "upload".equals(normalizeVideoSource(req.videoSource())));
         Lesson saved = lessonRepository.save(lesson);
         refreshCourseCounts(courseId);
+        auditContentChange(courseId, "LESSON", saved.getId(), "CREATE", "MAJOR",
+                me.userId(), null, lessonSnapshot(saved));
         log.info("Thêm bài giảng '{}' vào chương {}", req.title(), chapterId);
         return TeacherLessonResponse.fromEntity(saved);
     }
@@ -420,6 +462,7 @@ public class TeacherCourseService {
     public TeacherLessonResponse updateLesson(UUID courseId, UUID chapterId,
                                                UUID lessonId, AuthenticatedUser me,
                                                UpdateLessonRequest req) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
@@ -432,6 +475,7 @@ public class TeacherCourseService {
 
         String oldVideoPath = lesson.getVideoStoragePath();
         String videoSource = normalizeVideoSource(req.videoSource());
+        Map<String, Object> before = lessonSnapshot(lesson);
 
         lesson.update(
                 req.title(),
@@ -460,12 +504,17 @@ public class TeacherCourseService {
             }
         }
 
-        return TeacherLessonResponse.fromEntity(lessonRepository.save(lesson));
+        validateCompletionRuleForLesson(lesson, "upload".equals(videoSource));
+        Lesson saved = lessonRepository.save(lesson);
+        auditContentChange(courseId, "LESSON", saved.getId(), "UPDATE", detectLessonChangeType(before, saved),
+                me.userId(), before, lessonSnapshot(saved));
+        return TeacherLessonResponse.fromEntity(saved);
     }
 
     @Transactional
     public void deleteLesson(UUID courseId, UUID chapterId, UUID lessonId,
                               AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
@@ -475,21 +524,26 @@ public class TeacherCourseService {
         Lesson lesson = lessonRepository.findByIdAndChapterId(lessonId, chapterId)
                 .orElseThrow(() -> new ResourceNotFoundException("Lesson", lessonId));
 
+        Map<String, Object> before = lessonSnapshot(lesson);
         List<CourseDocument> documents = documentRepository.findByLessonIdOrderByPositionAsc(lessonId);
         documentRepository.deleteAll(documents);
         lessonRepository.delete(lesson);
         contentUploadService.deleteLessonFilesAfterCommit(List.of(lesson), documents);
         refreshCourseCounts(courseId);
+        auditContentChange(courseId, "LESSON", lessonId, "DELETE", "MAJOR",
+                me.userId(), before, null);
         log.info("Xóa bài giảng {} khỏi chương {}", lessonId, chapterId);
     }
 
     @Transactional
     public TeacherCourseDetailResponse reorderChapters(UUID courseId, AuthenticatedUser me,
                                                        ReorderChaptersRequest req) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
         List<Chapter> chapters = chapterRepository.findByCourseIdOrderByPositionAsc(courseId);
+        Map<String, Object> before = orderedChapterAuditSnapshot(chapters);
         validateReorderIds(
                 chapters.stream().map(Chapter::getId).collect(java.util.stream.Collectors.toSet()),
                 req.chapters().stream().map(ReorderItemRequest::id).toList(),
@@ -505,6 +559,8 @@ public class TeacherCourseService {
             byId.get(ordered.get(i).id()).update(null, null, i + 1);
         }
         chapterRepository.saveAll(chapters);
+        auditContentChange(courseId, "CHAPTER", courseId, "REORDER", "MAJOR",
+                me.userId(), before, orderedChapterAuditSnapshot(chapters));
         return getCourseDetail(courseId, me);
     }
 
@@ -512,6 +568,7 @@ public class TeacherCourseService {
     public TeacherCourseDetailResponse reorderLessons(UUID courseId, UUID chapterId,
                                                       AuthenticatedUser me,
                                                       ReorderLessonsRequest req) {
+        teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
@@ -519,6 +576,7 @@ public class TeacherCourseService {
                 .orElseThrow(() -> new ResourceNotFoundException("Chapter", chapterId));
 
         List<Lesson> lessons = lessonRepository.findByChapterIdOrderByPositionAsc(chapterId);
+        Map<String, Object> before = orderedLessonAuditSnapshot(chapterId, lessons);
         validateReorderIds(
                 lessons.stream().map(Lesson::getId).collect(java.util.stream.Collectors.toSet()),
                 req.lessons().stream().map(ReorderItemRequest::id).toList(),
@@ -535,6 +593,8 @@ public class TeacherCourseService {
             lesson.update(null, null, i + 1, Boolean.TRUE.equals(lesson.getIsFree()));
         }
         lessonRepository.saveAll(lessons);
+        auditContentChange(courseId, "LESSON", chapterId, "REORDER", "MAJOR",
+                me.userId(), before, orderedLessonAuditSnapshot(chapterId, lessons));
         return getCourseDetail(courseId, me);
     }
 
@@ -556,6 +616,81 @@ public class TeacherCourseService {
         }
         throw new BusinessException("INVALID_VIDEO_SOURCE",
                 "Nguồn video không hợp lệ. Chỉ chấp nhận upload, embed hoặc none.");
+    }
+
+    private void validateCompletionRuleForLesson(Lesson lesson, boolean allowPendingVideo) {
+        boolean hasVideo = lesson.getVideoStoragePath() != null
+                || lesson.getVideoUrl() != null
+                || lesson.getVideoEmbedUrl() != null;
+        if (hasVideo || allowPendingVideo) return;
+        String rule = lesson.getCompletionRule();
+        if (rule == null || !Set.of("DOCUMENT_OPENED", "MARK_AS_COMPLETE",
+                "ASSIGNMENT_SUBMITTED", "ASSIGNMENT_PASSED").contains(rule)) {
+            throw new BusinessException("COMPLETION_RULE_REQUIRED",
+                    "Bài học không có video phải chọn completion_rule hợp lệ.");
+        }
+    }
+
+    private String detectLessonChangeType(Map<String, Object> before, Lesson after) {
+        if (before == null) return "MAJOR";
+        boolean videoChanged = !java.util.Objects.equals(before.get("videoEmbedUrl"), after.getVideoEmbedUrl())
+                || !java.util.Objects.equals(before.get("videoStoragePath"), after.getVideoStoragePath())
+                || !java.util.Objects.equals(before.get("completionRule"), after.getCompletionRule());
+        return videoChanged ? "MAJOR" : "MINOR";
+    }
+
+    private Map<String, Object> chapterAuditSnapshot(Chapter chapter) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", chapter.getId());
+        row.put("title", chapter.getTitle());
+        row.put("description", chapter.getDescription());
+        row.put("position", chapter.getPosition());
+        return row;
+    }
+
+    private Map<String, Object> orderedChapterAuditSnapshot(List<Chapter> chapters) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("chapters", chapters.stream()
+                .sorted(Comparator.comparing(Chapter::getPosition))
+                .map(this::chapterAuditSnapshot)
+                .toList());
+        return row;
+    }
+
+    private Map<String, Object> orderedLessonAuditSnapshot(UUID chapterId, List<Lesson> lessons) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("chapterId", chapterId);
+        row.put("lessons", lessons.stream()
+                .sorted(Comparator.comparing(Lesson::getPosition))
+                .map(this::lessonSnapshot)
+                .toList());
+        return row;
+    }
+
+    private void auditContentChange(UUID courseId, String entityType, UUID entityId, String action,
+                                    String changeType, UUID actorId,
+                                    Map<String, Object> before, Map<String, Object> after) {
+        try {
+            jdbcTemplate.update("""
+                    INSERT INTO public.course_content_audit_logs
+                    (course_id, entity_type, entity_id, action, change_type, actor_id, before_state, after_state)
+                    VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+                    """,
+                    courseId, entityType, entityId, action, changeType, actorId,
+                    toJsonOrNull(before), toJsonOrNull(after));
+        } catch (Exception ex) {
+            log.warn("Could not write course content audit log course={} entity={} action={}",
+                    courseId, entityType, action, ex);
+        }
+    }
+
+    private String toJsonOrNull(Map<String, Object> payload) {
+        if (payload == null) return null;
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
     }
 
     private void validateReorderIds(Set<UUID> expectedIds, List<UUID> requestedIds, String message) {
@@ -608,7 +743,8 @@ public class TeacherCourseService {
         }
     }
 
-    private String buildCourseSnapshotJson(Course course, List<Chapter> chapters) {
+    private String buildCourseSnapshotJson(
+            Course course, List<Chapter> chapters, List<ExamConfig> submittedExams) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("courseId", course.getId());
         snapshot.put("versionNo", course.getSubmittedVersionNo());
@@ -629,9 +765,18 @@ public class TeacherCourseService {
         snapshot.put("status", course.getStatus().toDbValue());
         snapshot.put("totalChapters", chapters.size());
         snapshot.put("totalLessons", countLessons(chapters));
+        snapshot.put("quizChapterIds", quizConfigRepository.findByCourseIds(List.of(course.getId()))
+                .stream()
+                .map(config -> config.getChapter().getId())
+                .distinct()
+                .toList());
         snapshot.put("chapters", chapters.stream()
                 .sorted(Comparator.comparing(Chapter::getPosition))
                 .map(this::chapterSnapshot)
+                .toList());
+        snapshot.put("requiredExams", submittedExams.stream()
+                .sorted(Comparator.comparing(ExamConfig::getSlotIndex))
+                .map(this::examSnapshot)
                 .toList());
         try {
             return objectMapper.writeValueAsString(snapshot);
@@ -666,8 +811,78 @@ public class TeacherCourseService {
         row.put("videoUrl", lesson.getVideoUrl());
         row.put("durationSec", lesson.getDurationSec());
         row.put("videoFallbackUrl", lesson.getVideoFallbackUrl());
+        row.put("hlsPlaylistUrl", lesson.getHlsPlaylistUrl());
+        row.put("videoProcessingStatus", lesson.getVideoProcessingStatus());
+        row.put("originalVideoRetentionUntil", lesson.getOriginalVideoRetentionUntil());
+        row.put("completionRule", lesson.getCompletionRule());
         row.put("slideCueSeconds", lesson.getSlideCueSeconds());
         return row;
+    }
+
+    private Map<String, Object> examSnapshot(ExamConfig exam) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", exam.getId());
+        row.put("slotIndex", exam.getSlotIndex());
+        row.put("examType", exam.getExamType());
+        row.put("name", exam.getName());
+        row.put("scopeStartChapterId", exam.getScopeStartChapter() != null
+                ? exam.getScopeStartChapter().getId() : null);
+        row.put("placementChapterId", exam.getPlacementChapter() != null
+                ? exam.getPlacementChapter().getId() : null);
+        row.put("durationMinutes", exam.getDurationMinutes());
+        row.put("passScorePercent", exam.getPassScorePercent());
+        return row;
+    }
+
+    private void validateRequiredExamCoverage(
+            List<Chapter> chapters, List<ExamConfig> exams) {
+        if (exams.size() != 4 || exams.stream().map(ExamConfig::getSlotIndex).collect(Collectors.toSet()).size() != 4) {
+            throw new BusinessException("REQUIRED_EXAMS_MISSING",
+                    "Khóa học phải có đúng 4 bài kiểm tra bắt buộc.");
+        }
+        Map<Integer, ExamConfig> bySlot = exams.stream()
+                .collect(Collectors.toMap(ExamConfig::getSlotIndex, exam -> exam));
+        for (int slot = 0; slot < 4; slot++) {
+            if (!bySlot.containsKey(slot)) {
+                throw new BusinessException("REQUIRED_EXAMS_MISSING",
+                        "Thieu bai kiem tra bat buoc o slot " + (slot + 1) + ".");
+            }
+        }
+
+        List<Chapter> ordered = chapters.stream()
+                .sorted(Comparator.comparing(Chapter::getPosition))
+                .toList();
+        int coveredUntil = -1;
+        for (int slot = 0; slot < 4; slot++) {
+            ExamConfig exam = bySlot.get(slot);
+            int start = indexOfChapter(ordered, exam.getScopeStartChapter() != null
+                    ? exam.getScopeStartChapter().getId() : null);
+            int end = indexOfChapter(ordered, exam.getPlacementChapter() != null
+                    ? exam.getPlacementChapter().getId() : null);
+            if (start < 0 || end < start) {
+                throw new BusinessException("INVALID_EXAM_SCOPE_COVERAGE",
+                        "Phạm vi bài kiểm tra không hợp lệ.");
+            }
+            if (start > coveredUntil + 1) {
+                throw new BusinessException("INVALID_EXAM_SCOPE_COVERAGE",
+                        "Phạm vi 4 bài kiểm tra không được bỏ trống chương.");
+            }
+            coveredUntil = Math.max(coveredUntil, end);
+        }
+        if (coveredUntil != ordered.size() - 1) {
+            throw new BusinessException("INVALID_EXAM_SCOPE_COVERAGE",
+                    "Phạm vi 4 bài kiểm tra phải phủ từ chương đầu đến chương cuối.");
+        }
+    }
+
+    private int indexOfChapter(List<Chapter> chapters, UUID chapterId) {
+        if (chapterId == null) return -1;
+        for (int i = 0; i < chapters.size(); i++) {
+            if (chapters.get(i).getId().equals(chapterId)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private String normalizeSlideCueSeconds(String value) {
@@ -682,11 +897,11 @@ public class TeacherCourseService {
                 second = Integer.parseInt(part.trim());
             } catch (NumberFormatException ex) {
                 throw new BusinessException("INVALID_SLIDE_CUES",
-                        "Moc dong bo slide phai la cac so giay, cach nhau bang dau phay.", HttpStatus.BAD_REQUEST);
+                        "Mốc đồng bộ slide phải là các số giây, cách nhau bằng dấu phẩy.", HttpStatus.BAD_REQUEST);
             }
             if (second < 0 || second <= previous) {
                 throw new BusinessException("INVALID_SLIDE_CUES",
-                        "Moc dong bo slide phai tang dan va khong am.", HttpStatus.BAD_REQUEST);
+                        "Mốc đồng bộ slide phải tăng dần và không âm.", HttpStatus.BAD_REQUEST);
             }
             if (result.length() > 0) result.append(',');
             result.append(second);
@@ -877,3 +1092,4 @@ public class TeacherCourseService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 }
+

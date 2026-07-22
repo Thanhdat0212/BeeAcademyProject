@@ -1,40 +1,133 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
+  BookOpen,
+  CheckCircle2,
+  ClipboardList,
+  Clock,
+  FileText,
+  Loader2,
+  Lock,
+  MessageSquare,
+  Minus,
+  PlayCircle,
+  Plus,
+  ShoppingCart,
   Star,
   Users,
-  PlayCircle,
-  FileText,
-  CheckCircle2,
-  Lock,
-  ShoppingCart,
   Video,
-  MessageSquare,
-  BookOpen,
-  ClipboardList,
-  Loader2,
-  Clock,
 } from 'lucide-react';
-import DashboardHeader from '../../../components/DashboardHeader';
-import type { Course } from '../../../data/mockCourses';
-import { notify } from '../../../lib/toast';
-import { useCartStore } from '../../../store/useCartStore';
-import { useAuthStore } from '../../../store/useAuthStore';
-import { useCourseStore } from '../../../store/useCourseStore';
-import { formatDurationSec } from '../../../api/adapter';
+import { AnimatePresence, motion } from 'motion/react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { adaptCourseSummary, formatDurationSec } from '../../../api/adapter';
+import { getCourseProgress } from '../../../api/courseProgressService';
+import { searchCourses } from '../../../api/courseService';
 import { listOrders, verifyPayment } from '../../../api/orderService';
-import { getStudentLearningContext } from '../../../api/studentLearningContextService';
-import type { StudentVideoProgress } from '../../../api/studentVideoProgressService';
+import {
+  getLatestStudentVideoProgress,
+  type StudentVideoProgress,
+} from '../../../api/studentVideoProgressService';
+import DashboardHeader from '../../../components/DashboardHeader';
+import { notify } from '../../../lib/toast';
+import { useAuthStore } from '../../../store/useAuthStore';
+import { useCartStore } from '../../../store/useCartStore';
+import { useCourseStore, type VideoPosition } from '../../../store/useCourseStore';
 import type { ChapterDetail } from '../../../types/api';
-import { CourseReviewsPanel } from './CourseReviewsPanel';
-import { MarketingSyllabusList } from './MarketingSyllabusList';
-import { RelatedCourses } from './RelatedCourses';
-import { SafeCourseImage, adaptLearningLesson, getContinueLearningLesson, getCourseProgressStats, getOrderedVideoLessons, isDirectVideoUrl, toEmbeddableVideoUrl, type MarketingSyllabusSection, watchedDurationSec } from './shared';
+import type { Course, Lesson } from '../../../types/course';
+import {
+  adaptLearningLesson,
+  findContinueLearningLesson,
+  getCourseProgressStats,
+  getGlobalLessonNumberById,
+  getLessonDisplayDuration,
+  getLessonUnlockState,
+  getOrderedVideoLessons,
+  isDirectVideoUrl,
+  SafeCourseImage,
+  toEmbeddableVideoUrl,
+  watchedDurationSec,
+} from './courseDetailUtils';
 
+type MarketingSyllabusSection = Omit<ChapterDetail, 'lessons'> & { lessons: Lesson[] };
 
-export function MarketingView({
+const CourseReviewsPanel = lazy(() => import('./CourseReviewsPanel'));
+export function RelatedCourses({
+  currentCourseId,
+  subjectSlug,
+}: {
+  currentCourseId?: string;
+  subjectSlug?: string;
+}) {
+  const [courses, setCourses] = useState<Course[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRelatedCourses() {
+      try {
+        const bySubject = await searchCourses({
+          subject: subjectSlug,
+          size: 8,
+          sort: 'rating',
+        });
+        let items = bySubject.items.filter((item) => item.id !== currentCourseId);
+
+        // Nếu cùng môn chưa đủ 4 khóa, bổ sung bằng các khóa PUBLISHED khác.
+        if (items.length < 4) {
+          const fallback = await searchCourses({ size: 8, sort: 'rating' });
+          const seen = new Set(items.map((item) => item.id));
+          items = [...items, ...fallback.items.filter((item) =>
+            item.id !== currentCourseId && !seen.has(item.id)
+          )];
+        }
+
+        if (!cancelled) setCourses(items.slice(0, 4).map((item) => adaptCourseSummary(item)));
+      } catch {
+        if (!cancelled) setCourses([]);
+      }
+    }
+
+    void loadRelatedCourses();
+    return () => { cancelled = true; };
+  }, [currentCourseId, subjectSlug]);
+
+  if (courses.length === 0) return null;
+
+  return (
+    <section className="max-w-[1200px] mx-auto w-full px-4 md:px-10 pb-20">
+      <div className="flex items-end justify-between gap-4 mb-6">
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-wider text-primary">Khám phá thêm</p>
+          <h2 className="mt-1 text-2xl font-extrabold text-on-surface">Khóa học liên quan</h2>
+        </div>
+        <Link to="/courses" className="text-sm font-bold text-primary hover:underline">Xem tất cả</Link>
+      </div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        {courses.map((related) => (
+          <Link
+            key={related.id}
+            to={`/courses/${related.id}`}
+            className="overflow-hidden rounded-3xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all hover:-translate-y-1 hover:border-primary/40 hover:shadow-lg"
+          >
+            <SafeCourseImage course={related} className="h-36 w-full object-cover" />
+            <div className="p-4">
+              <p className="line-clamp-2 font-extrabold text-on-surface">{related.title}</p>
+              <p className="mt-2 text-xs text-on-surface-variant">{related.instructor}</p>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-600">
+                  <Star className="h-3.5 w-3.5 fill-amber-500" /> {related.rating > 0 ? related.rating.toFixed(1) : 'Mới'}
+                </span>
+                <span className="text-sm font-extrabold text-primary">{related.price}</span>
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export default function MarketingView({
   course,
   rawChapters,
   onStartPreview,
@@ -54,9 +147,9 @@ export function MarketingView({
   const enrollCourses = useCourseStore(state => state.enrollCourses);
   const completedLessons = useCourseStore(state => state.completedLessons);
   const completedQuizzes = useCourseStore(state => state.completedQuizzes);
+  const hydrateCourseProgress = useCourseStore(state => state.hydrateCourseProgress);
   const lessonDurations = useCourseStore(state => state.lessonDurations);
   const videoPositions = useCourseStore(state => state.videoPositions);
-  const hydrateCourseProgress = useCourseStore(state => state.hydrateCourseProgress);
   const navigate = useNavigate();
   const [activating, setActivating] = useState(false);
   const [openingLearning, setOpeningLearning] = useState(false);
@@ -99,11 +192,6 @@ export function MarketingView({
   const previewCtaLabel = primaryPreviewLesson?.type === 'video'
     ? 'Xem video học thử'
     : 'Xem nội dung học thử';
-  const orderedVideoLessons = useMemo(
-    () => getOrderedVideoLessons(syllabusSections),
-    [syllabusSections],
-  );
-
   const introVideoUrl = course.introVideoUrl?.trim();
   const introEmbedUrl = introVideoUrl ? toEmbeddableVideoUrl(introVideoUrl) : null;
   const introDirectUrl = introVideoUrl && isDirectVideoUrl(introVideoUrl) ? introVideoUrl : null;
@@ -143,8 +231,10 @@ export function MarketingView({
 
     if (user?.role === 'student' && course.isEnrolled) {
       try {
-        const { progress: courseProgress, latestVideoProgress: remoteVideoProgress } =
-          await getStudentLearningContext(course.id);
+        const [courseProgress, remoteVideoProgress] = await Promise.all([
+          getCourseProgress(course.id),
+          getLatestStudentVideoProgress(course.id),
+        ]);
         latestCompletedLessonIds = courseProgress.completedLessonIds;
         hydrateCourseProgress(
           course.id,
@@ -166,10 +256,21 @@ export function MarketingView({
       }
     }
 
-    const continueLesson = getContinueLearningLesson(
-      orderedVideoLessons,
+    const latestVideoPositions: Record<string, VideoPosition> = { ...localCourseProgress };
+    if (latestVideoProgress) {
+      latestVideoPositions[latestVideoProgress.lessonId] = {
+        positionSec: latestVideoProgress.positionSec,
+        durationSec: latestVideoProgress.durationSec,
+        updatedAt: latestVideoProgress.updatedAt ?? new Date().toISOString(),
+        watchedSegments: latestVideoProgress.watchedSegments,
+      };
+    }
+
+    const continueLesson = findContinueLearningLesson(
+      course,
+      syllabusSections,
       latestCompletedLessonIds,
-      latestVideoProgress,
+      latestVideoPositions,
     );
     onOpenLearning(continueLesson?.id);
     setOpeningLearning(false);
@@ -296,8 +397,8 @@ export function MarketingView({
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex-1 py-3 px-6 rounded-2xl font-bold text-sm md:text-base whitespace-nowrap transition-all ${activeTab === tab.id
-                      ? 'bg-primary text-on-primary shadow-md'
-                      : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+                    ? 'bg-primary text-on-primary shadow-md'
+                    : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
                     }`}
                 >
                   {tab.label}
@@ -383,14 +484,16 @@ export function MarketingView({
                 )}
                 {activeTab === 'reviews' && (
                   <motion.div key="reviews" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-                    <CourseReviewsPanel
-                      courseId={course.id}
-                      fallbackRating={course.rating}
-                      fallbackReviewCount={course.reviewCount ?? 0}
-                      canSubmitReview={canSubmitReview}
-                      isOwnedCourse={isOwnedCourse}
-                      progressPct={progressPercent}
-                    />
+                    <Suspense fallback={<div className="py-12 text-center text-sm text-on-surface-variant">Đang tải đánh giá...</div>}>
+                      <CourseReviewsPanel
+                        courseId={course.id}
+                        fallbackRating={course.rating}
+                        fallbackReviewCount={course.reviewCount ?? 0}
+                        canSubmitReview={canSubmitReview}
+                        isOwnedCourse={isOwnedCourse}
+                        progressPct={progressPercent}
+                      />
+                    </Suspense>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -414,8 +517,6 @@ export function MarketingView({
                     src={introDirectUrl}
                     poster={course.image && !isDirectVideoUrl(course.image) ? course.image : undefined}
                     controls
-                    // preload="none": không tải trước mp4 cho mọi khách vào trang — tiết kiệm egress Supabase
-                    preload="none"
                     className="w-full h-full object-cover bg-black"
                   />
                 ) : (
@@ -464,7 +565,7 @@ export function MarketingView({
                     type="button"
                     onClick={handleOpenLearning}
                     disabled={openingLearning}
-                    className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-4 text-lg font-bold text-on-primary shadow-lg shadow-primary/30 transition-all hover:-translate-y-1 hover:shadow-primary/50 disabled:cursor-wait disabled:opacity-70"
+                    className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-4 text-lg font-bold text-on-primary shadow-lg shadow-primary/30 transition-all hover:-translate-y-1 hover:shadow-primary/50 disabled:cursor-wait disabled:opacity-75"
                   >
                     {openingLearning
                       ? <Loader2 className="h-6 w-6 animate-spin" />
@@ -588,3 +689,217 @@ export function MarketingView({
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMPONENT: LearningView
+//
+// Hiển thị khi user ĐÃ MUA khóa học.
+// Giao diện học giống YouTube/Udemy: video player trái + sidebar mục lục phải.
+//
+// STATE QUAN TRỌNG:
+//   activeLesson  — bài học đang xem (video/pdf), quyết định nội dung player
+//   activeQuiz    — bài quiz đang mở (null = không có modal), tách biệt với activeLesson
+//   quizScores    — Record<lessonId, điểm%> lưu điểm các quiz trong session
+//   isSidebarOpen — toggle sidebar mục lục (ẩn/hiện)
+//
+// TẠI SAO activeQuiz TÁCH BIỆT activeLesson?
+//   Quiz không hiển thị trong video player — chúng mở modal overlay.
+//   Nếu dùng chung, khi user đóng quiz thì video player cũng bị reset.
+//   Tách biệt: click quiz → setActiveQuiz(lesson), click video/pdf → setActiveLesson(lesson)
+//
+// SIDEBAR:
+//   Mỗi item là một bài trong course.lessons
+//   Quiz items: hiển thị badge "Quiz" + điểm nếu đã làm (từ quizScores)
+//   Video/PDF items: hiển thị icon type + dấu tích xanh nếu isCompleted
+//   Sidebar slide in/out từ bên phải với spring animation
+// ═══════════════════════════════════════════════════════════════════════════════
+function MarketingSyllabusList({
+  course,
+  sections,
+  expandedChapterIds,
+  completedList,
+  lessonDurations,
+  isOwnedCourse,
+  onToggleChapter,
+  onStartPreview,
+  onOpenLearning,
+}: {
+  course: Course;
+  sections: MarketingSyllabusSection[];
+  expandedChapterIds: Set<string>;
+  completedList: string[];
+  lessonDurations: Record<string, Record<string, number>>;
+  isOwnedCourse: boolean;
+  onToggleChapter: (chapterId: string) => void;
+  onStartPreview?: (lessonId?: string) => void;
+  onOpenLearning?: (lessonId?: string) => void;
+}) {
+  const orderedVideoLessons = useMemo(
+    () => getOrderedVideoLessons(sections),
+    [sections],
+  );
+  const lessonNumberById = useMemo(
+    () => getGlobalLessonNumberById(sections),
+    [sections],
+  );
+
+  return (
+    <div className="space-y-7">
+      {sections.map((chapter, chapterIndex) => {
+        const isExpanded = expandedChapterIds.has(chapter.id);
+        const videoLessons = chapter.lessons.filter(lesson => lesson.type === 'video');
+        const completedVideoCount = videoLessons.filter(lesson =>
+          completedList.includes(lesson.id)
+        ).length;
+
+        return (
+          <section key={chapter.id} className="space-y-3">
+            <button
+              type="button"
+              onClick={() => onToggleChapter(chapter.id)}
+              aria-expanded={isExpanded}
+              className="w-full flex items-start justify-between gap-4 text-left"
+            >
+              <div className="min-w-0">
+                <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                  Chương {chapterIndex + 1}
+                </p>
+                <h3 className="text-base font-extrabold leading-snug text-on-surface">
+                  {chapter.title}
+                </h3>
+              </div>
+              <span className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container">
+                {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              </span>
+            </button>
+
+            <AnimatePresence initial={false}>
+              {isExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-2 pl-1 sm:pl-3">
+                    {chapter.lessons.map((lesson, lessonIndex) => {
+                      const isLessonCompleted = completedList.includes(lesson.id);
+                      const lessonNumber = lessonNumberById.get(lesson.id) ?? lessonIndex + 1;
+                      const canPreviewLesson = Boolean(lesson.isFree && onStartPreview);
+                      const unlockState = getLessonUnlockState(course, lesson, orderedVideoLessons, completedList);
+                      const canOpen = unlockState.canOpen && (isOwnedCourse || canPreviewLesson);
+                      const lockLabel = unlockState.lockedByPrerequisite
+                        ? 'Hoàn thành bài trước'
+                        : 'Cần mua khóa';
+
+                      return (
+                        <button
+                          type="button"
+                          key={lesson.id}
+                          onClick={() => {
+                            if (isOwnedCourse) {
+                              onOpenLearning?.(lesson.id);
+                            } else if (canPreviewLesson) {
+                              onStartPreview?.(lesson.id);
+                            }
+                          }}
+                          disabled={!canOpen}
+                          className={`w-full rounded-2xl border px-4 py-3 text-left transition-all disabled:cursor-default ${isLessonCompleted
+                            ? 'border-green-500/25 bg-green-500/5 text-green-700'
+                            : canPreviewLesson
+                              ? 'border-primary/30 bg-primary/5 text-primary hover:bg-primary/10'
+                              : 'border-transparent bg-surface hover:bg-surface-container disabled:hover:bg-surface'
+                            }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={`mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${isLessonCompleted
+                              ? 'bg-green-500/15 text-green-600'
+                              : canPreviewLesson
+                                ? 'bg-primary/10 text-primary'
+                                : 'bg-surface-container-high text-on-surface-variant'
+                              }`}>
+                              {isLessonCompleted
+                                ? <CheckCircle2 className="h-4 w-4" />
+                                : !canOpen
+                                  ? <Lock className="h-4 w-4" />
+                                  : lesson.type === 'video'
+                                    ? <PlayCircle className="h-4 w-4" />
+                                    : lesson.type === 'pdf'
+                                      ? <FileText className="h-4 w-4" />
+                                      : <ClipboardList className="h-4 w-4" />
+                              }
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h4 className="text-sm font-extrabold leading-snug text-current">
+                                Bài {lessonNumber}: {lesson.title.replace(/^Bài\s*\d+\s*[:.-]?\s*/i, '')}
+                              </h4>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium">
+                                <span className={canPreviewLesson ? 'text-primary' : 'text-on-surface-variant'}>
+                                  {getLessonDisplayDuration(course.id, lesson, lessonDurations)}
+                                </span>
+                                {canPreviewLesson && (
+                                  <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-extrabold text-amber-600">
+                                    Học thử miễn phí
+                                  </span>
+                                )}
+                                {isLessonCompleted && (
+                                  <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-extrabold text-green-700">
+                                    Đã hoàn thành
+                                  </span>
+                                )}
+                                {!canOpen && (
+                                  <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-extrabold text-on-surface-variant">
+                                    {lockLabel}
+                                  </span>
+                                )}
+                              </div>
+                              {!canOpen && unlockState.reason && (
+                                <p className="mt-2 text-xs font-medium text-on-surface-variant">
+                                  {unlockState.reason}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+
+                    {chapter.hasQuizConfig && chapter.id !== 'flat-lessons' && (
+                      <div className="w-full rounded-2xl border border-transparent bg-surface-container/60 px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant">
+                            <Lock className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-extrabold text-on-surface-variant">Quiz chương {chapterIndex + 1}</p>
+                            <p className="text-xs font-medium text-on-surface-variant">
+                              Hoàn thành {completedVideoCount}/{videoLessons.length} video để mở quiz
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMPONENT: CourseAssignmentsPanel (UC16 — Nộp bài tập)
+//
+// Tab "Bài tập" trong LearningView: liệt kê bài tập tự luận của khóa học,
+// cho học sinh nộp bài (text + tối đa 5 file) và xem điểm/nhận xét sau khi chấm.
+//
+// TRẠNG THÁI mỗi bài:
+//   chưa nộp   → form nộp bài
+//   pending    → đã nộp, chờ chấm (được nộp lại, ghi đè bài cũ)
+//   resubmit   → GV trả về yêu cầu nộp lại
+//   graded     → hiện điểm + nhận xét, khóa form
+// ═══════════════════════════════════════════════════════════════════════════════

@@ -158,7 +158,7 @@ export default function CertificatesPage() {
           <div>
             <h1 className="text-2xl font-extrabold text-on-surface">Chứng chỉ của tôi</h1>
             <p className="mt-1 text-sm text-on-surface-variant">
-              Điều kiện cấp: hoàn thành 100% khóa học và đạt bài kiểm tra cuối kỳ 2.
+              Điều kiện cấp: hoàn thành 100% khóa học và đạt đủ 4 bài kiểm tra bắt buộc.
             </p>
           </div>
           <button
@@ -191,7 +191,9 @@ export default function CertificatesPage() {
                 certificateCourses.map(course => {
                   const certificate = certificateByCourse.get(course.courseId);
                   const canDownload = certificate?.status === 'ISSUED' || certificate?.status === 'REISSUED';
-                  const eligibleForCertificate = course.progressPct >= 100 && course.finalExamPassed === true;
+                  const eligibleForCertificate = course.progressPct >= 100 && course.allRequiredExamsPassed === true;
+                  const passedExamCount = (course.requiredExams ?? [])
+                    .filter(exam => exam.status === 'passed').length;
 
                   return (
                     <article
@@ -205,8 +207,8 @@ export default function CertificatesPage() {
                           <p className="mt-1 text-sm text-on-surface-variant">
                             Giáo viên: {course.teacherName ?? 'Đang cập nhật'} · Tiến độ {course.progressPct}%
                           </p>
-                          <p className={`mt-1 text-xs font-semibold ${course.finalExamPassed ? 'text-green-700' : 'text-amber-700'}`}>
-                            Final exam: {course.finalExamPassed ? 'Đã đạt' : 'Chưa đạt hoặc chưa có kết quả'}
+                          <p className={`mt-1 text-xs font-semibold ${course.allRequiredExamsPassed ? 'text-green-700' : 'text-amber-700'}`}>
+                            Bài thi bắt buộc: {passedExamCount}/4 đã đạt
                           </p>
                           {certificate && (
                             <span className={`mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${statusClass(certificate.status)}`}>
@@ -261,7 +263,12 @@ export default function CertificatesPage() {
                             </p>
                           ) : (
                             <p className="max-w-xs self-center text-xs font-semibold text-amber-700">
-                              Hoàn thành 100% nội dung và đạt final exam để xem chứng chỉ.
+                              {course.progressPct < 100
+                                ? `Còn ${Math.max(0, 100 - course.progressPct)}% nội dung chưa hoàn thành. `
+                                : ''}
+                              {passedExamCount < 4
+                                ? `Cần đạt thêm ${4 - passedExamCount} bài thi bắt buộc.`
+                                : ''}
                             </p>
                           )}
                           <Link

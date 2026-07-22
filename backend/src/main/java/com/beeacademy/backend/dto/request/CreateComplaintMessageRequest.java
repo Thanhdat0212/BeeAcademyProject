@@ -4,8 +4,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 public record CreateComplaintMessageRequest(
-        @NotBlank(message = "Vui long nhap noi dung tin nhan")
-        @Size(max = 5000, message = "Tin nhan toi da 5000 ky tu")
+        @NotBlank(message = "Vui lòng nhập nội dung tin nhắn")
+        @Size(max = 5000, message = "Tin nhắn tối đa 5000 ký tự")
         String content
 ) {
 }

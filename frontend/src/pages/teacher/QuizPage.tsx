@@ -22,11 +22,12 @@ import type { QuizConfigRequest } from '../../api/quizService';
 import type { QuestionStatsResponse } from '../../api/questionService';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
-  Bell, LogOut, Menu, X, Save,
+  LogOut, Menu, X, Save,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, Megaphone, AlertTriangle, CheckCircle2,
-  Shuffle, Timer, Target, Layers, Database, UserCircle, Lock, Star,
+  Shuffle, Timer, Layers, Database, UserCircle, Lock, Star,
 } from 'lucide-react';
+import BrandLogo from '../../components/BrandLogo';
 
 // ═══════════════════════════════════════════════════════════════════
 //  NAVIGATION
@@ -261,7 +262,7 @@ export default function TeacherQuizPage() {
       `}>
         <div className="p-6 flex items-center justify-between border-b border-outline-variant/20">
           <Link to="/teacher" className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary text-on-primary rounded-xl flex items-center justify-center font-extrabold text-lg shadow-md shadow-primary/20">B</div>
+            <BrandLogo size="sm" />
             <div>
               <p className="font-extrabold text-on-surface text-sm">Bee Academy</p>
               <p className="text-xs text-on-surface-variant font-medium">Cổng Giáo Viên</p>

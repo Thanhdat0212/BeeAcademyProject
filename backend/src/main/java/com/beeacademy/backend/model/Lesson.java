@@ -14,6 +14,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 /**
@@ -80,6 +81,18 @@ public class Lesson {
     /** Nguồn/CDN dự phòng (thường là bản bitrate thấp hơn) khi video chính lỗi. */
     @Column(name = "video_fallback_url")
     private String videoFallbackUrl;
+
+    @Column(name = "hls_playlist_url")
+    private String hlsPlaylistUrl;
+
+    @Column(name = "video_processing_status", nullable = false)
+    private String videoProcessingStatus = "NOT_REQUIRED";
+
+    @Column(name = "video_uploaded_at")
+    private Instant videoUploadedAt;
+
+    @Column(name = "original_video_retention_until")
+    private Instant originalVideoRetentionUntil;
 
     /** Thời lượng tính bằng giây. Mặc định 0 trước khi upload xong. */
     @Column(name = "duration_sec", nullable = false)
@@ -162,6 +175,10 @@ public class Lesson {
         this.videoEmbedUrl = videoEmbedUrl != null ? videoEmbedUrl.trim() : null;
         this.videoStoragePath = null;
         this.videoUrl = null;
+        this.hlsPlaylistUrl = null;
+        this.videoProcessingStatus = "EMBED";
+        this.videoUploadedAt = null;
+        this.originalVideoRetentionUntil = null;
         this.durationSec = 0;
     }
 
@@ -170,6 +187,10 @@ public class Lesson {
         this.videoEmbedUrl = null;
         this.videoStoragePath = null;
         this.videoUrl = null;
+        this.hlsPlaylistUrl = null;
+        this.videoProcessingStatus = "NOT_REQUIRED";
+        this.videoUploadedAt = null;
+        this.originalVideoRetentionUntil = null;
         this.durationSec = 0;
     }
 
@@ -182,5 +203,14 @@ public class Lesson {
         this.videoUrl         = null;   // xoá URL cũ nếu có, ưu tiên storage path
         this.videoEmbedUrl    = null;   // upload mới thay thế embed cũ
         this.durationSec      = durationSec;
+        this.hlsPlaylistUrl   = null;
+        this.videoProcessingStatus = "HLS_QUEUED";
+        this.videoUploadedAt = Instant.now();
+        this.originalVideoRetentionUntil = this.videoUploadedAt.plus(365, ChronoUnit.DAYS);
+    }
+
+    public void markHlsReady(String hlsPlaylistUrl) {
+        this.hlsPlaylistUrl = normalize(hlsPlaylistUrl);
+        this.videoProcessingStatus = this.hlsPlaylistUrl == null ? "HLS_QUEUED" : "HLS_READY";
     }
 }

@@ -41,6 +41,9 @@ public class PayoutPeriod {
     @Column(name = "transfer_content")
     private String transferContent;
 
+    @Column(name = "unc_attachment_url")
+    private String uncAttachmentUrl;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -59,10 +62,18 @@ public class PayoutPeriod {
      * Ghi lại biên lai (mã giao dịch + nội dung) và đánh dấu PAID.
      */
     public void markPaid(UUID adminId, String transferRef, String transferContent) {
+        markPaid(adminId, transferRef, transferContent, null);
+    }
+
+    public void markPaid(UUID adminId, String transferRef, String transferContent,
+                         String uncAttachmentUrl) {
         this.status = PayoutStatus.PAID;
         this.paidByAdmin = adminId;
         this.transferRef = transferRef;
         this.transferContent = transferContent;
+        this.uncAttachmentUrl = uncAttachmentUrl == null || uncAttachmentUrl.isBlank()
+                ? null
+                : uncAttachmentUrl.trim();
         this.paidAt = Instant.now();
     }
 

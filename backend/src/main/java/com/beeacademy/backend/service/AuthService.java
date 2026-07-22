@@ -56,8 +56,8 @@ public class AuthService {
      *
      * <p>Luồng:
      * <ol>
-     *   <li>Validate role không phải admin (DTO đã chặn ở regex, nhưng
-     *       check thêm ở tầng service để phòng thủ chiều sâu).</li>
+     *   <li>Validate role thuộc nhóm được đăng ký công khai (DTO đã chặn ở
+     *       regex, nhưng check thêm ở tầng service để phòng thủ chiều sâu).</li>
      *   <li>Gọi provider tạo auth user → nhận UUID.</li>
      *   <li>INSERT row vào {@code profiles} với cùng UUID.</li>
      *   <li>Trả về thông tin user + message hướng dẫn xác thực email.</li>
@@ -76,7 +76,7 @@ public class AuthService {
     public UserSummaryResponse register(RegisterRequest request) {
         UserRole role = UserRole.fromDbValue(request.role());
 
-        // Phòng thủ chiều sâu: chặn admin dù DTO đã regex chỉ student|parent|teacher
+        // Phòng thủ chiều sâu: chặn admin/teacher dù DTO đã regex chỉ student|parent
         if (role == null || !role.isAllowedForPublicSignup()) {
             throw new BusinessException("INVALID_ROLE",
                     "Vai trò không hợp lệ cho đăng ký công khai");
@@ -94,9 +94,6 @@ public class AuthService {
 
         // Bước 2: tạo profile cùng UUID
         Profile profile = Profile.createNew(providerUser.id(), role, request.fullName());
-        if (role == UserRole.TEACHER) {
-            profile.markTeacherPendingApproval();
-        }
         profileRepository.save(profile);
         log.info("Đã tạo profile {} cho user {}", profile.getId(), providerUser.email());
 
@@ -155,9 +152,6 @@ public class AuthService {
 
         // Bước 3: tạo profile trong DB
         Profile profile = Profile.createNew(providerUser.id(), role, entry.fullName());
-        if (role == UserRole.TEACHER) {
-            profile.markTeacherPendingApproval();
-        }
         profileRepository.save(profile);
 
         // Bước 4: OTP đã dùng xong, xóa khỏi store (single-use)
@@ -250,7 +244,8 @@ public class AuthService {
                         base.user().email(),
                         profile.getRole() != null ? profile.getRole().toDbValue() : base.user().role(),
                         profile.getFullName() != null ? profile.getFullName() : base.user().fullName(),
-                        profile.getAvatarUrl()
+                        profile.getAvatarUrl(),
+                        profile.isMustChangePassword()
                 );
                 return new AuthTokenResponse(
                         base.accessToken(),
@@ -311,7 +306,15 @@ public class AuthService {
         // 3. Tiến hành cập nhật mật khẩu mới
         authProviderClient.updatePasswordAsAdmin(userId, newPassword);
 
-        // 4. Xóa mã OTP sau khi dùng
+        // 4. User đã tự đặt mật khẩu riêng → gỡ ràng buộc mật khẩu tạm của Admin
+        profileRepository.findById(userId)
+                .filter(Profile::isMustChangePassword)
+                .ifPresent(profile -> {
+                    profile.clearMustChangePassword();
+                    profileRepository.save(profile);
+                });
+
+        // 5. Xóa mã OTP sau khi dùng
         otpService.consumeResetPasswordOtp(email);
         log.info("Tài khoản {} đã đặt lại mật khẩu thành công qua OTP", email);
     }
@@ -389,6 +392,17 @@ public class AuthService {
 
         // Bước 3: gọi GoTrue update
         authProviderClient.updatePassword(accessToken, request.newPassword());
+
+        // Bước 4: user đã tự đặt mật khẩu riêng → gỡ ràng buộc "phải đổi mật khẩu
+        // tạm" nếu tài khoản này do Admin cấp (xem AdminTeacherAccountService).
+        profileRepository.findUserIdByEmail(email)
+                .flatMap(profileRepository::findById)
+                .filter(Profile::isMustChangePassword)
+                .ifPresent(profile -> {
+                    profile.clearMustChangePassword();
+                    profileRepository.save(profile);
+                });
+
         log.info("User {} đã đổi mật khẩu", email);
     }
 }

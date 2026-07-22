@@ -48,6 +48,10 @@ public class QaSchemaMigration implements ApplicationRunner {
                 """);
         jdbcTemplate.execute("""
                 ALTER TABLE public.qa_threads
+                ADD COLUMN IF NOT EXISTS title VARCHAR(180) NULL
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE public.qa_threads
                 ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'pending'
                 """);
         jdbcTemplate.execute("""
@@ -60,7 +64,16 @@ public class QaSchemaMigration implements ApplicationRunner {
                 """);
         jdbcTemplate.execute("""
                 ALTER TABLE public.qa_threads
+                ADD COLUMN IF NOT EXISTS visibility VARCHAR(16) NOT NULL DEFAULT 'public'
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE public.qa_threads
                 ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE public.qa_threads
+                ADD COLUMN IF NOT EXISTS duplicate_of_thread_id UUID REFERENCES public.qa_threads(id),
+                ADD COLUMN IF NOT EXISTS duplicate_marked_at TIMESTAMPTZ
                 """);
         jdbcTemplate.execute("""
                 DO $$
@@ -113,6 +126,17 @@ public class QaSchemaMigration implements ApplicationRunner {
                             ADD CONSTRAINT chk_qa_threads_status
                             CHECK (status IN ('pending', 'answered', 'resolved'));
                     END IF;
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.table_constraints
+                        WHERE table_schema = 'public'
+                          AND table_name = 'qa_threads'
+                          AND constraint_name = 'chk_qa_threads_visibility'
+                    ) THEN
+                        ALTER TABLE public.qa_threads
+                            ADD CONSTRAINT chk_qa_threads_visibility
+                            CHECK (visibility IN ('public', 'private'));
+                    END IF;
                 END$$
                 """);
         jdbcTemplate.execute("""
@@ -130,6 +154,14 @@ public class QaSchemaMigration implements ApplicationRunner {
         jdbcTemplate.execute("""
                 CREATE INDEX IF NOT EXISTS idx_qa_threads_last_activity
                 ON public.qa_threads (last_activity_at DESC)
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_qa_threads_course_visibility_activity
+                ON public.qa_threads (course_id, visibility, last_activity_at DESC)
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_qa_threads_duplicate_of
+                ON public.qa_threads (duplicate_of_thread_id)
                 """);
 
         jdbcTemplate.execute("""
@@ -151,7 +183,12 @@ public class QaSchemaMigration implements ApplicationRunner {
                     ADD COLUMN IF NOT EXISTS attachment_url TEXT NULL,
                     ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255) NULL,
                     ADD COLUMN IF NOT EXISTS attachment_type VARCHAR(100) NULL,
-                    ADD COLUMN IF NOT EXISTS attachment_size_bytes BIGINT NULL
+                    ADD COLUMN IF NOT EXISTS attachment_size_bytes BIGINT NULL,
+                    ADD COLUMN IF NOT EXISTS moderation_status VARCHAR(30) NOT NULL DEFAULT 'approved',
+                    ADD COLUMN IF NOT EXISTS moderation_reason TEXT NULL,
+                    ADD COLUMN IF NOT EXISTS retention_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '12 months'),
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NULL,
+                    ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ NULL
                 """);
         jdbcTemplate.execute("""
                 CREATE INDEX IF NOT EXISTS idx_qa_messages_thread_id
@@ -160,6 +197,10 @@ public class QaSchemaMigration implements ApplicationRunner {
         jdbcTemplate.execute("""
                 CREATE INDEX IF NOT EXISTS idx_qa_messages_created_at
                 ON public.qa_messages (created_at ASC)
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_qa_messages_retention_until
+                ON public.qa_messages (retention_until)
                 """);
         jdbcTemplate.execute("""
                 DO $$

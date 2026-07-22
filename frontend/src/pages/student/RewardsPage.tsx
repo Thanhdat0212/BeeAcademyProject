@@ -214,7 +214,7 @@ export default function RewardsPage() {
             <p className="text-sm font-bold uppercase text-primary">Điểm tích lũy cá nhân</p>
             <h1 className="mt-1 text-3xl font-extrabold text-on-surface">Ví điểm của bạn</h1>
             <p className="mt-2 max-w-2xl text-sm text-on-surface-variant">
-              Theo dõi điểm thưởng nhận được sau quiz, bài kiểm tra và các voucher đã đổi từ điểm tích lũy.
+              Theo dõi điểm thưởng nhận được từ 4 bài kiểm tra của mỗi khóa học và các voucher đã đổi.
             </p>
           </div>
           <button
@@ -255,7 +255,7 @@ export default function RewardsPage() {
                 icon={<Trophy className="h-5 w-5" />}
                 label="Tổng điểm đã nhận"
                 value={formatNumber(wallet.lifetimePoints)}
-                note="Tính theo điểm cao nhất của mỗi bài"
+                note="Tính theo điểm cao nhất của mỗi bài kiểm tra"
                 tone="bg-primary/10 text-primary"
               />
               <SummaryCard
@@ -276,8 +276,9 @@ export default function RewardsPage() {
                   <div>
                     <h2 className="text-lg font-extrabold text-on-surface">Cách điểm được cộng</h2>
                     <p className="mt-1 max-w-3xl text-sm text-on-surface-variant">
-                      Mỗi kết quả quiz hoặc bài kiểm tra được quy đổi theo thang 100 điểm. Nếu làm lại tốt hơn,
-                      hệ thống chỉ cộng thêm phần điểm chênh lệch để bảo toàn tổng điểm cá nhân.
+                      Mỗi khóa học có 4 bài kiểm tra được tính điểm tích lũy; kết quả quiz không được tính.
+                      Điểm bài kiểm tra được quy đổi theo thang 100. Nếu làm lại tốt hơn, hệ thống chỉ cộng thêm
+                      phần điểm chênh lệch.
                     </p>
                   </div>
                 </div>

@@ -41,6 +41,9 @@ class ExamServiceTest {
     private CourseRepository courseRepository;
 
     @Mock
+    private ExamConfigVersionService examConfigVersionService;
+
+    @Mock
     private ProfileRepository profileRepository;
 
     @Mock
@@ -51,6 +54,9 @@ class ExamServiceTest {
 
     @Mock
     private QuestionRepository questionRepository;
+
+    @Mock
+    private TeacherAccessService teacherAccessService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -121,6 +127,7 @@ class ExamServiceTest {
         UUID courseId = UUID.randomUUID();
         UUID scopeChapterId = UUID.randomUUID();
         UUID placementChapterId = UUID.randomUUID();
+        UUID thirdChapterId = UUID.randomUUID();
         UUID lastChapterId = UUID.randomUUID();
         Course course = givenOwnedCourse(courseId, teacherId);
         when(course.getId()).thenReturn(courseId);
@@ -129,14 +136,16 @@ class ExamServiceTest {
 
         Chapter scopeChapter = chapter(course, scopeChapterId, "Chapter 1");
         Chapter placementChapter = chapter(course, placementChapterId, "Chapter 2");
-        Chapter lastChapter = chapter(course, lastChapterId, "Chapter 3");
+        Chapter thirdChapter = chapter(course, thirdChapterId, "Chapter 3");
+        Chapter lastChapter = chapter(course, lastChapterId, "Chapter 4");
         when(chapterRepository.findById(scopeChapterId)).thenReturn(Optional.of(scopeChapter));
         when(chapterRepository.findById(placementChapterId)).thenReturn(Optional.of(placementChapter));
         when(chapterRepository.findWithLessonsByCourseId(courseId))
-                .thenReturn(List.of(scopeChapter, placementChapter, lastChapter));
+                .thenReturn(List.of(scopeChapter, placementChapter, thirdChapter, lastChapter));
         when(chapterRepository.findByCourseIdOrderByPositionAsc(courseId))
-                .thenReturn(List.of(scopeChapter, placementChapter, lastChapter));
-        when(examRepository.findByCourseIdAndSlotIndex(courseId, 0)).thenReturn(Optional.empty());
+                .thenReturn(List.of(scopeChapter, placementChapter, thirdChapter, lastChapter));
+        when(examConfigVersionService.currentForAuthoring(courseId)).thenReturn(List.of());
+        when(examConfigVersionService.ensureDraftSet(courseId)).thenReturn(List.of());
         when(examRepository.save(any(ExamConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.saveExam(
@@ -150,12 +159,132 @@ class ExamServiceTest {
         verify(questionRepository, never()).findById(any(UUID.class));
     }
 
+    @Test
+    void saveFinalExamAllowsOverlappingPreviousSlotWhenCoverageHasNoGap() {
+        UUID teacherId = UUID.randomUUID();
+        UUID courseId = UUID.randomUUID();
+        Course course = givenOwnedCourse(courseId, teacherId);
+        when(course.getId()).thenReturn(courseId);
+        Profile teacherProfile = mock(Profile.class);
+        when(profileRepository.findById(teacherId)).thenReturn(Optional.of(teacherProfile));
+
+        Chapter chapter1 = chapter(course, UUID.randomUUID(), "Chapter 1");
+        Chapter chapter2 = chapter(course, UUID.randomUUID(), "Chapter 2");
+        Chapter chapter3 = chapter(course, UUID.randomUUID(), "Chapter 3");
+        Chapter chapter4 = chapter(course, UUID.randomUUID(), "Chapter 4");
+        Chapter chapter5 = chapter(course, UUID.randomUUID(), "Chapter 5");
+        Chapter chapter6 = chapter(course, UUID.randomUUID(), "Chapter 6");
+        Chapter chapter7 = chapter(course, UUID.randomUUID(), "Chapter 7");
+        List<Chapter> chapters = List.of(chapter1, chapter2, chapter3, chapter4, chapter5, chapter6, chapter7);
+
+        when(chapterRepository.findById(chapter4.getId())).thenReturn(Optional.of(chapter4));
+        when(chapterRepository.findById(chapter7.getId())).thenReturn(Optional.of(chapter7));
+        when(chapterRepository.findWithLessonsByCourseId(courseId)).thenReturn(chapters);
+        when(chapterRepository.findByCourseIdOrderByPositionAsc(courseId)).thenReturn(chapters);
+        List<ExamConfig> existingExams = List.of(
+                existingExam(0, chapter1, chapter2),
+                existingExam(1, chapter3, chapter3),
+                existingExam(2, chapter4, chapter4));
+        when(examConfigVersionService.currentForAuthoring(courseId)).thenReturn(existingExams);
+        when(examConfigVersionService.ensureDraftSet(courseId)).thenReturn(existingExams);
+        when(examRepository.save(any(ExamConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.saveExam(
+                courseId,
+                3,
+                teacher(teacherId),
+                request(true, chapter4.getId(), chapter7.getId(), List.of(
+                        directMultipleChoiceQuestion(),
+                        directEssayQuestion())));
+
+        verify(examRepository).save(any(ExamConfig.class));
+    }
+
+    @Test
+    void saveExamRejectsGapBetweenFixedExamSlots() {
+        UUID teacherId = UUID.randomUUID();
+        UUID courseId = UUID.randomUUID();
+        Course course = givenOwnedCourse(courseId, teacherId);
+        when(course.getId()).thenReturn(courseId);
+        when(profileRepository.findById(teacherId)).thenReturn(Optional.of(mock(Profile.class)));
+
+        Chapter chapter1 = chapter(course, UUID.randomUUID(), "Chapter 1");
+        Chapter chapter2 = chapter(course, UUID.randomUUID(), "Chapter 2");
+        Chapter chapter3 = chapter(course, UUID.randomUUID(), "Chapter 3");
+        Chapter chapter4 = chapter(course, UUID.randomUUID(), "Chapter 4");
+        List<Chapter> chapters = List.of(chapter1, chapter2, chapter3, chapter4);
+
+        when(chapterRepository.findById(chapter3.getId())).thenReturn(Optional.of(chapter3));
+        when(chapterRepository.findWithLessonsByCourseId(courseId)).thenReturn(chapters);
+        when(chapterRepository.findByCourseIdOrderByPositionAsc(courseId)).thenReturn(chapters);
+        ExamConfig firstExam = existingExam(0, chapter1, chapter1);
+        when(examConfigVersionService.currentForAuthoring(courseId))
+                .thenReturn(List.of(firstExam));
+
+        assertThatThrownBy(() -> service.saveExam(
+                courseId,
+                1,
+                teacher(teacherId),
+                request(true, chapter3.getId(), chapter3.getId(), List.of(
+                        directMultipleChoiceQuestion(),
+                        directEssayQuestion()))))
+                .isInstanceOfSatisfying(BusinessException.class, ex ->
+                        assertThat(((BusinessException) ex).getCode())
+                                .isEqualTo("INVALID_EXAM_SCOPE_COVERAGE"));
+
+        verify(examRepository, never()).save(any(ExamConfig.class));
+    }
+
+    @Test
+    void saveFinalExamRejectsWhenItDoesNotEndAtLastChapter() {
+        UUID teacherId = UUID.randomUUID();
+        UUID courseId = UUID.randomUUID();
+        Course course = givenOwnedCourse(courseId, teacherId);
+        when(course.getId()).thenReturn(courseId);
+        when(profileRepository.findById(teacherId)).thenReturn(Optional.of(mock(Profile.class)));
+
+        Chapter chapter1 = chapter(course, UUID.randomUUID(), "Chapter 1");
+        Chapter chapter2 = chapter(course, UUID.randomUUID(), "Chapter 2");
+        Chapter chapter3 = chapter(course, UUID.randomUUID(), "Chapter 3");
+        Chapter chapter4 = chapter(course, UUID.randomUUID(), "Chapter 4");
+        Chapter chapter5 = chapter(course, UUID.randomUUID(), "Chapter 5");
+        List<Chapter> chapters = List.of(chapter1, chapter2, chapter3, chapter4, chapter5);
+
+        when(chapterRepository.findById(chapter4.getId())).thenReturn(Optional.of(chapter4));
+        when(chapterRepository.findWithLessonsByCourseId(courseId)).thenReturn(chapters);
+        when(chapterRepository.findByCourseIdOrderByPositionAsc(courseId)).thenReturn(chapters);
+        ExamConfig firstExam = existingExam(0, chapter1, chapter1);
+        ExamConfig secondExam = existingExam(1, chapter2, chapter2);
+        ExamConfig thirdExam = existingExam(2, chapter3, chapter3);
+        when(examConfigVersionService.currentForAuthoring(courseId))
+                .thenReturn(List.of(firstExam, secondExam, thirdExam));
+
+        assertThatThrownBy(() -> service.saveExam(
+                courseId,
+                3,
+                teacher(teacherId),
+                request(true, chapter4.getId(), chapter4.getId(), List.of(
+                        directMultipleChoiceQuestion(),
+                        directEssayQuestion()))))
+                .isInstanceOfSatisfying(BusinessException.class, ex ->
+                        assertThat(((BusinessException) ex).getCode())
+                                .isEqualTo("INVALID_EXAM_SCOPE_COVERAGE"));
+
+        verify(examRepository, never()).save(any(ExamConfig.class));
+    }
+
     private Course givenOwnedCourse(UUID courseId, UUID teacherId) {
         Profile teacherProfile = mock(Profile.class);
         when(teacherProfile.getId()).thenReturn(teacherId);
         Course course = mock(Course.class);
         when(course.getTeacher()).thenReturn(teacherProfile);
         when(courseRepository.findWithCategoryAndTeacherById(courseId)).thenReturn(Optional.of(course));
+        lenient().when(examConfigVersionService.currentForAuthoring(courseId))
+                .thenReturn(List.of());
+        lenient().when(examConfigVersionService.ensureDraftSet(courseId))
+                .thenReturn(List.of());
+        lenient().when(teacherAccessService.requireApprovedTeacher(any(AuthenticatedUser.class)))
+                .thenReturn(teacherProfile);
         return course;
     }
 
@@ -190,11 +319,19 @@ class ExamServiceTest {
 
     private Chapter chapter(Course course, UUID id, String title) {
         Chapter chapter = mock(Chapter.class);
-        when(chapter.getId()).thenReturn(id);
+        lenient().when(chapter.getId()).thenReturn(id);
         lenient().when(chapter.getCourse()).thenReturn(course);
         lenient().when(chapter.getTitle()).thenReturn(title);
         lenient().when(chapter.getLessons()).thenReturn(List.of(mock(Lesson.class)));
         return chapter;
+    }
+
+    private ExamConfig existingExam(int slotIndex, Chapter scopeStartChapter, Chapter placementChapter) {
+        ExamConfig exam = mock(ExamConfig.class);
+        lenient().when(exam.getSlotIndex()).thenReturn(slotIndex);
+        lenient().when(exam.getScopeStartChapter()).thenReturn(scopeStartChapter);
+        lenient().when(exam.getPlacementChapter()).thenReturn(placementChapter);
+        return exam;
     }
 
     private ExamConfigRequest.ExamQuestionRequest directMultipleChoiceQuestion() {
@@ -204,6 +341,7 @@ class ExamServiceTest {
         metadata.put("createdInExam", true);
         return new ExamConfigRequest.ExamQuestionRequest(
                 "manual-" + UUID.randomUUID(),
+                null,
                 "2 + 2 = ?",
                 "multiple_choice",
                 List.of("3", "4", "5", "6"),
@@ -221,6 +359,7 @@ class ExamServiceTest {
         metadata.put("createdInExam", true);
         return new ExamConfigRequest.ExamQuestionRequest(
                 "manual-" + UUID.randomUUID(),
+                null,
                 "Explain your reasoning.",
                 "essay",
                 List.of(),
@@ -242,6 +381,7 @@ class ExamServiceTest {
         }
         return new ExamConfigRequest.ExamQuestionRequest(
                 "ai-" + UUID.randomUUID(),
+                null,
                 "Explain the solution.",
                 "essay",
                 List.of(),
@@ -263,6 +403,7 @@ class ExamServiceTest {
         }
         return new ExamConfigRequest.ExamQuestionRequest(
                 "ai-" + UUID.randomUUID(),
+                null,
                 "Explain the solution.",
                 "essay",
                 List.of(),

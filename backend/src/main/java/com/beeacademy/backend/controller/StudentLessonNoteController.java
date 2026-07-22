@@ -42,7 +42,7 @@ public class StudentLessonNoteController {
             @Valid @RequestBody SaveStudentLessonNoteRequest request) {
         return ApiResponse.ok(
                 noteService.createNote(courseId, lessonId, CurrentUser.required(), request),
-                "Da luu ghi chu"
+                "Đã lưu ghi chú"
         );
     }
 
@@ -54,7 +54,7 @@ public class StudentLessonNoteController {
             @Valid @RequestBody SaveStudentLessonNoteRequest request) {
         return ApiResponse.ok(
                 noteService.updateNote(courseId, lessonId, noteId, CurrentUser.required(), request),
-                "Da cap nhat ghi chu"
+                "Đã cập nhật ghi chú"
         );
     }
 
@@ -64,6 +64,6 @@ public class StudentLessonNoteController {
             @PathVariable UUID lessonId,
             @PathVariable UUID noteId) {
         noteService.deleteNote(courseId, lessonId, noteId, CurrentUser.required());
-        return ApiResponse.ok(null, "Da xoa ghi chu");
+        return ApiResponse.ok(null, "Đã xóa ghi chú");
     }
 }

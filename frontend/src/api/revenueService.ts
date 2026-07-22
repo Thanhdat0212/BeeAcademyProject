@@ -25,8 +25,10 @@ export interface PayoutPeriodResponse {
   totalTeacherAmount: number;
   status: PayoutStatus;
   paidAt: string | null;
+  paidByAdmin: string | null;
   transferRef: string | null;
   transferContent: string | null;
+  uncAttachmentUrl: string | null;
 }
 
 /**
@@ -111,4 +113,19 @@ export async function getRevenueTrend(): Promise<RevenueTrendPoint[]> {
 export async function getEnrollmentTrend(): Promise<CountPoint[]> {
   const res = await apiClient.get('/api/teacher/revenue/enrollment-trend');
   return res.data.data ?? [];
+}
+
+export async function getPayoutPeriodSplits(periodId: string): Promise<RevenueSplitResponse[]> {
+  const res = await apiClient.get(
+    `/api/teacher/revenue/periods/${encodeURIComponent(periodId)}/splits`,
+  );
+  return res.data.data ?? [];
+}
+
+export async function exportPayoutPeriod(periodId: string): Promise<Blob> {
+  const res = await apiClient.get(
+    `/api/teacher/revenue/periods/${encodeURIComponent(periodId)}/export`,
+    { responseType: 'blob' },
+  );
+  return res.data;
 }

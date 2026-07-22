@@ -4,18 +4,24 @@ import com.beeacademy.backend.dto.request.CreateQuestionRequest;
 import com.beeacademy.backend.dto.response.PageResponse;
 import com.beeacademy.backend.dto.response.QuestionResponse;
 import com.beeacademy.backend.dto.response.QuestionStatsResponse;
+import com.beeacademy.backend.dto.response.QuestionAuditLogResponse;
+import com.beeacademy.backend.dto.response.QuestionVersionResponse;
 import com.beeacademy.backend.exception.BusinessException;
 import com.beeacademy.backend.exception.ResourceNotFoundException;
 import com.beeacademy.backend.model.Category;
 import com.beeacademy.backend.model.Chapter;
 import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.model.Question;
+import com.beeacademy.backend.model.QuestionAuditLog;
 import com.beeacademy.backend.model.QuestionBank;
 import com.beeacademy.backend.model.QuestionChoice;
+import com.beeacademy.backend.model.QuestionVersion;
 import com.beeacademy.backend.repository.CategoryRepository;
 import com.beeacademy.backend.repository.ChapterRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
 import com.beeacademy.backend.repository.QuestionRepository;
+import com.beeacademy.backend.repository.QuestionAuditLogRepository;
+import com.beeacademy.backend.repository.QuestionVersionRepository;
 import com.beeacademy.backend.security.AuthenticatedUser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -62,8 +69,11 @@ public class QuestionService {
     private final CategoryRepository categoryRepository;
     private final ProfileRepository profileRepository;
     private final ChapterRepository chapterRepository;
+    private final QuestionVersionRepository questionVersionRepository;
+    private final QuestionAuditLogRepository questionAuditLogRepository;
     private final ObjectMapper objectMapper;
     private final QuestionBankService questionBankService;
+    private final TeacherAccessService teacherAccessService;
 
     @Lazy
     @Autowired
@@ -73,7 +83,7 @@ public class QuestionService {
     public QuestionResponse createQuestion(AuthenticatedUser me, CreateQuestionRequest req) {
         validateQuestionRequest(req);
 
-        Profile teacher = loadProfile(me.userId());
+        Profile teacher = teacherAccessService.requireApprovedTeacher(me);
         Category category = loadCategory(req.categoryId());
         Chapter chapter = req.chapterId() != null ? loadChapter(req.chapterId()) : null;
         QuestionBank questionBank = resolveQuestionBank(req.questionBankId(), me.userId(), req.categoryId(), req.grade());
@@ -89,15 +99,20 @@ public class QuestionService {
                 chapter,
                 req.content(),
                 req.explanation(),
+                req.defaultPoints(),
+                serializeTags(req.tags()),
                 serializeMetadata(req.metadata()),
                 req.difficulty(),
                 req.type());
 
         addChoices(question, req.choices());
 
+        boolean duplicate = hasDuplicateContent(me.userId(), req.content(), null);
         Question saved = questionRepository.save(question);
+        QuestionVersion initialVersion = saveVersion(saved, 1, "Initial question version.");
+        saveAudit(saved, null, initialVersion.getVersionNo(), "CREATE", null, serializeQuestionState(saved));
         log.info("Teacher {} created question {} type={}", me.userId(), saved.getId(), saved.getType());
-        return QuestionResponse.fromEntity(saved, objectMapper);
+        return withDuplicateWarning(QuestionResponse.fromEntity(saved, objectMapper), duplicate);
     }
 
     @Transactional(readOnly = true)
@@ -110,6 +125,7 @@ public class QuestionService {
             String difficulty,
             String status,
             Pageable pageable) {
+        teacherAccessService.requireApprovedTeacher(me);
         String resolvedStatus = status != null ? status : "active";
         Specification<Question> spec = (root, query, cb) ->
                 cb.equal(root.get("teacher").get("id"), me.userId());
@@ -138,6 +154,7 @@ public class QuestionService {
 
     @Transactional(readOnly = true)
     public QuestionResponse getQuestion(UUID questionId, AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
         Question q = loadAndVerifyOwner(questionId, me.userId());
         return QuestionResponse.fromEntity(q, objectMapper);
     }
@@ -145,8 +162,11 @@ public class QuestionService {
     @Transactional
     public QuestionResponse updateQuestion(UUID questionId, AuthenticatedUser me, CreateQuestionRequest req) {
         validateQuestionRequest(req);
+        teacherAccessService.requireApprovedTeacher(me);
 
-        Question question = loadAndVerifyOwner(questionId, me.userId());
+        Question question = loadAndVerifyOwnerForUpdate(questionId, me.userId());
+        String oldState = serializeQuestionState(question);
+        QuestionVersion oldVersion = ensureCurrentVersion(question, "Snapshot before update.");
         Category category = loadCategory(req.categoryId());
         Chapter chapter = req.chapterId() != null ? loadChapter(req.chapterId()) : null;
         QuestionBank questionBank = resolveQuestionBank(req.questionBankId(), me.userId(), req.categoryId(), req.grade());
@@ -161,6 +181,8 @@ public class QuestionService {
                 chapter,
                 req.content(),
                 req.explanation(),
+                req.defaultPoints(),
+                serializeTags(req.tags()),
                 serializeMetadata(req.metadata()),
                 req.difficulty(),
                 req.type());
@@ -168,26 +190,84 @@ public class QuestionService {
         question.clearChoices();
         addChoices(question, req.choices());
 
+        boolean duplicate = hasDuplicateContent(me.userId(), req.content(), questionId);
         Question saved = questionRepository.save(question);
+        QuestionVersion newVersion = saveVersion(
+                saved,
+                oldVersion.getVersionNo() + 1,
+                question.getUsageCount() != null && question.getUsageCount() > 0
+                        ? "Teacher updated question after it had been used."
+                        : "Teacher updated question.");
+        saveAudit(
+                saved,
+                oldVersion.getVersionNo(),
+                newVersion.getVersionNo(),
+                "UPDATE",
+                oldState,
+                serializeQuestionState(saved));
         log.info("Teacher {} updated question {} type={}", me.userId(), questionId, saved.getType());
-        return QuestionResponse.fromEntity(saved, objectMapper);
+        return withDuplicateWarning(QuestionResponse.fromEntity(saved, objectMapper), duplicate);
     }
 
     @Transactional
     public void deleteQuestion(UUID questionId, AuthenticatedUser me) {
-        Question question = loadAndVerifyOwner(questionId, me.userId());
+        teacherAccessService.requireApprovedTeacher(me);
+        Question question = loadAndVerifyOwnerForUpdate(questionId, me.userId());
+        String oldState = serializeQuestionState(question);
+        QuestionVersion oldVersion = ensureCurrentVersion(question, "Snapshot before deletion.");
 
-        if (question.getUsageCount() > 0) {
+        if (question.getUsageCount() != null && question.getUsageCount() > 0) {
+            if ("inactive".equals(question.getStatus())) {
+                throw new BusinessException(
+                        "QUESTION_ALREADY_ARCHIVED",
+                        "Câu hỏi đã được lưu trữ trước đó.",
+                        HttpStatus.CONFLICT);
+            }
             question.deactivate();
-            questionRepository.save(question);
+            Question saved = questionRepository.save(question);
+            QuestionVersion archivedVersion = saveVersion(
+                    saved, oldVersion.getVersionNo() + 1, "Question archived after it was used.");
+            saveAudit(
+                    saved,
+                    oldVersion.getVersionNo(),
+                    archivedVersion.getVersionNo(),
+                    "ARCHIVE",
+                    oldState,
+                    serializeQuestionState(saved));
             log.info("Deactivate question {} usage={}", questionId, question.getUsageCount());
         } else {
+            saveAudit(
+                    question,
+                    oldVersion.getVersionNo(),
+                    null,
+                    "DELETE",
+                    oldState,
+                    null);
             questionRepository.delete(question);
             log.info("Delete question {}", questionId);
         }
     }
 
+    @Transactional(readOnly = true)
+    public List<QuestionVersionResponse> listQuestionVersions(UUID questionId, AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
+        loadAndVerifyOwner(questionId, me.userId());
+        return questionVersionRepository.findByQuestionIdOrderByVersionNoDesc(questionId).stream()
+                .map(version -> QuestionVersionResponse.fromEntity(version, objectMapper))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<QuestionAuditLogResponse> listQuestionAuditLogs(UUID questionId, AuthenticatedUser me) {
+        teacherAccessService.requireApprovedTeacher(me);
+        loadAndVerifyOwner(questionId, me.userId());
+        return questionAuditLogRepository.findByQuestionIdOrderByCreatedAtDesc(questionId).stream()
+                .map(audit -> QuestionAuditLogResponse.fromEntity(audit, objectMapper))
+                .toList();
+    }
+
     public BulkImportResult bulkCreateQuestions(AuthenticatedUser me, List<CreateQuestionRequest> requests) {
+        teacherAccessService.requireApprovedTeacher(me);
         int created = 0;
         int failed = 0;
         List<BulkImportError> errors = new ArrayList<>();
@@ -197,7 +277,7 @@ public class QuestionService {
         }
 
         if (requests.size() > 200) {
-            throw new BusinessException("BULK_LIMIT_EXCEEDED", "Moi lan chi duoc nhap toi da 200 cau hoi.");
+            throw new BusinessException("BULK_LIMIT_EXCEEDED", "Mỗi lần chỉ được nhập tối đa 200 câu hỏi.");
         }
 
         for (int i = 0; i < requests.size(); i++) {
@@ -219,6 +299,7 @@ public class QuestionService {
 
     @Transactional(readOnly = true)
     public QuestionStatsResponse getStatsForChapter(AuthenticatedUser me, UUID chapterId) {
+        teacherAccessService.requireApprovedTeacher(me);
         loadChapter(chapterId);
         List<Object[]> rows = questionRepository.countActiveByDifficultyForTeacherAndChapter(me.userId(), chapterId);
         List<Object[]> typeRows = questionRepository.countActiveByTypeForTeacherAndChapter(me.userId(), chapterId);
@@ -240,6 +321,7 @@ public class QuestionService {
         int multipleChoiceCount = 0;
         int trueFalseCount = 0;
         int fillInBlankCount = 0;
+        int imageQuestionCount = 0;
         int essayCount = 0;
         for (Object[] row : typeRows) {
             String type = (String) row[0];
@@ -248,12 +330,14 @@ public class QuestionService {
                 case "multiple_choice" -> multipleChoiceCount = (int) count;
                 case "true_false" -> trueFalseCount = (int) count;
                 case "fill_in_blank" -> fillInBlankCount = (int) count;
+                case "image_question" -> imageQuestionCount = (int) count;
                 case "essay", "essay_short", "essay_long" -> essayCount += (int) count;
                 default -> {
                 }
             }
         }
-        int totalExamSupported = multipleChoiceCount + trueFalseCount + fillInBlankCount + essayCount;
+        int totalExamSupported = multipleChoiceCount + trueFalseCount + fillInBlankCount
+                + imageQuestionCount + essayCount;
         return new QuestionStatsResponse(
                 easy,
                 medium,
@@ -262,6 +346,7 @@ public class QuestionService {
                 multipleChoiceCount,
                 trueFalseCount,
                 fillInBlankCount,
+                imageQuestionCount,
                 essayCount,
                 totalExamSupported);
     }
@@ -270,18 +355,169 @@ public class QuestionService {
         List<CreateQuestionRequest.ChoiceRequest> safeChoices = choiceReqs != null ? choiceReqs : List.of();
         for (int i = 0; i < safeChoices.size(); i++) {
             CreateQuestionRequest.ChoiceRequest choiceRequest = safeChoices.get(i);
-            QuestionChoice choice = QuestionChoice.create(question, choiceRequest.content(), choiceRequest.isCorrect(), i + 1);
+            QuestionChoice choice = QuestionChoice.create(
+                    question, choiceRequest.content(), choiceRequest.isCorrect(), i + 1, choiceRequest.imageUrl());
             question.addChoice(choice);
         }
+    }
+
+    private String serializeChoices(Question question) {
+        try {
+            List<QuestionResponse.ChoiceResponse> choices = question.getChoices().stream()
+                    .map(c -> new QuestionResponse.ChoiceResponse(
+                            c.getId(), c.getContent(), c.getIsCorrect(), c.getPosition(), c.getImageUrl()))
+                    .toList();
+            return objectMapper.writeValueAsString(choices);
+        } catch (Exception ex) {
+            throw new BusinessException("QUESTION_VERSION_FAILED",
+                    "Không thể lưu phiên bản câu hỏi cũ.");
+        }
+    }
+
+    private String serializeTags(List<String> tags) {
+        try {
+            if (tags == null || tags.isEmpty()) {
+                return "[]";
+            }
+            List<String> normalized = tags.stream()
+                    .filter(value -> value != null && !value.isBlank())
+                    .map(String::trim)
+                    .collect(java.util.stream.Collectors.collectingAndThen(
+                            java.util.stream.Collectors.toCollection(LinkedHashSet::new),
+                            ArrayList::new));
+            return objectMapper.writeValueAsString(normalized);
+        } catch (Exception ex) {
+            throw new BusinessException("QUESTION_TAGS_INVALID",
+                    "Không thể lưu tag câu hỏi.");
+        }
+    }
+
+    private QuestionVersion ensureCurrentVersion(Question question, String reason) {
+        String choicesJson = serializeChoices(question);
+        var latestVersion = questionVersionRepository
+                .findTopByQuestionIdOrderByVersionNoDesc(question.getId());
+        if (latestVersion.isPresent() && latestVersion.get().matches(question, choicesJson)) {
+            return latestVersion.get();
+        }
+        int nextVersion = latestVersion.map(QuestionVersion::getVersionNo).orElse(0) + 1;
+        return questionVersionRepository.save(
+                QuestionVersion.snapshot(question, nextVersion, choicesJson, reason));
+    }
+
+    private QuestionVersion saveVersion(Question question, int versionNo, String reason) {
+        return questionVersionRepository.save(
+                QuestionVersion.snapshot(question, versionNo, serializeChoices(question), reason));
+    }
+
+    private void saveAudit(
+            Question question,
+            Integer oldVersion,
+            Integer newVersion,
+            String action,
+            String oldState,
+            String newState) {
+        questionAuditLogRepository.save(QuestionAuditLog.record(
+                question.getTeacher().getId(),
+                question.getId(),
+                oldVersion,
+                newVersion,
+                action,
+                oldState,
+                newState));
+    }
+
+    private String serializeQuestionState(Question question) {
+        try {
+            com.fasterxml.jackson.databind.node.ObjectNode state = objectMapper.createObjectNode();
+            state.put("questionId", question.getId().toString());
+            putUuid(state, "questionBankId",
+                    question.getQuestionBank() != null ? question.getQuestionBank().getId() : null);
+            putUuid(state, "categoryId",
+                    question.getCategory() != null ? question.getCategory().getId() : null);
+            if (question.getGrade() != null) state.put("grade", question.getGrade());
+            else state.putNull("grade");
+            putUuid(state, "chapterId",
+                    question.getChapter() != null ? question.getChapter().getId() : null);
+            state.put("content", question.getContent());
+            if (question.getExplanation() != null) state.put("explanation", question.getExplanation());
+            else state.putNull("explanation");
+            if (question.getDefaultPoints() != null) state.put("defaultPoints", question.getDefaultPoints());
+            else state.putNull("defaultPoints");
+            if (question.getTagsJson() != null && !question.getTagsJson().isBlank()) {
+                state.set("tags", objectMapper.readTree(question.getTagsJson()));
+            } else {
+                state.putArray("tags");
+            }
+            if (question.getMetadataJson() != null && !question.getMetadataJson().isBlank()) {
+                state.set("metadata", objectMapper.readTree(question.getMetadataJson()));
+            } else {
+                state.putNull("metadata");
+            }
+            state.put("difficulty", question.getDifficulty());
+            state.put("type", question.getType());
+            state.put("status", question.getStatus());
+            state.put("usageCount", question.getUsageCount() != null ? question.getUsageCount() : 0);
+
+            com.fasterxml.jackson.databind.node.ArrayNode choices = state.putArray("choices");
+            question.getChoices().forEach(choice -> {
+                com.fasterxml.jackson.databind.node.ObjectNode choiceState = choices.addObject();
+                choiceState.put("id", choice.getId().toString());
+                choiceState.put("content", choice.getContent());
+                choiceState.put("isCorrect", Boolean.TRUE.equals(choice.getIsCorrect()));
+                choiceState.put("position", choice.getPosition());
+                if (choice.getImageUrl() != null) choiceState.put("imageUrl", choice.getImageUrl());
+                else choiceState.putNull("imageUrl");
+            });
+            return objectMapper.writeValueAsString(state);
+        } catch (Exception ex) {
+            throw new BusinessException(
+                    "QUESTION_AUDIT_FAILED",
+                    "Không thể ghi nhật ký thay đổi câu hỏi.");
+        }
+    }
+
+    private void putUuid(
+            com.fasterxml.jackson.databind.node.ObjectNode state,
+            String field,
+            UUID value) {
+        if (value != null) state.put(field, value.toString());
+        else state.putNull(field);
+    }
+
+    private boolean hasDuplicateContent(UUID teacherId, String content, UUID excludeQuestionId) {
+        if (content == null || content.isBlank()) {
+            return false;
+        }
+        return questionRepository.existsActiveDuplicateContent(teacherId, content, excludeQuestionId);
+    }
+
+    private QuestionResponse withDuplicateWarning(QuestionResponse response, boolean duplicate) {
+        if (!duplicate) {
+            return response;
+        }
+        return response.withDuplicateWarning(
+                "Nội dung câu hỏi trùng với một câu hỏi đang active trong ngân hàng của giáo viên.");
     }
 
     private Question loadAndVerifyOwner(UUID questionId, UUID teacherId) {
         Question q = questionRepository.findById(questionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Question", questionId));
         if (!q.getTeacher().getId().equals(teacherId)) {
-            throw new BusinessException("FORBIDDEN", "Ban khong co quyen chinh sua cau hoi nay.", HttpStatus.FORBIDDEN);
+            throw new BusinessException("FORBIDDEN", "Bạn không có quyền chỉnh sửa câu hỏi này.", HttpStatus.FORBIDDEN);
         }
         return q;
+    }
+
+    private Question loadAndVerifyOwnerForUpdate(UUID questionId, UUID teacherId) {
+        Question question = questionRepository.findByIdForUpdate(questionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Question", questionId));
+        if (!question.getTeacher().getId().equals(teacherId)) {
+            throw new BusinessException(
+                    "FORBIDDEN",
+                    "Bạn không có quyền chỉnh sửa câu hỏi này.",
+                    HttpStatus.FORBIDDEN);
+        }
+        return question;
     }
 
     private Profile loadProfile(UUID id) {
@@ -306,33 +542,33 @@ public class QuestionService {
         QuestionBank questionBank = questionBankService.getOwnedQuestionBank(questionBankId, teacherId);
         if (!questionBank.getCategory().getId().equals(categoryId)) {
             throw new BusinessException("QUESTION_BANK_CATEGORY_MISMATCH",
-                    "Mon hoc cua cau hoi phai khop voi ngan hang da chon.");
+                    "Môn học của câu hỏi phải khớp với ngân hàng đã chọn.");
         }
         if (!questionBank.getGrade().equals(grade)) {
             throw new BusinessException("QUESTION_BANK_GRADE_MISMATCH",
-                    "Lop cua cau hoi phai khop voi ngan hang da chon.");
+                    "Lớp của câu hỏi phải khớp với ngân hàng đã chọn.");
         }
         return questionBank;
     }
 
     private void validateQuestionRequest(CreateQuestionRequest req) {
         if (req == null) {
-            throw new BusinessException("INVALID_REQUEST", "Du lieu cau hoi khong hop le.");
+            throw new BusinessException("INVALID_REQUEST", "Dữ liệu câu hỏi không hợp lệ.");
         }
         if (req.categoryId() == null) {
-            throw new BusinessException("CATEGORY_REQUIRED", "Vui long chon mon hoc.");
+            throw new BusinessException("CATEGORY_REQUIRED", "Vui lòng chọn môn học.");
         }
         if (req.grade() == null || req.grade() < 1) {
-            throw new BusinessException("GRADE_REQUIRED", "Vui long chon lop.");
+            throw new BusinessException("GRADE_REQUIRED", "Vui lòng chọn lớp.");
         }
         if (req.content() == null || req.content().isBlank()) {
-            throw new BusinessException("CONTENT_REQUIRED", "Noi dung cau hoi khong duoc trong.");
+            throw new BusinessException("CONTENT_REQUIRED", "Nội dung câu hỏi không được trống.");
         }
         if (!List.of("easy", "medium", "hard").contains(req.difficulty())) {
-            throw new BusinessException("INVALID_DIFFICULTY", "Do kho phai la easy, medium hoac hard.");
+            throw new BusinessException("INVALID_DIFFICULTY", "Độ khó phải là easy, medium hoặc hard.");
         }
         if (!SUPPORTED_TYPES.contains(req.type())) {
-            throw new BusinessException("INVALID_TYPE", "Loai cau hoi khong hop le.");
+            throw new BusinessException("INVALID_TYPE", "Loại câu hỏi không hợp lệ.");
         }
 
         if (OBJECTIVE_TYPES.contains(req.type())) {
@@ -354,75 +590,81 @@ public class QuestionService {
 
     private void validateObjectiveQuestion(CreateQuestionRequest req) {
         if (req.choices() == null || req.choices().size() < 2 || req.choices().size() > 6) {
-            throw new BusinessException("INVALID_CHOICES", "Cau hoi objective phai co 2-6 dap an.");
+            throw new BusinessException("INVALID_CHOICES", "Câu hỏi objective phải có 2-6 đáp án.");
         }
         for (CreateQuestionRequest.ChoiceRequest choice : req.choices()) {
             if (choice == null || choice.content() == null || choice.content().isBlank()) {
-                throw new BusinessException("INVALID_CHOICES", "Dap an khong duoc trong.");
+                throw new BusinessException("INVALID_CHOICES", "Đáp án không được trống.");
             }
         }
         long correctCount = req.choices().stream()
                 .filter(CreateQuestionRequest.ChoiceRequest::isCorrect)
                 .count();
         if ("true_false".equals(req.type()) && correctCount != 1) {
-            throw new BusinessException("INVALID_CHOICES", "Cau dung/sai phai co dung 1 dap an dung.");
+            throw new BusinessException("INVALID_CHOICES", "Câu đúng/sai phải có đúng 1 đáp án đúng.");
         }
         if (!"true_false".equals(req.type()) && correctCount < 1) {
-            throw new BusinessException("INVALID_CHOICES", "Cau hoi objective phai co it nhat 1 dap an dung.");
+            throw new BusinessException("INVALID_CHOICES", "Câu hỏi objective phải có ít nhất 1 đáp án đúng.");
         }
 
         if ("image_question".equals(req.type())) {
-            requireMetadataText(req.metadata(), "promptAssetUrl", "Cau hoi hinh anh can co URL hinh.");
+            boolean hasPromptAsset = hasMetadataText(req.metadata(), "promptAssetUrl");
+            boolean hasChoiceImage = req.choices().stream()
+                    .anyMatch(choice -> choice.imageUrl() != null && !choice.imageUrl().isBlank());
+            if (!hasPromptAsset && !hasChoiceImage) {
+                throw new BusinessException("METADATA_REQUIRED",
+                        "Câu hỏi hình ảnh cần có ảnh: ở đề bài hoặc ở ít nhất 1 đáp án.");
+            }
         }
         if ("audio_question".equals(req.type())) {
-            requireMetadataText(req.metadata(), "promptAssetUrl", "Cau hoi audio can co URL audio.");
+            requireMetadataText(req.metadata(), "promptAssetUrl", "Câu hỏi audio can co URL audio.");
         }
     }
 
     private void validateFillInBlank(CreateQuestionRequest req) {
         if (hasChoices(req)) {
-            throw new BusinessException("INVALID_CHOICES", "Cau dien vao cho trong khong dung danh sach dap an objective.");
+            throw new BusinessException("INVALID_CHOICES", "Câu điền vào chỗ trống không dùng danh sách đáp án objective.");
         }
         List<String> acceptedAnswers = stringList(req.metadata(), "acceptedAnswers");
         if (acceptedAnswers.isEmpty()) {
-            throw new BusinessException("ACCEPTED_ANSWERS_REQUIRED", "Cau dien vao cho trong can it nhat 1 dap an hop le.");
+            throw new BusinessException("ACCEPTED_ANSWERS_REQUIRED", "Câu điền vào chỗ trống cần ít nhất 1 đáp án hợp lệ.");
         }
     }
 
     private void validateEssay(CreateQuestionRequest req) {
         if (hasChoices(req)) {
-            throw new BusinessException("INVALID_CHOICES", "Cau tu luan khong dung danh sach dap an objective.");
+            throw new BusinessException("INVALID_CHOICES", "Câu tự luận không dùng danh sách đáp án objective.");
         }
         Integer wordLimit = integerValue(req.metadata(), "wordLimit");
         if (wordLimit != null && wordLimit <= 0) {
-            throw new BusinessException("INVALID_WORD_LIMIT", "wordLimit phai lon hon 0.");
+            throw new BusinessException("INVALID_WORD_LIMIT", "wordLimit phải lớn hơn 0.");
         }
     }
 
     private void validateMatching(CreateQuestionRequest req) {
         if (hasChoices(req)) {
-            throw new BusinessException("INVALID_CHOICES", "Cau noi cot khong dung danh sach dap an objective.");
+            throw new BusinessException("INVALID_CHOICES", "Câu nối cột không dùng danh sách đáp án objective.");
         }
         JsonNode pairs = req.metadata() != null ? req.metadata().get("matchingPairs") : null;
         if (pairs == null || !pairs.isArray() || pairs.size() < 2) {
             throw new BusinessException("MATCHING_PAIRS_REQUIRED",
-                    "Cau noi cot can it nhat 2 cap hop le.");
+                    "Câu nối cột cần ít nhất 2 cặp hợp lệ.");
         }
     }
 
     private void validateFormulaQuestion(CreateQuestionRequest req) {
         requireMetadataText(req.metadata(), "formulaLatex",
-                "Cau hoi cong thuc can co noi dung cong thuc.");
+                "Câu hỏi công thức can co noi dung cong thuc.");
     }
 
     private void validateFileUpload(CreateQuestionRequest req) {
         if (hasChoices(req)) {
-            throw new BusinessException("INVALID_CHOICES", "Cau nop file khong dung danh sach dap an objective.");
+            throw new BusinessException("INVALID_CHOICES", "Câu nộp file không dùng danh sách đáp án objective.");
         }
         List<String> allowedUploadTypes = stringList(req.metadata(), "allowedUploadTypes");
         if (allowedUploadTypes.isEmpty()) {
             throw new BusinessException("UPLOAD_TYPES_REQUIRED",
-                    "Cau nop file can khai bao loai file duoc phep.");
+                    "Câu nộp file cần khai báo loại file được phép.");
         }
     }
 
@@ -476,13 +718,13 @@ public class QuestionService {
             return;
         }
         if (!hasReadingSetId) {
-            throw new BusinessException("READING_SET_REQUIRED", "Cau hoi bai doc can co readingSetId.");
+            throw new BusinessException("READING_SET_REQUIRED", "Câu hỏi bai doc can co readingSetId.");
         }
         if (!hasSharedPrompt) {
-            throw new BusinessException("SHARED_PROMPT_REQUIRED", "Cau hoi bai doc can co doan van chung.");
+            throw new BusinessException("SHARED_PROMPT_REQUIRED", "Câu hỏi bai doc can co doan van chung.");
         }
         if (questionOrderInSet != null && questionOrderInSet <= 0) {
-            throw new BusinessException("INVALID_READING_ORDER", "questionOrderInSet phai lon hon 0.");
+            throw new BusinessException("INVALID_READING_ORDER", "questionOrderInSet phải lớn hơn 0.");
         }
     }
 
@@ -493,7 +735,7 @@ public class QuestionService {
         try {
             return objectMapper.writeValueAsString(metadata);
         } catch (Exception ex) {
-            throw new BusinessException("INVALID_METADATA", "Khong the luu metadata cau hoi.");
+            throw new BusinessException("INVALID_METADATA", "Không thể lưu metadata câu hỏi.");
         }
     }
 
@@ -503,7 +745,7 @@ public class QuestionService {
         if (courseCategory == null) return;
         if (!courseCategory.getId().equals(requestedCategoryId)) {
             throw new BusinessException("CATEGORY_MISMATCH",
-                    "Mon hoc khong khop voi khoa hoc cua chuong da chon. Chuong nay thuoc mon: "
+                    "Môn học không khớp với khóa học của chương đã chọn. Chương này thuộc môn: "
                             + courseCategory.getName() + ".");
         }
     }
@@ -512,14 +754,14 @@ public class QuestionService {
         if (chapter == null || grade == null) return;
         validateCategoryMatchesChapter(requestedCategoryId, chapter);
         if (!courseGrades(chapter).contains(grade)) {
-            throw new BusinessException("GRADE_MISMATCH", "Lop khong khop voi khoa hoc cua chuong da chon.");
+            throw new BusinessException("GRADE_MISMATCH", "Lớp không khớp với khóa học của chương đã chọn.");
         }
     }
 
     private List<Integer> courseGrades(Chapter chapter) {
         int[] grades = chapter.getCourse().getGrades();
         if (grades == null || grades.length == 0) {
-            throw new BusinessException("COURSE_GRADE_MISSING", "Khoa hoc cua chuong chua co thong tin lop.");
+            throw new BusinessException("COURSE_GRADE_MISSING", "Khóa học của chương chưa có thông tin lớp.");
         }
         return Arrays.stream(grades).boxed().toList();
     }

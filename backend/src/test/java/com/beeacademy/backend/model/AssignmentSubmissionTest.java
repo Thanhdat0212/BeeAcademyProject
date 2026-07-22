@@ -16,8 +16,24 @@ class AssignmentSubmissionTest {
         assertThat(submission.getScore()).isEqualTo(8);
         assertThat(submission.getFeedback()).isEqualTo("Lập luận rõ ràng.");
         assertThat(submission.getStatus()).isEqualTo("graded");
+        assertThat(submission.getRawScore()).isEqualTo(8);
         assertThat(submission.getGradedAt()).isNotNull();
         assertThat(submission.getGradedBy()).isEqualTo(teacher);
+    }
+
+    @Test
+    void resubmitIncrementsAttemptAndStoresLatePolicySnapshot() {
+        AssignmentSubmission submission = AssignmentSubmission.submit(
+                org.mockito.Mockito.mock(Assignment.class),
+                Profile.createNew(java.util.UUID.randomUUID(), UserRole.STUDENT, "Student"),
+                "Lần 1",
+                "[]");
+
+        submission.resubmit("Lần 2", "[]", true, 15);
+
+        assertThat(submission.effectiveAttemptNumber()).isEqualTo(2);
+        assertThat(submission.isLate()).isTrue();
+        assertThat(submission.effectiveLatePenaltyPercent()).isEqualTo(15);
     }
 
     @Test

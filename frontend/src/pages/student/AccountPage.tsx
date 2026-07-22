@@ -35,6 +35,8 @@ export default function AccountPage() {
   // ── Đọc email từ store — chỉ để hiển thị, không cho sửa ─────────────────────
   // Email là thông tin định danh tài khoản, chỉ admin mới được đổi (scope backend)
   const email = useAuthStore(state => state.user?.email ?? '');
+  const updateUser = useAuthStore(state => state.updateUser);
+  const mustChangePassword = useAuthStore(state => state.user?.mustChangePassword ?? false);
 
   // ── State form đổi mật khẩu ──────────────────────────────────────────────────
   const [currentPassword, setCurrentPassword] = useState('');
@@ -73,6 +75,11 @@ export default function AccountPage() {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      // Nếu đang dùng mật khẩu tạm do Admin cấp, backend đã gỡ cờ — đồng bộ store
+      // ngay, nếu không ProtectedRoute sẽ giữ user ở lại trang này.
+      if (mustChangePassword) {
+        updateUser({ mustChangePassword: false });
+      }
     } catch (err) {
       notify.dismiss(toastId);
       const message = isApiError(err) ? err.message : 'Đổi mật khẩu thất bại. Vui lòng thử lại.';

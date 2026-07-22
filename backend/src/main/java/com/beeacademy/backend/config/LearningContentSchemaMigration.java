@@ -28,5 +28,27 @@ public class LearningContentSchemaMigration implements ApplicationRunner {
         jdbcTemplate.execute("ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS subtitle_url TEXT");
         jdbcTemplate.execute("ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS slide_cue_seconds TEXT");
         jdbcTemplate.execute("ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS video_fallback_url TEXT");
+        jdbcTemplate.execute("ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS hls_playlist_url TEXT");
+        jdbcTemplate.execute("ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS video_processing_status VARCHAR(32) NOT NULL DEFAULT 'NOT_REQUIRED'");
+        jdbcTemplate.execute("ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS video_uploaded_at TIMESTAMPTZ");
+        jdbcTemplate.execute("ALTER TABLE public.lessons ADD COLUMN IF NOT EXISTS original_video_retention_until TIMESTAMPTZ");
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS public.course_content_audit_logs (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    course_id UUID NOT NULL REFERENCES public.courses(id) ON DELETE CASCADE,
+                    entity_type VARCHAR(32) NOT NULL,
+                    entity_id UUID,
+                    action VARCHAR(32) NOT NULL,
+                    change_type VARCHAR(16) NOT NULL,
+                    actor_id UUID NOT NULL REFERENCES public.profiles(id),
+                    before_state JSONB,
+                    after_state JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_course_content_audit_logs_course_created
+                ON public.course_content_audit_logs(course_id, created_at DESC)
+                """);
     }
 }

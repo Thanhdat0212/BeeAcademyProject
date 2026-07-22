@@ -1,22 +1,23 @@
 ﻿/**
- * ExcelImportModal â€” Phase 2
- * GiÃ¡o viÃªn upload file .xlsx â†’ parse â†’ preview â†’ bulk import
+ * ExcelImportModal — Phase 2
+ * Giáo viên upload file .xlsx → parse → preview → bulk import
  *
- * Äá»‹nh dáº¡ng Excel (hÃ ng 1 = header, dá»¯ liá»‡u tá»« hÃ ng 2):
- *   A: Ná»™i dung cÃ¢u há»i
- *   B: Loáº¡i (TN/DS/DC/TL/TLN/TLD/HA/AU)
- *   C: Äá»™ khÃ³ (D/TB/K)
- *   D-G: ÄÃ¡p Ã¡n A-D (cho cÃ¢u tráº¯c nghiá»‡m)
- *   H: ÄÃ¡p Ã¡n Ä‘Ãºng
- *   I: Giáº£i thÃ­ch
- *   J: ÄÃ¡p Ã¡n cháº¥p nháº­n
- *   K: Cáº·p ná»‘i
- *   L-R: metadata má»Ÿ rá»™ng theo tá»«ng loáº¡i
+ * Định dạng Excel (hàng 1 = header, dữ liệu từ hàng 2):
+ *   A: Nội dung câu hỏi
+ *   B: Loại (TN/DS/DC/TL/TLN/TLD/HA/AU)
+ *   C: Độ khó (D/TB/K)
+ *   D-G: Đáp án A-D (cho câu trắc nghiệm)
+ *   H: Đáp án đúng
+ *   I: Giải thích
+ *   J: Đáp án chấp nhận
+ *   K: Cặp nối
+ *   L-R: metadata mở rộng theo từng loại
  */
 
 import { useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
 import { notify } from '../../lib/toast';
 import * as questionService from '../../api/questionService';
 import type { CreateQuestionRequest, QuestionMetadata } from '../../api/questionService';
@@ -41,10 +42,12 @@ interface ParsedRow {
   content: string;
   type: CreateQuestionRequest['type'];
   difficulty: Difficulty;
-  choices: Array<{ content: string; isCorrect: boolean }>;
+  choices: Array<{ content: string; isCorrect: boolean; imageUrl?: string }>;
   explanation: string;
   metadata?: QuestionMetadata | null;
   error?: string;
+  questionImageFile?: string;
+  choiceImageFiles?: string[];
 }
 // Excel parser
 
@@ -56,8 +59,8 @@ function token(value: unknown): string {
   return plain(value)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/Ä‘/g, 'd')
-    .replace(/Ä/g, 'D')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
     .toUpperCase();
 }
 
@@ -68,6 +71,7 @@ function parseQuestionType(value: unknown): CreateQuestionRequest['type'] {
   if (['TLN', 'TU_LUAN_NGAN', 'ESSAY_SHORT'].includes(t)) return 'essay';
   if (['TLD', 'TU_LUAN_DAI', 'ESSAY_LONG'].includes(t)) return 'essay';
   if (['TL', 'TU_LUAN', 'TULUAN', 'ESSAY'].includes(t)) return 'essay';
+  if (['HA', 'HINH_ANH', 'IMAGE_QUESTION'].includes(t)) return 'image_question';
   return 'multiple_choice';
 }
 
@@ -174,13 +178,36 @@ function parseExcel(file: File): Promise<ParsedRow[]> {
             'NC', 'NOI_COT', 'MATCHING',
             'CT', 'CONG_THUC', 'FORMULA_QUESTION',
             'NF', 'NOP_FILE', 'FILE_UPLOAD',
-            'HA', 'HINH_ANH', 'IMAGE_QUESTION',
             'AU', 'AUDIO_QUESTION', 'NGHE_AUDIO',
           ].includes(rawTypeToken);
 
+          let questionImageFile: string | undefined;
+          let choiceImageFiles: string[] | undefined;
+
           if (unsupportedType) {
             choices = [];
-            error = 'Import Excel chỉ hỗ trợ trắc nghiệm, đúng/sai, điền vào chỗ trống và tự luận chung. Câu hỏi hình ảnh/audio phải thêm thủ công.';
+            error = 'Import Excel chỉ hỗ trợ trắc nghiệm, đúng/sai, điền vào chỗ trống, tự luận chung và câu hỏi hình ảnh. Câu hỏi audio phải thêm thủ công.';
+          } else if (type === 'image_question') {
+            const slots = [
+              { text: ansA, image: plain(r[14]) },
+              { text: ansB, image: plain(r[15]) },
+              { text: ansC, image: plain(r[16]) },
+              { text: ansD, image: plain(r[17]) },
+            ].filter(slot => slot.text || slot.image);
+            if (slots.length < 2) error = 'Câu hỏi hình ảnh cần ít nhất 2 đáp án (chữ và/hoặc tên file ảnh)';
+            const correctIndices = correctChoiceIndices(r[7] || 'A');
+            choices = slots.map((slot, idx) => ({
+              content: slot.text || `Đáp án ${String.fromCharCode(65 + idx)}`,
+              isCorrect: correctIndices.includes(idx),
+            }));
+            if (!error && (correctIndices.length === 0 || correctIndices.some(correctIdx => correctIdx >= slots.length))) {
+              error = `Đáp án đúng "${plain(r[7])}" không hợp lệ`;
+            }
+            questionImageFile = plain(r[13]) || undefined;
+            choiceImageFiles = slots.map(slot => slot.image);
+            if (!error && !questionImageFile && !choiceImageFiles.some(Boolean)) {
+              error = 'Câu hỏi hình ảnh cần ít nhất 1 ảnh — ở đề bài hoặc ở 1 đáp án';
+            }
           } else if (type === 'essay') {
             choices = [];
             metadata = {
@@ -213,7 +240,10 @@ function parseExcel(file: File): Promise<ParsedRow[]> {
 
           if (!content) error = 'Thiếu nội dung câu hỏi';
 
-          parsed.push({ rowNum: i + 1, content, type, difficulty, choices, explanation, metadata, error });
+          parsed.push({
+            rowNum: i + 1, content, type, difficulty, choices, explanation, metadata, error,
+            questionImageFile, choiceImageFiles,
+          });
         }
         resolve(parsed);
       } catch (err) {
@@ -225,12 +255,51 @@ function parseExcel(file: File): Promise<ParsedRow[]> {
   });
 }
 
+// Zip ảnh đính kèm — dùng cho câu hỏi hình ảnh (type HA)
+
+function normalizeFileKey(name: string): string {
+  const base = name.split('/').pop() ?? name;
+  return base.trim().toLowerCase();
+}
+
+function guessMimeFromExt(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'png': return 'image/png';
+    case 'jpg':
+    case 'jpeg': return 'image/jpeg';
+    case 'webp': return 'image/webp';
+    default: return 'application/octet-stream';
+  }
+}
+
+async function buildZipIndex(file: File): Promise<Map<string, JSZip.JSZipObject>> {
+  const zip = await JSZip.loadAsync(file);
+  const index = new Map<string, JSZip.JSZipObject>();
+  Object.values(zip.files).forEach(entry => {
+    if (entry.dir) return;
+    index.set(normalizeFileKey(entry.name), entry);
+  });
+  return index;
+}
+
+async function extractImageFile(
+  index: Map<string, JSZip.JSZipObject>,
+  filename: string,
+): Promise<File | null> {
+  const key = normalizeFileKey(filename);
+  const entry = index.get(key);
+  if (!entry) return null;
+  const blob = await entry.async('blob');
+  return new File([blob], key, { type: blob.type || guessMimeFromExt(key) });
+}
+
 // Download template
 
 function downloadTemplate() {
   const header = [
     'Nội dung câu hỏi',
-    'Loại (TN/DS/DC/TL)',
+    'Loại (TN/DS/DC/TL/HA)',
     'Độ khó (D/TB/K)',
     'Đáp án A',
     'Đáp án B',
@@ -242,13 +311,19 @@ function downloadTemplate() {
     'Đáp án mẫu',
     'Giới hạn từ',
     'Rubric',
+    'Tên file ảnh đề bài (câu HA, tùy chọn)',
+    'Tên file ảnh đáp án A (câu HA, tùy chọn)',
+    'Tên file ảnh đáp án B (câu HA, tùy chọn)',
+    'Tên file ảnh đáp án C (câu HA, tùy chọn)',
+    'Tên file ảnh đáp án D (câu HA, tùy chọn)',
   ];
   const examples = [
-    ['Phương trình bậc hai ax²+bx+c=0 có tối đa bao nhiêu nghiệm thực?', 'TN', 'D', '1 nghiệm', '2 nghiệm', '3 nghiệm', '0 nghiệm', 'B', 'Theo định lý cơ bản đại số', '', '', '', ''],
-    ['Những số nào sau đây là số nguyên tố?', 'TN', 'TB', '2', '3', '4', '5', 'A,B,D', 'Có thể có nhiều đáp án đúng', '', '', '', ''],
-    ['Trái đất quay quanh Mặt Trời.', 'DS', 'D', '', '', '', '', 'A', '', '', '', '', ''],
-    ['Thủ đô của Việt Nam là ___', 'DC', 'D', '', '', '', '', '', '', 'Hà Nội|Ha Noi', '', '', ''],
-    ['Trình bày các bước giải phương trình bậc hai bằng công thức nghiệm.', 'TL', 'K', '', '', '', '', '', 'Câu tự luận', '', 'Nêu đủ công thức và cách thay số', '150', 'Trình bày đúng công thức và các bước thay số'],
+    ['Phương trình bậc hai ax²+bx+c=0 có tối đa bao nhiêu nghiệm thực?', 'TN', 'D', '1 nghiệm', '2 nghiệm', '3 nghiệm', '0 nghiệm', 'B', 'Theo định lý cơ bản đại số', '', '', '', '', '', '', '', '', ''],
+    ['Những số nào sau đây là số nguyên tố?', 'TN', 'TB', '2', '3', '4', '5', 'A,B,D', 'Có thể có nhiều đáp án đúng', '', '', '', '', '', '', '', '', ''],
+    ['Trái đất quay quanh Mặt Trời.', 'DS', 'D', '', '', '', '', 'A', '', '', '', '', '', '', '', '', '', ''],
+    ['Thủ đô của Việt Nam là ___', 'DC', 'D', '', '', '', '', '', '', 'Hà Nội|Ha Noi', '', '', '', '', '', '', '', ''],
+    ['Trình bày các bước giải phương trình bậc hai bằng công thức nghiệm.', 'TL', 'K', '', '', '', '', '', 'Câu tự luận', '', 'Nêu đủ công thức và cách thay số', '150', 'Trình bày đúng công thức và các bước thay số', '', '', '', '', ''],
+    ['Hình nào dưới đây là tam giác vuông?', 'HA', 'TB', '', '', '', '', 'A', '', '', '', '', '', '', 'cau6_A.png', 'cau6_B.png', 'cau6_C.png', 'cau6_D.png'],
   ];
 
   const ws = XLSX.utils.aoa_to_sheet([header, ...examples]);
@@ -257,7 +332,8 @@ function downloadTemplate() {
   ws['!cols'] = [
     { wch: 50 }, { wch: 22 }, { wch: 16 }, { wch: 20 }, { wch: 20 },
     { wch: 20 }, { wch: 20 }, { wch: 30 }, { wch: 35 }, { wch: 28 },
-    { wch: 28 }, { wch: 14 }, { wch: 24 },
+    { wch: 28 }, { wch: 14 }, { wch: 24 }, { wch: 26 }, { wch: 26 },
+    { wch: 26 }, { wch: 26 }, { wch: 26 },
   ];
 
   const wb = XLSX.utils.book_new();
@@ -295,6 +371,7 @@ export default function ExcelImportModal({
   selectedQuestionBank = null,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const zipRef = useRef<HTMLInputElement>(null);
 
   // Context selectors
   const [categories,  setCategories]  = useState<Category[]>([]);
@@ -311,7 +388,9 @@ export default function ExcelImportModal({
   const [parsing,   setParsing]   = useState(false);
   const [rows,      setRows]      = useState<ParsedRow[]>([]);
   const [fileName,  setFileName]  = useState('');
+  const [zipFile,   setZipFile]   = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importLabel, setImportLabel] = useState('');
   const [result,    setResult]    = useState<questionService.BulkImportResult | null>(null);
 
   // Load categories + courses on open
@@ -349,14 +428,26 @@ export default function ExcelImportModal({
   function resetFile() {
     setRows([]);
     setFileName('');
+    setZipFile(null);
     setResult(null);
     if (fileRef.current) fileRef.current.value = '';
+    if (zipRef.current) zipRef.current.value = '';
   }
 
   function handleClose() {
     resetFile();
     setCategoryId(''); setGrade(''); setCourseId(''); setChapterId('');
     onClose();
+  }
+
+  function onZipChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.match(/\.zip$/i)) {
+      notify.error('Chỉ hỗ trợ file .zip');
+      return;
+    }
+    setZipFile(file);
   }
 
   const handleFile = useCallback(async (file: File) => {
@@ -423,33 +514,110 @@ export default function ExcelImportModal({
     setGrade(selectedCourse?.grades?.[0] ? String(selectedCourse.grades[0]) : '');
   }
 
+  function rowNeedsImages(r: ParsedRow): boolean {
+    return Boolean(r.questionImageFile) || Boolean(r.choiceImageFiles?.some(Boolean));
+  }
+
   async function handleImport() {
     if (!categoryId) { notify.error('Vui lòng chọn môn học'); return; }
     if (!grade) { notify.error('Vui lòng chọn lớp'); return; }
     if (validRows.length === 0) { notify.error('Không có câu hỏi hợp lệ để nhập'); return; }
 
-    const requests: CreateQuestionRequest[] = validRows.map(r => ({
-      categoryId,
-      grade: Number(grade),
-      questionBankId: selectedQuestionBank?.id || undefined,
-      chapterId: chapterId || undefined,
-      content:     r.content,
-      explanation: r.explanation || undefined,
-      difficulty:  r.difficulty,
-      type:        r.type,
-      choices:     r.choices,
-      metadata:    r.metadata ?? null,
-    }));
+    const rowsNeedingImages = validRows.filter(rowNeedsImages);
+    if (rowsNeedingImages.length > 0 && !zipFile) {
+      notify.error('Có câu hỏi hình ảnh trong file — vui lòng chọn file zip ảnh đính kèm');
+      return;
+    }
 
     setImporting(true);
+    setImportLabel('Đang xử lý...');
     try {
-      const res = await questionService.bulkCreateQuestions(requests);
-      setResult(res);
-      if (res.created > 0) {
-        notify.success(`Nhập thành công ${res.created} câu hỏi`);
+      let zipIndex: Map<string, JSZip.JSZipObject> | null = null;
+      if (zipFile) {
+        setImportLabel('Đang đọc file zip ảnh...');
+        try {
+          zipIndex = await buildZipIndex(zipFile);
+        } catch {
+          notify.error('Không đọc được file zip - kiểm tra lại file');
+          setImporting(false);
+          setImportLabel('');
+          return;
+        }
+      }
+
+      const imageErrors: Array<{ row: number; message: string }> = [];
+      const readyRows: ParsedRow[] = [];
+
+      for (const r of validRows) {
+        if (!rowNeedsImages(r) || !zipIndex) {
+          readyRows.push(r);
+          continue;
+        }
+        try {
+          let promptAssetUrl: string | undefined;
+          if (r.questionImageFile) {
+            setImportLabel(`Đang tải ảnh đề bài dòng ${r.rowNum}...`);
+            const file = await extractImageFile(zipIndex, r.questionImageFile);
+            if (!file) throw new Error(`Không tìm thấy ảnh "${r.questionImageFile}" trong zip`);
+            const uploaded = await questionService.uploadQuestionImage(file);
+            promptAssetUrl = uploaded.publicUrl;
+          }
+
+          const choices = [...r.choices];
+          if (r.choiceImageFiles) {
+            for (let i = 0; i < r.choiceImageFiles.length; i++) {
+              const filename = r.choiceImageFiles[i];
+              if (!filename) continue;
+              setImportLabel(`Đang tải ảnh đáp án dòng ${r.rowNum} (${i + 1}/${r.choiceImageFiles.length})...`);
+              const file = await extractImageFile(zipIndex, filename);
+              if (!file) throw new Error(`Không tìm thấy ảnh "${filename}" trong zip`);
+              const uploaded = await questionService.uploadQuestionImage(file);
+              choices[i] = { ...choices[i], imageUrl: uploaded.publicUrl };
+            }
+          }
+
+          readyRows.push({
+            ...r,
+            choices,
+            metadata: promptAssetUrl ? { ...r.metadata, promptAssetUrl } : r.metadata,
+          });
+        } catch (err) {
+          imageErrors.push({
+            row: r.rowNum,
+            message: err instanceof Error ? err.message : 'Không xử lý được ảnh cho dòng này',
+          });
+        }
+      }
+
+      setImportLabel('Đang tạo câu hỏi...');
+      const requests: CreateQuestionRequest[] = readyRows.map(r => ({
+        categoryId,
+        grade: Number(grade),
+        questionBankId: selectedQuestionBank?.id || undefined,
+        chapterId: chapterId || undefined,
+        content:     r.content,
+        explanation: r.explanation || undefined,
+        difficulty:  r.difficulty,
+        type:        r.type,
+        choices:     r.choices,
+        metadata:    r.metadata ?? null,
+      }));
+
+      const res = requests.length > 0
+        ? await questionService.bulkCreateQuestions(requests)
+        : { created: 0, failed: 0, errors: [] };
+
+      const combined: questionService.BulkImportResult = {
+        created: res.created,
+        failed: res.failed + imageErrors.length,
+        errors: [...imageErrors, ...(res.errors ?? [])],
+      };
+      setResult(combined);
+      if (combined.created > 0) {
+        notify.success(`Nhập thành công ${combined.created} câu hỏi`);
         onImported();
-      } else if (res.failed > 0) {
-        notify.error(res.errors?.[0]?.message ?? 'Không nhập được câu hỏi nào');
+      } else if (combined.failed > 0) {
+        notify.error(combined.errors?.[0]?.message ?? 'Không nhập được câu hỏi nào');
       }
     } catch (err) {
       if (!wasNetworkErrorAlreadyToasted(err)) {
@@ -457,6 +625,7 @@ export default function ExcelImportModal({
       }
     } finally {
       setImporting(false);
+      setImportLabel('');
     }
   }
 
@@ -506,10 +675,11 @@ export default function ExcelImportModal({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-blue-800">Bước 1 - Tải file mẫu</p>
                   <p className="text-xs text-blue-600 mt-0.5">
-                    File mẫu chỉ hỗ trợ 4 dạng: trắc nghiệm, đúng/sai, điền vào chỗ trống và tự luận chung.
+                    File mẫu hỗ trợ trắc nghiệm, đúng/sai, điền vào chỗ trống, tự luận chung và câu hỏi hình ảnh (loại HA).
                   </p>
                   <p className="text-xs text-blue-600 mt-1">
-                    Câu hỏi hình ảnh và audio cần được thêm thủ công ở mục Thêm câu hỏi.
+                    Câu hỏi hình ảnh: ghi tên file ảnh vào các cột cuối, nén ảnh vào 1 file .zip rồi chọn ở Bước 3.
+                    Câu hỏi audio vẫn cần thêm thủ công ở mục Thêm câu hỏi.
                   </p>
                 </div>
                 <button
@@ -668,6 +838,40 @@ export default function ExcelImportModal({
                 </div>
               </div>
 
+              {/* Step 3b - Zip ảnh đính kèm, chỉ hiện khi có câu hỏi hình ảnh */}
+              {rows.some(rowNeedsImages) && (
+                <div>
+                  <p className="text-sm font-bold text-on-surface mb-2">
+                    Bước 3b - Chọn file ảnh đính kèm (.zip)
+                    <span className="ml-1 text-xs font-normal text-red-500">bắt buộc — file có câu hỏi hình ảnh</span>
+                  </p>
+                  <div
+                    onClick={() => zipRef.current?.click()}
+                    className="border-2 border-dashed border-outline-variant rounded-xl p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-primary/2 transition-colors"
+                  >
+                    <input ref={zipRef} type="file" accept=".zip" className="hidden" onChange={onZipChange} />
+                    {zipFile ? (
+                      <div className="flex items-center justify-center gap-3">
+                        <FileSpreadsheet className="w-7 h-7 text-amber-500" />
+                        <p className="font-bold text-on-surface text-sm">{zipFile.name}</p>
+                        <button
+                          onClick={e => { e.stopPropagation(); setZipFile(null); if (zipRef.current) zipRef.current.value = ''; }}
+                          className="ml-2 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1.5">
+                        <Upload className="w-8 h-8 text-on-surface-variant/40" />
+                        <p className="text-sm font-semibold text-on-surface-variant">Click để chọn file .zip chứa ảnh</p>
+                        <p className="text-xs text-on-surface-variant/60">Tên file ảnh trong zip phải khớp với Excel</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Preview table */}
               {rows.length > 0 && (
                 <div>
@@ -691,6 +895,7 @@ export default function ExcelImportModal({
                             <th className="text-left px-3 py-2 font-bold text-on-surface-variant">Loại</th>
                             <th className="text-left px-3 py-2 font-bold text-on-surface-variant">Độ khó</th>
                             <th className="text-left px-3 py-2 font-bold text-on-surface-variant">Đáp án đúng</th>
+                            <th className="text-left px-3 py-2 font-bold text-on-surface-variant">Ảnh</th>
                             <th className="text-left px-3 py-2 font-bold text-on-surface-variant">Trạng thái</th>
                           </tr>
                         </thead>
@@ -719,6 +924,11 @@ export default function ExcelImportModal({
                                   : row.metadata?.acceptedAnswers?.join(', ')
                                     || row.metadata?.sampleAnswer?.slice(0, 30)
                                     || '-'}
+                              </td>
+                              <td className="px-3 py-2 text-on-surface-variant">
+                                {rowNeedsImages(row)
+                                  ? [row.questionImageFile, ...(row.choiceImageFiles ?? [])].filter(Boolean).length + ' file'
+                                  : '-'}
                               </td>
                               <td className="px-3 py-2">
                                 {row.error ? (
@@ -775,9 +985,11 @@ export default function ExcelImportModal({
             {/* Footer */}
             <div className="px-6 py-4 border-t border-outline-variant/30 flex items-center justify-between gap-3 flex-shrink-0">
               <p className="text-xs text-on-surface-variant">
-                {validRows.length > 0 && !result && (
+                {importing && importLabel ? (
+                  <span className="font-semibold text-primary">{importLabel}</span>
+                ) : validRows.length > 0 && !result ? (
                   <span className="font-semibold text-primary">{validRows.length} câu hợp lệ sẵn sàng nhập</span>
-                )}
+                ) : null}
               </p>
               <div className="flex gap-3">
                 <button
@@ -789,7 +1001,7 @@ export default function ExcelImportModal({
                 {!result && (
                   <button
                     onClick={handleImport}
-                    disabled={importing || validRows.length === 0 || !categoryId || !grade}
+                    disabled={importing || validRows.length === 0 || !categoryId || !grade || (rows.some(rowNeedsImages) && !zipFile)}
                     className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold bg-green-500 text-white rounded-xl hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {importing

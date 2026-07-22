@@ -1,14 +1,20 @@
-import { useState, useEffect, useMemo } from 'react';
-import { MessageSquare, Loader2, Send } from 'lucide-react';
-import { notify } from '../../../lib/toast';
-import { getCourseReviews, upsertCourseReview } from '../../../api/courseService';
+import {
+  Loader2,
+  MessageSquare,
+  Send,
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { isApiError } from '../../../api/client';
 import { getCourseProgress } from '../../../api/courseProgressService';
+import {
+  getCourseReviews,
+  upsertCourseReview,
+} from '../../../api/courseService';
+import { notify } from '../../../lib/toast';
 import type { CourseReviewSummary } from '../../../types/api';
-import { renderReviewStars } from './shared';
+import { renderReviewStars } from './courseDetailUtils';
 
-
-export function CourseReviewsPanel({
+export default function CourseReviewsPanel({
   courseId,
   fallbackRating,
   fallbackReviewCount,
@@ -101,13 +107,6 @@ export function CourseReviewsPanel({
       setServerProgressPct(null);
       return;
     }
-    // Tiến độ local đã đủ mở khóa đánh giá (>=30%) thì khỏi hỏi server —
-    // fetch này chỉ để cứu trường hợp local thiếu dữ liệu (học trên máy khác).
-    // Reset về null để effectiveProgressPct dùng giá trị local mới hơn.
-    if (progressPct >= 30) {
-      setServerProgressPct(null);
-      return;
-    }
     let cancelled = false;
     getCourseProgress(courseId)
       .then(progress => {
@@ -119,7 +118,7 @@ export function CourseReviewsPanel({
     return () => {
       cancelled = true;
     };
-  }, [canSubmitReview, courseId, progressPct]);
+  }, [canSubmitReview, courseId]);
 
   async function handleSubmitReview() {
     if (!canSubmitReview) {

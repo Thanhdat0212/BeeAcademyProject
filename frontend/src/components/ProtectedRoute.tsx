@@ -15,7 +15,8 @@ interface Props {
  * Luồng:
  *   1. Chưa đăng nhập → redirect /login, ghi nhớ from để login xong quay lại.
  *   2. Đã đăng nhập nhưng sai role → redirect về trang chính của role đó.
- *   3. Đúng role → render children.
+ *   3. Đang dùng mật khẩu tạm do Admin cấp → ép sang trang đổi mật khẩu.
+ *   4. Đúng role → render children.
  *
  * Ví dụ dùng trong App.tsx:
  *   <Route path="/teacher/courses" element={
@@ -48,6 +49,15 @@ export default function ProtectedRoute({ children, role, redirectTo = '/login' }
     };
     const home = user?.role ? homepageByRole[user.role] ?? '/' : '/';
     return <Navigate to={home} replace />;
+  }
+
+  // Mật khẩu tạm do Admin cấp đã đi qua kênh ngoài hệ thống → chặn mọi trang
+  // trừ chính trang đổi mật khẩu. Backend chặn song song ở TeacherAccessService.
+  if (user?.mustChangePassword) {
+    const changePasswordPath = user.role === 'teacher' ? '/teacher/account' : '/account';
+    if (location.pathname !== changePasswordPath) {
+      return <Navigate to={changePasswordPath} replace />;
+    }
   }
 
   return <>{children}</>;

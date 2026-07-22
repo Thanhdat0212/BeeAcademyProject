@@ -45,6 +45,9 @@ public class QaThread {
     @JoinColumn(name = "lesson_id")
     private Lesson lesson;
 
+    @Column(name = "title", length = 180)
+    private String title;
+
     @Convert(converter = QaThreadStatusConverter.class)
     @Column(name = "status", nullable = false)
     private QaThreadStatus status;
@@ -58,6 +61,15 @@ public class QaThread {
 
     @Column(name = "resolved_at")
     private Instant resolvedAt;
+
+    @Column(name = "visibility", nullable = false, length = 16)
+    private String visibility = "public";
+
+    @Column(name = "duplicate_of_thread_id")
+    private UUID duplicateOfThreadId;
+
+    @Column(name = "duplicate_marked_at")
+    private Instant duplicateMarkedAt;
 
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
@@ -76,7 +88,26 @@ public class QaThread {
                                   String attachmentUrl, String attachmentName,
                                   String attachmentType, Long attachmentSizeBytes) {
         return createWithAuthor(student, course, lesson, student, content,
-                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes);
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes, "public");
+    }
+
+    public static QaThread create(Profile student, Course course, Lesson lesson, String content,
+                                  String attachmentUrl, String attachmentName,
+                                  String attachmentType, Long attachmentSizeBytes,
+                                  String visibility) {
+        return createWithAuthor(student, course, lesson, student, content,
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes, visibility);
+    }
+
+    public static QaThread createStudentQuestion(Profile student, Course course, Lesson lesson,
+                                                 String title, String content,
+                                                 String attachmentUrl, String attachmentName,
+                                                 String attachmentType, Long attachmentSizeBytes,
+                                                 String visibility) {
+        QaThread thread = createWithAuthor(student, course, lesson, student, content,
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes, visibility);
+        thread.title = title;
+        return thread;
     }
 
     public static QaThread createWithAuthor(Profile student, Course course, Lesson lesson,
@@ -88,11 +119,21 @@ public class QaThread {
                                             Profile author, String content,
                                             String attachmentUrl, String attachmentName,
                                             String attachmentType, Long attachmentSizeBytes) {
+        return createWithAuthor(student, course, lesson, author, content,
+                attachmentUrl, attachmentName, attachmentType, attachmentSizeBytes, "public");
+    }
+
+    public static QaThread createWithAuthor(Profile student, Course course, Lesson lesson,
+                                            Profile author, String content,
+                                            String attachmentUrl, String attachmentName,
+                                            String attachmentType, Long attachmentSizeBytes,
+                                            String visibility) {
         QaThread thread = new QaThread();
         thread.id = UUID.randomUUID();
         thread.student = student;
         thread.course = course;
         thread.lesson = lesson;
+        thread.visibility = normalizeVisibility(visibility);
         thread.status = QaThreadStatus.PENDING;
         thread.lastActivityAt = Instant.now();
         thread.messages.add(QaMessage.create(thread, author, content,
@@ -157,6 +198,24 @@ public class QaThread {
                 .anyMatch(m -> m.getAuthorRole() == UserRole.TEACHER);
         this.status = hasTeacherReply ? QaThreadStatus.ANSWERED : QaThreadStatus.PENDING;
         this.resolvedAt = null;
+        this.duplicateOfThreadId = null;
+        this.duplicateMarkedAt = null;
         this.lastActivityAt = Instant.now();
+    }
+
+    public void markDuplicate(UUID duplicateOfThreadId) {
+        this.duplicateOfThreadId = duplicateOfThreadId;
+        this.duplicateMarkedAt = Instant.now();
+        this.status = QaThreadStatus.RESOLVED;
+        this.resolvedAt = Instant.now();
+        this.lastActivityAt = Instant.now();
+    }
+
+    private static String normalizeVisibility(String visibility) {
+        if (visibility == null || visibility.isBlank()) {
+            return "public";
+        }
+        String normalized = visibility.trim().toLowerCase();
+        return "private".equals(normalized) ? "private" : "public";
     }
 }

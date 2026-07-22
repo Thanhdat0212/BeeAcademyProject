@@ -38,8 +38,11 @@ public class QuestionBankSchemaMigration implements ApplicationRunner {
 
         ensureQuestionTypeValues();
         ensureMetadataColumn();
+        ensureQuestionPointAndTagColumns();
         ensureGradeColumn();
         ensureQuestionBankSchema();
+        ensureQuestionVersionSchema();
+        ensureQuestionAuditSchema();
     }
 
     private void ensureQuestionTypeValues() {
@@ -91,6 +94,83 @@ public class QuestionBankSchemaMigration implements ApplicationRunner {
                 """, Boolean.class);
         if (!Boolean.TRUE.equals(hasMetadataColumn)) {
             jdbcTemplate.execute("ALTER TABLE public.questions ADD COLUMN metadata_json TEXT");
+        }
+    }
+
+    private void ensureQuestionVersionSchema() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS public.question_versions (
+                    id UUID PRIMARY KEY,
+                    question_id UUID NOT NULL REFERENCES public.questions(id) ON DELETE CASCADE,
+                    teacher_id UUID NOT NULL REFERENCES public.profiles(id),
+                    version_no INTEGER NOT NULL,
+                    question_bank_id UUID,
+                    category_id UUID,
+                    grade INTEGER,
+                    chapter_id UUID,
+                    content TEXT NOT NULL,
+                    explanation TEXT,
+                    default_points NUMERIC(6,2),
+                    tags_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    metadata_json JSONB,
+                    difficulty TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    status VARCHAR(16),
+                    choices_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    change_reason VARCHAR(500),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uk_question_versions_question_version
+                        UNIQUE (question_id, version_no)
+                )
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE public.question_versions
+                    ADD COLUMN IF NOT EXISTS question_bank_id UUID,
+                    ADD COLUMN IF NOT EXISTS category_id UUID,
+                    ADD COLUMN IF NOT EXISTS grade INTEGER,
+                    ADD COLUMN IF NOT EXISTS chapter_id UUID,
+                    ADD COLUMN IF NOT EXISTS default_points NUMERIC(6,2),
+                    ADD COLUMN IF NOT EXISTS tags_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    ADD COLUMN IF NOT EXISTS status VARCHAR(16)
+                """);
+        jdbcTemplate.execute("""
+                UPDATE public.question_versions qv
+                SET question_bank_id = q.question_bank_id,
+                    category_id = q.category_id,
+                    grade = q.grade,
+                    chapter_id = q.chapter_id,
+                    default_points = q.default_points,
+                    tags_json = q.tags_json,
+                    status = q.status::text
+                FROM public.questions q
+                WHERE q.id = qv.question_id
+                  AND (
+                      qv.category_id IS NULL
+                      OR qv.grade IS NULL
+                      OR qv.status IS NULL
+                      OR qv.tags_json IS NULL
+                      OR qv.tags_json = '[]'::jsonb
+                  )
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_question_versions_question
+                ON public.question_versions (question_id, version_no DESC)
+                """);
+    }
+
+    private void ensureQuestionPointAndTagColumns() {
+        jdbcTemplate.execute("ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS default_points NUMERIC(6,2)");
+        jdbcTemplate.execute("ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS tags_json JSONB NOT NULL DEFAULT '[]'::jsonb");
+        Boolean hasQuestionVersionsTable = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = 'question_versions'
+                )
+                """, Boolean.class);
+        if (Boolean.TRUE.equals(hasQuestionVersionsTable)) {
+            jdbcTemplate.execute("ALTER TABLE public.question_versions ADD COLUMN IF NOT EXISTS default_points NUMERIC(6,2)");
+            jdbcTemplate.execute("ALTER TABLE public.question_versions ADD COLUMN IF NOT EXISTS tags_json JSONB NOT NULL DEFAULT '[]'::jsonb");
         }
     }
 
@@ -205,6 +285,43 @@ public class QuestionBankSchemaMigration implements ApplicationRunner {
         jdbcTemplate.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_question_banks_teacher_title
                 ON public.question_banks (teacher_id, lower(btrim(title)))
+                """);
+    }
+
+    private void ensureQuestionAuditSchema() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS public.question_audit_logs (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    teacher_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
+                    question_id UUID NOT NULL,
+                    old_version INTEGER,
+                    new_version INTEGER,
+                    action VARCHAR(16) NOT NULL,
+                    old_state JSONB,
+                    new_state JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT chk_question_audit_action
+                        CHECK (action IN ('CREATE', 'UPDATE', 'ARCHIVE', 'DELETE')),
+                    CONSTRAINT chk_question_audit_old_version
+                        CHECK (old_version IS NULL OR old_version > 0),
+                    CONSTRAINT chk_question_audit_new_version
+                        CHECK (new_version IS NULL OR new_version > 0),
+                    CONSTRAINT chk_question_audit_version_transition
+                        CHECK (
+                            (action = 'CREATE' AND old_version IS NULL AND new_version IS NOT NULL)
+                            OR (action IN ('UPDATE', 'ARCHIVE') AND old_version IS NOT NULL
+                                AND new_version IS NOT NULL AND new_version > old_version)
+                            OR (action = 'DELETE' AND old_version IS NOT NULL AND new_version IS NULL)
+                        )
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_question_audit_question_created
+                ON public.question_audit_logs (question_id, created_at DESC)
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_question_audit_teacher_created
+                ON public.question_audit_logs (teacher_id, created_at DESC)
                 """);
     }
 }

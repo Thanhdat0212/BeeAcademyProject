@@ -246,7 +246,7 @@ GET {{baseUrl}}/api/courses/by-slug/{slug}
 ```
 GET {{baseUrl}}/api/categories
 ```
-**Expected (200):** `data` là mảng 8 danh mục (Toán, Văn, Anh...).
+**Expected (200):** `data` là mảng danh mục môn học (Toán, Văn, Anh, Công nghệ...).
 
 ---
 

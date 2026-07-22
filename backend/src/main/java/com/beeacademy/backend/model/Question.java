@@ -16,7 +16,9 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -65,7 +67,7 @@ public class Question {
     @JoinColumn(name = "category_id")
     private Category category;
 
-    /** Lop hoc cua ngan hang cau hoi, vi du 6, 7, 8, 9. */
+    /** Lớp học của ngân hàng câu hỏi, ví dụ 6, 7, 8, 9. */
     @Column(name = "grade", nullable = false)
     private Integer grade;
 
@@ -84,6 +86,13 @@ public class Question {
     /** Giải thích đáp án — hiển thị cho học sinh sau khi nộp bài. */
     @Column(name = "explanation")
     private String explanation;
+
+    @Column(name = "default_points", columnDefinition = "NUMERIC(6,2)")
+    private Double defaultPoints;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "tags_json", columnDefinition = "jsonb")
+    private String tagsJson;
 
     @Column(name = "metadata_json")
     private String metadataJson;
@@ -145,7 +154,8 @@ public class Question {
 
     public static Question create(Profile teacher, QuestionBank questionBank,
                                   Category category, Integer grade, Chapter chapter,
-                                   String content, String explanation, String metadataJson,
+                                   String content, String explanation, Double defaultPoints,
+                                   String tagsJson, String metadataJson,
                                    String difficulty, String type) {
         Question q     = new Question();
         q.id           = UUID.randomUUID();
@@ -156,6 +166,8 @@ public class Question {
         q.chapter      = chapter;
         q.content      = content;
         q.explanation  = explanation;
+        q.defaultPoints = defaultPoints;
+        q.tagsJson     = tagsJson;
         q.metadataJson = metadataJson;
         q.difficulty   = difficulty;   // "easy" | "medium" | "hard"
         q.type         = type;         // "multiple_choice" | "true_false"
@@ -165,7 +177,8 @@ public class Question {
     }
 
     public void update(QuestionBank questionBank, Category category, Integer grade, Chapter chapter,
-                       String content, String explanation, String metadataJson,
+                       String content, String explanation, Double defaultPoints,
+                       String tagsJson, String metadataJson,
                        String difficulty, String type) {
         this.questionBank = questionBank;
         if (category != null) this.category = category;
@@ -173,6 +186,8 @@ public class Question {
         this.chapter = chapter;
         if (content != null && !content.isBlank()) this.content = content;
         if (explanation != null) this.explanation = explanation;
+        this.defaultPoints = defaultPoints;
+        this.tagsJson = tagsJson;
         this.metadataJson = metadataJson;
         if (difficulty != null) this.difficulty = difficulty;
         if (type != null) this.type = type;

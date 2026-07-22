@@ -1,27 +1,18 @@
+import {
+  Award,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  RotateCcw,
+  Trophy,
+  X,
+  XCircle,
+} from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, X, XCircle, Award, RotateCcw, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
-import type { Lesson, QuizQuestion } from '../../../data/mockCourses';
-import { LearningView } from './LearningView';
+import type { Lesson, QuizQuestion } from '../../../types/course';
 
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// COMPONENT: ScoreCircle
-//
-// Hiển thị vòng tròn SVG animated thể hiện % điểm số.
-// Màu vòng tròn thay đổi theo ngưỡng điểm:
-//   ≥90% → xanh lá (xuất sắc)
-//   ≥70% → xanh dương (giỏi)
-//   ≥50% → vàng (khá)
-//   <50%  → đỏ (cần cố gắng)
-//
-// KỸ THUẬT SVG:
-//   Bán kính r=15.9 → chu vi = 2π×15.9 ≈ 100
-//   → strokeDasharray="${dash} ${circumference}" với dash=(score/100)×circumference
-//   → dash gần bằng đúng score (vd: score=75 → dash≈75/100)
-//   → Trick này giúp điều chỉnh độ dài cung SVG trực quan theo %
-// ═══════════════════════════════════════════════════════════════════════════════
-export function ScoreCircle({ score }: { score: number }) {
+function ScoreCircle({ score }: { score: number }) {
   const circumference = 2 * Math.PI * 15.9;
   const dash = (score / 100) * circumference;
   const color =
@@ -88,15 +79,14 @@ export function ScoreCircle({ score }: { score: number }) {
 //   Nộp bài (khi đã trả lời hết) → handleSubmit() tính điểm → phase='results'
 //   Làm lại → handleRetry() reset toàn bộ về phase='quiz'
 // ═══════════════════════════════════════════════════════════════════════════════
-export interface QuizModalProps {
+interface QuizModalProps {
   lesson: Lesson;
   prevScore?: number;
   onClose: () => void;
   onComplete: (lessonId: string, score: number) => void;
 }
 
-
-export function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalProps) {
+export default function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalProps) {
   const questions: QuizQuestion[] = lesson.questions ?? [];
   const [currentIdx, setCurrentIdx] = useState(0);
 
@@ -236,8 +226,8 @@ export function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalP
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: 0.1 * i }}
                       className={`rounded-2xl border-2 overflow-hidden ${isCorrect
-                          ? 'border-green-500/30 bg-green-500/5'
-                          : 'border-red-500/30 bg-red-500/5'
+                        ? 'border-green-500/30 bg-green-500/5'
+                        : 'border-red-500/30 bg-red-500/5'
                         }`}
                     >
                       <div className="flex items-start gap-3 p-4">
@@ -370,13 +360,13 @@ export function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalP
                       whileTap={{ scale: 0.99 }}
                       onClick={() => handleSelect(i)}
                       className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 transition-all text-left ${isSelected
-                          ? 'border-primary bg-primary/10 shadow-sm shadow-primary/20'
-                          : 'border-outline-variant/40 hover:border-primary/40 hover:bg-surface-container'
+                        ? 'border-primary bg-primary/10 shadow-sm shadow-primary/20'
+                        : 'border-outline-variant/40 hover:border-primary/40 hover:bg-surface-container'
                         }`}
                     >
                       <div className={`w-9 h-9 rounded-full flex items-center justify-center font-extrabold text-sm flex-shrink-0 transition-colors ${isSelected
-                          ? 'bg-primary text-on-primary'
-                          : 'bg-surface-container-high text-on-surface-variant'
+                        ? 'bg-primary text-on-primary'
+                        : 'bg-surface-container-high text-on-surface-variant'
                         }`}>
                         {letter}
                       </div>
@@ -408,10 +398,10 @@ export function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalP
                 onClick={() => setCurrentIdx(i)}
                 title={`Câu ${i + 1}`}
                 className={`rounded-full transition-all duration-200 ${i === currentIdx
-                    ? 'w-6 h-3 bg-primary'
-                    : answers[i] !== null
-                      ? 'w-3 h-3 bg-primary/50 hover:bg-primary/70'
-                      : 'w-3 h-3 bg-surface-container-high hover:bg-outline-variant'
+                  ? 'w-6 h-3 bg-primary'
+                  : answers[i] !== null
+                    ? 'w-3 h-3 bg-primary/50 hover:bg-primary/70'
+                    : 'w-3 h-3 bg-surface-container-high hover:bg-outline-variant'
                   }`}
               />
             ))}
@@ -445,8 +435,8 @@ export function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalP
                 onClick={handleSubmit}
                 disabled={!allAnswered}
                 className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${allAnswered
-                    ? 'bg-green-500 text-white hover:bg-green-600 shadow-md shadow-green-500/30'
-                    : 'bg-surface-container-high text-on-surface-variant cursor-not-allowed opacity-60'
+                  ? 'bg-green-500 text-white hover:bg-green-600 shadow-md shadow-green-500/30'
+                  : 'bg-surface-container-high text-on-surface-variant cursor-not-allowed opacity-60'
                   }`}
               >
                 <Trophy className="w-4 h-4" />
@@ -459,3 +449,23 @@ export function QuizModal({ lesson, prevScore, onClose, onComplete }: QuizModalP
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMPONENT: MarketingView
+//
+// Hiển thị khi user CHƯA mua khóa học.
+// Mục tiêu: thuyết phục user mua — hero banner, tabs thông tin, sticky purchase card.
+//
+// LUỒNG THÊM VÀO GIỎ HÀNG:
+//   1. User nhấn "Thêm vào giỏ hàng" → handleAddToCart()
+//   2. Kiểm tra đăng nhập: chưa → redirect /login với state { from: /courses/:id }
+//      Sau khi login xong, Login.tsx sẽ navigate về đúng trang này
+//   3. Kiểm tra đã sở hữu: đã mua rồi → toast lỗi, dừng lại
+//   4. Hợp lệ → addToCart(course) → toast thành công
+//   5. User vào /checkout để thanh toán
+//
+// 3 TABS:
+//   'overview'   — Bạn sẽ học được gì (checklist + mô tả chi tiết)
+//   'syllabus'   — Nội dung khóa học (danh sách bài học với icon type)
+//   'instructor' — Thông tin giảng viên (avatar + bio)
+// ═══════════════════════════════════════════════════════════════════════════════

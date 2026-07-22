@@ -60,11 +60,11 @@ public class StudentLessonNote {
 
     public void update(int timeSec, String content) {
         if (timeSec < 0) {
-            throw new IllegalArgumentException("timeSec khong duoc am");
+            throw new IllegalArgumentException("timeSec không được âm");
         }
         String normalized = content == null ? "" : content.trim();
         if (normalized.isEmpty() || normalized.length() > 2000) {
-            throw new IllegalArgumentException("Noi dung ghi chu khong hop le");
+            throw new IllegalArgumentException("Nội dung ghi chú không hợp lệ");
         }
         this.timeSec = timeSec;
         this.content = normalized;

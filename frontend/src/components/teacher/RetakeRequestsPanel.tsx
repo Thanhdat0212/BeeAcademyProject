@@ -103,6 +103,10 @@ export default function RetakeRequestsPanel() {
                   {request.attemptsUsed}/{request.maxAttempts} lượt
                 </p>
                 <p className="text-xs text-on-surface-variant mt-0.5">
+                  Yêu cầu {request.requestCount}/3 · Đã duyệt {request.approvalCount}/3 ·{' '}
+                  {request.examEnrollmentStatus}
+                </p>
+                <p className="text-xs text-on-surface-variant mt-0.5">
                   Gửi lúc {formatDateTime(request.createdAt)}
                 </p>
               </div>

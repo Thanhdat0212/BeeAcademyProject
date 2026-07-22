@@ -10,6 +10,12 @@ public record GradeAssignmentSubmissionRequest(
         Double score,
 
         @Size(max = 3000, message = "Nhận xét tối đa 3000 ký tự")
-        String feedback
+        String feedback,
+
+        @Size(max = 1000, message = "Lý do sửa điểm tối đa 1000 ký tự")
+        String revisionReason
 ) {
+    public GradeAssignmentSubmissionRequest(Double score, String feedback) {
+        this(score, feedback, null);
+    }
 }

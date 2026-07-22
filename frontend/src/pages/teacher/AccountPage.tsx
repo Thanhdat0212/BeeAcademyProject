@@ -4,7 +4,6 @@ import { motion } from 'motion/react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart2,
-  Bell,
   BookOpen,
   ClipboardList,
   Database,
@@ -18,6 +17,7 @@ import {
   Megaphone,
   PenSquare,
   Save,
+  ShieldAlert,
   Star,
   UserCircle,
   Lock,
@@ -27,6 +27,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { notify } from '../../lib/toast';
 import { changePassword as changePasswordApi } from '../../api/authService';
 import { isApiError } from '../../api/client';
+import BrandLogo from '../../components/BrandLogo';
 
 const NAV_ITEMS = [
   { icon: LayoutDashboard, label: 'Tổng quan', path: '/teacher' },
@@ -56,6 +57,8 @@ export default function TeacherAccountPage() {
   const location = useLocation();
   const logout = useAuthStore(state => state.logout);
   const user = useAuthStore(state => state.user);
+  const updateUser = useAuthStore(state => state.updateUser);
+  const mustChangePassword = user?.mustChangePassword ?? false;
 
   async function handleSave() {
     if (!currentPassword.trim()) {
@@ -84,6 +87,12 @@ export default function TeacherAccountPage() {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      // Backend đã gỡ cờ mustChangePassword; đồng bộ store ngay để ProtectedRoute
+      // thôi chặn mà không cần đăng nhập lại.
+      if (mustChangePassword) {
+        updateUser({ mustChangePassword: false });
+        navigate('/teacher');
+      }
     } catch (err) {
       notify.dismiss(toastId);
       const message = isApiError(err) ? err.message : 'Đổi mật khẩu thất bại. Vui lòng thử lại.';
@@ -113,7 +122,7 @@ export default function TeacherAccountPage() {
       `}>
         <div className="p-6 flex items-center justify-between border-b border-outline-variant/20">
           <Link to="/teacher" className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary text-on-primary rounded-xl flex items-center justify-center font-extrabold text-lg shadow-md shadow-primary/20">B</div>
+            <BrandLogo size="sm" />
             <div>
               <p className="font-extrabold text-on-surface text-sm">Bee Academy</p>
               <p className="text-xs text-on-surface-variant font-medium">Cổng Giáo Viên</p>
@@ -189,6 +198,23 @@ export default function TeacherAccountPage() {
               Cập nhật thông tin đăng nhập cho tài khoản giáo viên.
             </p>
           </motion.div>
+
+          {mustChangePassword && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-300 flex gap-3"
+            >
+              <ShieldAlert className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-amber-900 text-sm">Bắt buộc đổi mật khẩu</p>
+                <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                  Bạn đang dùng mật khẩu tạm do Admin cấp. Hãy đặt mật khẩu riêng để mở khóa
+                  các chức năng giảng dạy — mật khẩu hiện tại là mật khẩu tạm bạn đã nhận.
+                </p>
+              </div>
+            </motion.div>
+          )}
 
           <motion.div
             initial={{ opacity: 0, y: 15 }}

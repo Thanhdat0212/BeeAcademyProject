@@ -3,6 +3,9 @@ build/
 dist/
 .vite/
 coverage/
+test-results/
+playwright-report/
+blob-report/
 .DS_Store
 *.log
 .env*

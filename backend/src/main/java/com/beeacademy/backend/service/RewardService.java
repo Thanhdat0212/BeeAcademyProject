@@ -39,12 +39,11 @@ public class RewardService {
     }
 
     @Transactional
-    public int recordAssessmentScore(
+    public int recordExamScore(
             UUID studentId,
-            RewardAssessmentType assessmentType,
-            UUID assessmentId,
+            UUID examConfigId,
             double scorePercent) {
-        if (studentId == null || assessmentType == null || assessmentId == null) {
+        if (studentId == null || examConfigId == null) {
             return 0;
         }
         int points = toRewardPoints(scorePercent);
@@ -52,13 +51,14 @@ public class RewardService {
 
         StudentRewardBalance balance = getOrCreateBalance(studentId);
         StudentRewardSource source = sourceRepository
-                .findByStudentIdAndAssessmentTypeAndAssessmentId(studentId, assessmentType, assessmentId)
+                .findByStudentIdAndAssessmentTypeAndAssessmentId(
+                        studentId, RewardAssessmentType.EXAM, examConfigId)
                 .orElse(null);
 
         int delta;
         if (source == null) {
             source = StudentRewardSource.create(
-                    studentId, assessmentType, assessmentId, normalizedScore, points);
+                    studentId, RewardAssessmentType.EXAM, examConfigId, normalizedScore, points);
             sourceRepository.save(source);
             delta = points;
         } else {
@@ -68,8 +68,8 @@ public class RewardService {
         if (delta > 0) {
             balance.addPoints(delta);
             balanceRepository.save(balance);
-            log.info("Reward points +{} for student={} assessment={} {}",
-                    delta, studentId, assessmentType, assessmentId);
+            log.info("Reward points +{} for student={} exam={}",
+                    delta, studentId, examConfigId);
         }
         return delta;
     }
@@ -87,13 +87,13 @@ public class RewardService {
                 .orElseThrow(() -> new ResourceNotFoundException("RewardVoucher", voucherId));
         if (!Boolean.TRUE.equals(voucher.getActive())) {
             throw new BusinessException("VOUCHER_INACTIVE",
-                    "Voucher nay hien khong kha dung.", HttpStatus.BAD_REQUEST);
+                    "Voucher này hiện không khả dụng.", HttpStatus.BAD_REQUEST);
         }
 
         StudentRewardBalance balance = getOrCreateBalance(studentId);
         if (balance.getAvailablePoints() < voucher.getRequiredPoints()) {
             throw new BusinessException("NOT_ENOUGH_POINTS",
-                    "Ban chua du diem de doi voucher nay.", HttpStatus.BAD_REQUEST);
+                    "Bạn chưa đủ điểm để đổi voucher này.", HttpStatus.BAD_REQUEST);
         }
 
         balance.spendPoints(voucher.getRequiredPoints());
@@ -115,14 +115,14 @@ public class RewardService {
                 .findByIdAndStudentIdAndStatus(
                         studentVoucherId, studentId, StudentRewardVoucherStatus.AVAILABLE)
                 .orElseThrow(() -> new BusinessException("VOUCHER_NOT_AVAILABLE",
-                        "Voucher khong kha dung hoac da duoc su dung.", HttpStatus.BAD_REQUEST));
+                        "Voucher không khả dụng hoặc đã được sử dụng.", HttpStatus.BAD_REQUEST));
 
         int discount = Math.min(
                 Math.max(0, subtotalAmount),
                 studentVoucher.getVoucher().getDiscountAmount());
         if (discount <= 0) {
             throw new BusinessException("VOUCHER_NOT_APPLICABLE",
-                    "Voucher khong ap dung duoc cho don hang nay.", HttpStatus.BAD_REQUEST);
+                    "Voucher không áp dụng được cho đơn hàng này.", HttpStatus.BAD_REQUEST);
         }
 
         studentVoucher.reserveForOrder(orderId);

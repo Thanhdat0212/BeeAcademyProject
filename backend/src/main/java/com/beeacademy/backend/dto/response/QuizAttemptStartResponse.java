@@ -1,5 +1,7 @@
 package com.beeacademy.backend.dto.response;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -19,8 +21,10 @@ public record QuizAttemptStartResponse(
             UUID id,
             String content,
             String type,
+            JsonNode metadata,
+            boolean multipleAnswer,
             List<ChoiceForStudent> choices
     ) {}
 
-    public record ChoiceForStudent(UUID id, String content, Integer position) {}
+    public record ChoiceForStudent(UUID id, String content, Integer position, String imageUrl) {}
 }

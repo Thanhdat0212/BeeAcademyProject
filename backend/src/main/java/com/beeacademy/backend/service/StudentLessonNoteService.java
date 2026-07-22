@@ -75,14 +75,14 @@ public class StudentLessonNoteService {
         if (!lesson.getChapter().getCourse().getId().equals(courseId)) {
             throw new BusinessException(
                     "STUDENT_NOTE_INVALID_LESSON",
-                    "Bai hoc khong thuoc khoa hoc da chon.",
+                    "Bài học không thuộc khóa học đã chọn.",
                     HttpStatus.BAD_REQUEST
             );
         }
         if (!enrollmentRepository.existsByStudentIdAndCourseId(me.userId(), courseId)) {
             throw new BusinessException(
                     "STUDENT_NOTE_COURSE_FORBIDDEN",
-                    "Ban can tham gia khoa hoc de su dung ghi chu.",
+                    "Bạn cần tham gia khóa học để sử dụng ghi chú.",
                     HttpStatus.FORBIDDEN
             );
         }
@@ -99,7 +99,7 @@ public class StudentLessonNoteService {
         if (me == null || !"student".equalsIgnoreCase(me.role())) {
             throw new BusinessException(
                     "STUDENT_NOTE_ROLE_FORBIDDEN",
-                    "Chi hoc sinh moi co the su dung ghi chu bai hoc.",
+                    "Chỉ học sinh mới có thể sử dụng ghi chú bài học.",
                     HttpStatus.FORBIDDEN
             );
         }

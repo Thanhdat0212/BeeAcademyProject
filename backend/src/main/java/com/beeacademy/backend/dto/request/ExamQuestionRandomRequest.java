@@ -54,6 +54,9 @@ public record ExamQuestionRandomRequest(
             Integer fillInBlankCount,
 
             @Min(0) @Max(200)
+            Integer imageQuestionCount,
+
+            @Min(0) @Max(200)
             Integer easyCount,
 
             @Min(0) @Max(200)

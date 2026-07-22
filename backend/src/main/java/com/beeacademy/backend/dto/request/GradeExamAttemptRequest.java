@@ -12,6 +12,12 @@ public record GradeExamAttemptRequest(
         Double scorePercent,
 
         @Size(max = 2000, message = "Nhận xét tối đa 2000 ký tự")
-        String feedback
+        String feedback,
+
+        @Size(max = 1000, message = "Lý do sửa điểm tối đa 1000 ký tự")
+        String revisionReason
 ) {
+    public GradeExamAttemptRequest(Double scorePercent, String feedback) {
+        this(scorePercent, feedback, null);
+    }
 }

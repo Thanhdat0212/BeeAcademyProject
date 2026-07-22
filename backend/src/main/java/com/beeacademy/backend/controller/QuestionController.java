@@ -5,6 +5,8 @@ import com.beeacademy.backend.dto.response.ApiResponse;
 import com.beeacademy.backend.dto.response.PageResponse;
 import com.beeacademy.backend.dto.response.QuestionResponse;
 import com.beeacademy.backend.dto.response.QuestionStatsResponse;
+import com.beeacademy.backend.dto.response.QuestionAuditLogResponse;
+import com.beeacademy.backend.dto.response.QuestionVersionResponse;
 import com.beeacademy.backend.security.CurrentUser;
 import com.beeacademy.backend.service.QuestionService;
 import jakarta.validation.Valid;
@@ -72,6 +74,20 @@ public class QuestionController {
     public ApiResponse<QuestionResponse> getQuestion(@PathVariable UUID questionId) {
         return ApiResponse.ok(
                 questionService.getQuestion(questionId, CurrentUser.required()));
+    }
+
+    @GetMapping("/{questionId}/versions")
+    public ApiResponse<List<QuestionVersionResponse>> listQuestionVersions(
+            @PathVariable UUID questionId) {
+        return ApiResponse.ok(
+                questionService.listQuestionVersions(questionId, CurrentUser.required()));
+    }
+
+    @GetMapping("/{questionId}/audit-logs")
+    public ApiResponse<List<QuestionAuditLogResponse>> listQuestionAuditLogs(
+            @PathVariable UUID questionId) {
+        return ApiResponse.ok(
+                questionService.listQuestionAuditLogs(questionId, CurrentUser.required()));
     }
 
     /** Cập nhật câu hỏi (rebuild toàn bộ choices). */

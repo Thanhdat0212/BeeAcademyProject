@@ -17,6 +17,6 @@ public record RequestOtpRequest(
         String fullName,
 
         @NotBlank(message = "Vai trò không được trống")
-        @Pattern(regexp = "student|parent|teacher", message = "Vai trò chỉ được là student, parent hoặc teacher")
+        @Pattern(regexp = "student|parent", message = "Vai trò chỉ được là student hoặc parent")
         String role
 ) {}

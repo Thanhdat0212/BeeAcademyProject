@@ -48,9 +48,16 @@ public enum UserRole {
 
     /**
      * Kiểm tra role có hợp lệ cho đăng ký công khai không.
-     * KHÔNG cho phép {@link #ADMIN} - admin phải được tạo qua đường nội bộ.
+     *
+     * <p>Chỉ {@link #STUDENT} và {@link #PARENT}. {@link #ADMIN} và
+     * {@link #TEACHER} phải được tạo qua đường nội bộ: giáo viên liên hệ
+     * Bee Academy qua mạng xã hội, Admin tạo tài khoản và cấp mật khẩu tạm
+     * (xem {@code AdminTeacherAccountService}).
+     *
+     * <p>Đây là nguồn sự thật duy nhất cho luật này - cả
+     * {@code AuthService.register()} lẫn {@code requestOtp()} đều gọi vào đây.
      */
     public boolean isAllowedForPublicSignup() {
-        return this == STUDENT || this == PARENT || this == TEACHER;
+        return this == STUDENT || this == PARENT;
     }
 }

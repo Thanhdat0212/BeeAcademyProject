@@ -55,6 +55,8 @@ public record ExamConfigRequest(
     public record ExamQuestionRequest(
             String id,
 
+            UUID questionVersionId,
+
             @NotBlank
             @Size(max = 5000)
             String text,

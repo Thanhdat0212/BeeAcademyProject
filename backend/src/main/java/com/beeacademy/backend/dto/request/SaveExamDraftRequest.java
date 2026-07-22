@@ -5,7 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import java.util.Map;
 
 public record SaveExamDraftRequest(
-        @NotNull(message = "Thieu danh sach cau tra loi")
+        @NotNull(message = "Thiếu danh sách câu trả lời")
         Map<String, SubmitExamRequest.ExamAnswerRequest> answers
 ) {
 }

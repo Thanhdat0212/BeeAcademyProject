@@ -16,15 +16,15 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Heart, BookOpen, PlayCircle, ShoppingCart } from 'lucide-react';
+import { Heart, BookOpen, PlayCircle, ShoppingCart, Loader2 } from 'lucide-react';
 import DashboardHeader from '../../components/DashboardHeader';
 import PageBanner from '../../components/PageBanner';
 import { useCourseStore } from '../../store/useCourseStore';
 import { useCartStore } from '../../store/useCartStore';
 import { notify } from '../../lib/toast';
-import { getCourseDetail } from '../../api/courseService';
-import { adaptCourseDetail } from '../../api/adapter';
-import type { Course as UiCourse } from '../../data/mockCourses';
+import { getCourseDetail, getEnrolledCourses } from '../../api/courseService';
+import { adaptCourseDetail, adaptCourseSummary } from '../../api/adapter';
+import type { Course as UiCourse } from '../../types/course';
 
 export default function FavoritesPage() {
   const navigate = useNavigate();
@@ -36,21 +36,49 @@ export default function FavoritesPage() {
   const addToCart      = useCartStore(state => state.addToCart);
 
   const [favoritedCourses, setFavoritedCourses] = useState<UiCourse[]>([]);
+  const [loadingFavorites, setLoadingFavorites] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     if (favoritedIds.length === 0) {
       setFavoritedCourses([]);
+      setLoadingFavorites(false);
       return;
     }
-    Promise.all(
-      favoritedIds.map(id =>
-        getCourseDetail(id)
-          .then(adaptCourseDetail)
-          .catch(() => null)
-      )
-    ).then(details => {
-      setFavoritedCourses(details.filter((d): d is UiCourse => d !== null));
-    });
+
+    setLoadingFavorites(true);
+
+    getEnrolledCourses()
+      .catch(() => [])
+      .then(async enrolledSummaries => {
+        const enrolledById = new Map<string, UiCourse>();
+        enrolledSummaries.forEach(summary => {
+          enrolledById.set(summary.id, adaptCourseSummary(summary, true));
+        });
+
+        const courses = await Promise.all(
+          favoritedIds.map(async id => {
+            const enrolledCourse = enrolledById.get(id);
+            if (enrolledCourse) return enrolledCourse;
+
+            return getCourseDetail(id)
+              .then(adaptCourseDetail)
+              .catch(() => null);
+          }),
+        );
+
+        if (!cancelled) {
+          setFavoritedCourses(courses.filter((course): course is UiCourse => course !== null));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingFavorites(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [favoritedIds]);
 
   function handleAddToCart(course: UiCourse) {
@@ -69,7 +97,7 @@ export default function FavoritesPage() {
 
       <PageBanner
         title="Danh sách yêu thích"
-        subtitle={`${favoritedCourses.length} khóa học đã yêu thích`}
+        subtitle={`${favoritedIds.length} khóa học đã yêu thích`}
       />
 
       <div className="flex-grow max-w-[1600px] mx-auto w-full px-4 md:px-10 py-8">
@@ -84,7 +112,12 @@ export default function FavoritesPage() {
           </div>
 
           {/* ── Empty state ──────────────────────────────────────────────────── */}
-          {favoritedCourses.length === 0 ? (
+          {loadingFavorites ? (
+            <div className="flex flex-col items-center justify-center py-24 bg-surface-container-lowest rounded-2xl border border-outline-variant/30 border-dashed">
+              <Loader2 className="w-9 h-9 text-primary animate-spin mb-4" />
+              <p className="text-on-surface-variant font-semibold">Đang tải danh sách yêu thích...</p>
+            </div>
+          ) : favoritedCourses.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 bg-surface-container-lowest rounded-2xl border border-outline-variant/30 border-dashed">
               <div className="w-20 h-20 bg-surface-container rounded-full flex items-center justify-center mb-5">
                 <Heart className="w-9 h-9 text-on-surface-variant opacity-40" />
@@ -175,7 +208,7 @@ export default function FavoritesPage() {
                           {isEnrolled ? (
                             /* Đã mua → "Tiếp tục học" */
                             <button
-                              onClick={() => navigate(`/courses/${course.id}`)}
+                              onClick={() => navigate(`/courses/${course.id}?learn=1`)}
                               className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-on-primary rounded-lg text-xs font-bold hover:bg-primary/90 transition-colors"
                             >
                               <PlayCircle className="w-3.5 h-3.5" />

@@ -79,7 +79,7 @@ class QuestionBankControllerTest {
                                         "Đại số cơ bản"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.message").value("Tạo ngân hàng câu hỏi thành công"))
+                .andExpect(jsonPath("$.message").value("Created question bank"))
                 .andExpect(jsonPath("$.data.id").value(bankId.toString()))
                 .andExpect(jsonPath("$.data.status").value("active"))
                 .andExpect(jsonPath("$.data.questionCount").value(0))

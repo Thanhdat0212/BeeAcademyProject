@@ -28,7 +28,7 @@ public class CourseProgressItem {
     @Column(name = "course_id", nullable = false, updatable = false)
     private UUID courseId;
 
-    @Column(name = "item_id", nullable = false, updatable = false)
+    @Column(name = "item_id", nullable = false)
     private UUID itemId;
 
     @Column(name = "item_type", nullable = false, updatable = false)
@@ -46,5 +46,12 @@ public class CourseProgressItem {
         item.itemId = itemId;
         item.itemType = itemType;
         return item;
+    }
+
+    public void migrateItemId(UUID targetItemId) {
+        if (targetItemId == null) {
+            throw new IllegalArgumentException("targetItemId is required");
+        }
+        this.itemId = targetItemId;
     }
 }

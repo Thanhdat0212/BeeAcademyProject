@@ -23,7 +23,8 @@ import jakarta.validation.constraints.Size;
  * @param email    email đăng ký
  * @param password mật khẩu raw (gửi qua HTTPS)
  * @param fullName họ và tên
- * @param role     vai trò - chỉ chấp nhận student/parent/teacher
+ * @param role     vai trò - chỉ chấp nhận student/parent (tài khoản giáo viên
+ *                 do Admin cấp, không đăng ký công khai được)
  */
 public record RegisterRequest(
 
@@ -45,8 +46,8 @@ public record RegisterRequest(
 
         @NotBlank(message = "Vai trò không được để trống")
         @Pattern(
-                regexp = "^(student|parent|teacher)$",
-                message = "Vai trò phải là student, parent hoặc teacher"
+                regexp = "^(student|parent)$",
+                message = "Vai trò phải là student hoặc parent"
         )
         String role
 ) {

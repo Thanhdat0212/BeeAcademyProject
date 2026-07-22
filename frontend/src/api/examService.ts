@@ -8,6 +8,7 @@ export type ExamType = 'quiz' | 'chapter_test' | 'final_exam';
 
 export interface ExamQuestionPayload {
   id: string;
+  questionVersionId?: string | null;
   text: string;
   type: ExamQuestionType;
   options: string[];
@@ -68,6 +69,7 @@ export interface ExamQuestionRandomRequest {
     multipleChoiceCount?: number;
     trueFalseCount?: number;
     fillInBlankCount?: number;
+    imageQuestionCount?: number;
   }>;
 }
 
@@ -203,6 +205,10 @@ export async function randomizeCourseExamQuestions(
   return unwrap(res.data);
 }
 
+// Cùng lý do với AI Scan: Gemini sinh đề lâu hơn timeout mặc định 15s của apiClient,
+// và phải lớn hơn timeout Gemini phía backend (60s) để nhận lỗi tiếng Việt từ server.
+const AI_DRAFT_CONFIG = { timeout: 90_000 };
+
 export async function generateCourseExamAiDraft(
     courseId: string,
     req: ExamAiDraftRequest,
@@ -210,6 +216,7 @@ export async function generateCourseExamAiDraft(
   const res = await apiClient.post<ApiResponse<ExamAiDraftResponse>>(
     `/api/teacher/courses/${courseId}/exams/ai-draft`,
     req,
+    AI_DRAFT_CONFIG,
   );
   return unwrap(res.data);
 }
@@ -251,10 +258,11 @@ export async function gradeTeacherExamAttempt(
   attemptId: string,
   scorePercent: number,
   feedback: string,
+  revisionReason?: string,
 ): Promise<TeacherExamAttemptResponse> {
   const res = await apiClient.put<ApiResponse<TeacherExamAttemptResponse>>(
     `/api/teacher/exam-attempts/${attemptId}/grade`,
-    { scorePercent, feedback },
+    { scorePercent, feedback, revisionReason },
   );
   return unwrap(res.data);
 }
@@ -269,10 +277,15 @@ export interface TeacherRetakeRequest {
   studentId: string;
   studentName: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  examEnrollmentStatus: 'AVAILABLE' | 'RETAKE_LOCKED' | 'RETAKE_APPROVED';
   requestedReason: string;
   extraAttempts: number | null;
   decidedReason: string | null;
   retakeExpireAt: string | null;
+  requestCount: number;
+  approvalCount: number;
+  rejectedAt: string | null;
+  cooldownUntil: string | null;
   createdAt: string;
   decidedAt: string | null;
   attemptsUsed: number;

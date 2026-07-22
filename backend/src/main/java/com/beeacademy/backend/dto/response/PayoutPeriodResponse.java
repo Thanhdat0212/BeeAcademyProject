@@ -17,8 +17,10 @@ public record PayoutPeriodResponse(
     long totalTeacherAmount,
     PayoutStatus status,
     Instant paidAt,
+    UUID paidByAdmin,
     String transferRef,
-    String transferContent
+    String transferContent,
+    String uncAttachmentUrl
 ) {
     public static PayoutPeriodResponse from(PayoutPeriod p,
                                              long transactionCount,
@@ -33,8 +35,10 @@ public record PayoutPeriodResponse(
                 .totalTeacherAmount(totalTeacherAmount)
                 .status(p.getStatus())
                 .paidAt(p.getPaidAt())
+                .paidByAdmin(p.getPaidByAdmin())
                 .transferRef(p.getTransferRef())
                 .transferContent(p.getTransferContent())
+                .uncAttachmentUrl(p.getUncAttachmentUrl())
                 .build();
     }
 }

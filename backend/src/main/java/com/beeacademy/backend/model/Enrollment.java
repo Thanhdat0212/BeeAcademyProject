@@ -61,6 +61,10 @@ public class Enrollment {
     @Column(name = "course_id", nullable = false, updatable = false)
     private UUID courseId;
 
+    /** Immutable course release selected when access was granted. */
+    @Column(name = "course_version_id", nullable = false)
+    private UUID courseVersionId;
+
     @CreationTimestamp
     @Column(name = "enrolled_at", nullable = false, updatable = false)
     private Instant enrolledAt;
@@ -68,17 +72,34 @@ public class Enrollment {
     @Column(name = "progress_pct")
     private Integer progressPct;
 
-    public static Enrollment create(UUID studentId, UUID courseId) {
+    @Column(name = "progress_updated_at", nullable = false)
+    private Instant progressUpdatedAt;
+
+    public static Enrollment create(UUID studentId, UUID courseId, UUID courseVersionId) {
+        if (courseVersionId == null) {
+            throw new IllegalArgumentException("courseVersionId is required");
+        }
         Enrollment e = new Enrollment();
         e.id = UUID.randomUUID();
         e.studentId = studentId;
         e.courseId = courseId;
+        e.courseVersionId = courseVersionId;
         e.progressPct = 0;
+        e.progressUpdatedAt = Instant.now();
         return e;
+    }
+
+    public void migrateToVersion(UUID targetCourseVersionId, Integer migratedProgressPct) {
+        if (targetCourseVersionId == null) {
+            throw new IllegalArgumentException("targetCourseVersionId is required");
+        }
+        this.courseVersionId = targetCourseVersionId;
+        updateProgress(migratedProgressPct);
     }
 
     public void updateProgress(Integer progressPct) {
         int normalized = progressPct != null ? progressPct : 0;
         this.progressPct = Math.max(0, Math.min(100, normalized));
+        this.progressUpdatedAt = Instant.now();
     }
 }

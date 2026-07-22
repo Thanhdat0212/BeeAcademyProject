@@ -47,6 +47,7 @@ export interface QuestionMetadata {
   sourceRefs?: string[];
   rejectionReason?: string;
   optionIndexMap?: number[];
+  optionImages?: string[];
   sourceType?: 'direct_exam' | 'question_bank' | 'ai';
   createdInExam?: boolean;
 }
@@ -56,12 +57,15 @@ export interface ChoiceResponse {
   content: string;
   isCorrect: boolean | null;  // null khi trả cho student đang làm bài
   position: number;
+  imageUrl?: string | null;
 }
 
 export interface QuestionResponse {
   id: string;
   content: string;
   explanation: string | null;
+  defaultPoints: number | null;
+  tags: string[];
   metadata: QuestionMetadata | null;
   difficulty: Difficulty;
   type: QuestionType;
@@ -75,7 +79,40 @@ export interface QuestionResponse {
   chapterId: string | null;
   chapterTitle: string | null;
   createdAt: string;
+  duplicateWarning?: string | null;
   choices: ChoiceResponse[];
+}
+
+export interface QuestionVersionResponse {
+  id: string;
+  versionNo: number;
+  questionBankId: string | null;
+  categoryId: string | null;
+  grade: number | null;
+  chapterId: string | null;
+  content: string;
+  explanation: string | null;
+  defaultPoints: number | null;
+  tags: string[];
+  metadata: QuestionMetadata | null;
+  difficulty: Difficulty;
+  type: QuestionType;
+  status: QuestionStatus;
+  choices: ChoiceResponse[] | null;
+  changeReason: string | null;
+  createdAt: string;
+}
+
+export interface QuestionAuditLogResponse {
+  id: string;
+  teacherId: string;
+  questionId: string;
+  oldVersion: number | null;
+  newVersion: number | null;
+  action: 'CREATE' | 'UPDATE' | 'ARCHIVE' | 'DELETE';
+  oldState: Record<string, unknown> | null;
+  newState: Record<string, unknown> | null;
+  createdAt: string;
 }
 
 export interface QuestionStatsResponse {
@@ -86,6 +123,7 @@ export interface QuestionStatsResponse {
   multipleChoiceCount?: number;
   trueFalseCount?: number;
   fillInBlankCount?: number;
+  imageQuestionCount?: number;
   essayCount?: number;
   totalExamSupported?: number;
 }
@@ -95,6 +133,7 @@ export interface ExamSupportedQuestionStats {
   multipleChoiceCount: number;
   trueFalseCount: number;
   fillInBlankCount: number;
+  imageQuestionCount: number;
   essayCount: number;
 }
 
@@ -107,7 +146,9 @@ export interface CreateQuestionRequest {
   explanation?: string;
   difficulty: Difficulty;
   type: QuestionType;
-  choices: Array<{ content: string; isCorrect: boolean }>;
+  choices: Array<{ content: string; isCorrect: boolean; imageUrl?: string }>;
+  defaultPoints?: number | null;
+  tags?: string[];
   metadata?: QuestionMetadata | null;
 }
 
@@ -156,6 +197,20 @@ export async function deleteQuestion(questionId: string): Promise<void> {
   await apiClient.delete(`/api/teacher/questions/${questionId}`);
 }
 
+export async function listQuestionVersions(questionId: string): Promise<QuestionVersionResponse[]> {
+  const res = await apiClient.get<ApiResponse<QuestionVersionResponse[]>>(
+    `/api/teacher/questions/${questionId}/versions`,
+  );
+  return unwrap(res.data);
+}
+
+export async function listQuestionAuditLogs(questionId: string): Promise<QuestionAuditLogResponse[]> {
+  const res = await apiClient.get<ApiResponse<QuestionAuditLogResponse[]>>(
+    `/api/teacher/questions/${questionId}/audit-logs`,
+  );
+  return unwrap(res.data);
+}
+
 export async function getQuestionStats(chapterId: string): Promise<QuestionStatsResponse> {
   const res = await apiClient.get<ApiResponse<QuestionStatsResponse>>(
     `/api/teacher/questions/stats/${chapterId}`);
@@ -183,6 +238,7 @@ export async function getExamSupportedQuestionStats(
   let multipleChoiceCount = 0;
   let trueFalseCount = 0;
   let fillInBlankCount = 0;
+  let imageQuestionCount = 0;
   let essayCount = 0;
 
   items.forEach(question => {
@@ -196,6 +252,9 @@ export async function getExamSupportedQuestionStats(
       case 'fill_in_blank':
         fillInBlankCount += 1;
         break;
+      case 'image_question':
+        imageQuestionCount += 1;
+        break;
       case 'essay':
       case 'essay_short':
       case 'essay_long':
@@ -207,10 +266,12 @@ export async function getExamSupportedQuestionStats(
   });
 
   return {
-    totalActive: multipleChoiceCount + trueFalseCount + fillInBlankCount + essayCount,
+    totalActive: multipleChoiceCount + trueFalseCount + fillInBlankCount
+      + imageQuestionCount + essayCount,
     multipleChoiceCount,
     trueFalseCount,
     fillInBlankCount,
+    imageQuestionCount,
     essayCount,
   };
 }

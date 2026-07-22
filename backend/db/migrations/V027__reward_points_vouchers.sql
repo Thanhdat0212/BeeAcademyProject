@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS student_reward_balances (
 CREATE TABLE IF NOT EXISTS student_reward_sources (
     id                 UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id         UUID        NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    assessment_type    TEXT        NOT NULL CHECK (assessment_type IN ('QUIZ', 'EXAM')),
+    assessment_type    TEXT        NOT NULL CHECK (assessment_type = 'EXAM'),
     assessment_id      UUID        NOT NULL,
     best_score_percent NUMERIC(5,1) NOT NULL DEFAULT 0,
     awarded_points     INTEGER     NOT NULL DEFAULT 0 CHECK (awarded_points >= 0),

@@ -10,7 +10,9 @@ public record CourseVersionResponse(
         Integer versionNo,
         String title,
         String submittedByName,
-        Instant submittedAt
+        Instant submittedAt,
+        boolean approved,
+        Instant approvedAt
 ) {
     public static CourseVersionResponse fromEntity(CourseVersion version) {
         return new CourseVersionResponse(
@@ -20,7 +22,9 @@ public record CourseVersionResponse(
                 version.getSubmittedBy() != null
                         ? version.getSubmittedBy().getFullName()
                         : null,
-                version.getSubmittedAt()
+                version.getSubmittedAt(),
+                version.isApproved(),
+                version.getApprovedAt()
         );
     }
 }

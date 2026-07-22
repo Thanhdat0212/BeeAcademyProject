@@ -16,7 +16,7 @@ import type {
   CourseSummary as ApiCourseSummary,
   LessonDetail as ApiLesson,
 } from '../types/api';
-import type { Course as UiCourse, Lesson as UiLesson, Subject, Grade } from '../data/mockCourses';
+import type { Course as UiCourse, Lesson as UiLesson, Subject, Grade } from '../types/course';
 
 // ---------------------------------------------------------------------------
 //  Helpers chuyển kiểu giá / lớp / category
@@ -46,6 +46,7 @@ const SLUG_TO_SUBJECT: Record<string, Subject> = {
   'lich-su-dia-ly': 'Sử',
   'tieng-anh': 'Tất cả',
   'tin-hoc': 'Tất cả',
+  'cong-nghe': 'Công nghệ',
   'on-thi-lop-10': 'Tất cả',
   'ky-nang-mem': 'Tất cả',
 };
@@ -158,6 +159,7 @@ export function adaptCourseSummary(summary: ApiCourseSummary, isEnrolled = false
     lastAccessedAt: summary.lastAccessedAt ?? null,
     learningStatus: summary.learningStatus ?? null,
     finalExamPassed: summary.finalExamPassed ?? null,
+    allRequiredExamsPassed: summary.allRequiredExamsPassed ?? null,
   };
 }
 

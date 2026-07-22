@@ -20,6 +20,7 @@ import {
   ChevronRight, Calculator, Megaphone, Settings,
   RefreshCcw, BookMarked, Layers,
 } from 'lucide-react';
+import BrandLogo from '../../components/BrandLogo';
 
 // ═══════════════════════════════════════════════════════════════════
 //  TYPES
@@ -162,7 +163,7 @@ export default function ApprovalsPage() {
       `}>
         <div className="p-6 flex items-center justify-between border-b border-outline-variant/20">
           <Link to="/admin" className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary text-on-primary rounded-xl flex items-center justify-center font-extrabold text-xl shadow-lg shadow-primary/20">B</div>
+            <BrandLogo size="md" />
             <div>
               <p className="font-extrabold text-sm text-on-surface">Bee Academy</p>
               <p className="text-xs text-on-surface-variant font-medium">Bảng Quản Trị</p>

@@ -20,18 +20,19 @@ import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
-import { getRevenueSplits, getPayoutPeriods } from '../../api/revenueService';
+import { exportPayoutPeriod, getRevenueSplits, getPayoutPeriods } from '../../api/revenueService';
 import type { RevenueSplitResponse, PayoutPeriodResponse } from '../../api/revenueService';
 import ChartCard from '../../components/charts/ChartCard';
 import RevenueTrendChart from '../../components/charts/RevenueTrendChart';
 import { BRAND, BRAND_ALT } from '../../lib/chartTheme';
 import {
   LayoutDashboard, BookOpen, FileText, HelpCircle,
-  Bell, LogOut, Menu, X,
+  LogOut, Menu, X,
   PenSquare, Landmark, BarChart2, ClipboardList,
   GraduationCap, DollarSign, Clock, CheckCircle2,
-  TrendingUp, Calendar, Receipt, ArrowRight, Megaphone, Database, UserCircle, Lock, Star,
+  TrendingUp, Calendar, Receipt, ArrowRight, Megaphone, Database, UserCircle, Lock, Star, Download,
 } from 'lucide-react';
+import BrandLogo from '../../components/BrandLogo';
 
 type PayoutStatus = 'PENDING' | 'PROCESSING' | 'PAID';
 type RevenueSplit = RevenueSplitResponse;
@@ -82,6 +83,17 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('vi-VN', {
     day: '2-digit', month: '2-digit', year: 'numeric',
   });
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -144,6 +156,11 @@ export default function TeacherRevenuePage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'paid'>('all');
   // Lọc theo kỳ — cross-link từ Tab 2 set state này
   const [periodFilter, setPeriodFilter] = useState<string>('all');
+
+  async function handleExportPeriod(period: PayoutPeriod) {
+    const blob = await exportPayoutPeriod(period.id);
+    downloadBlob(blob, `bee-academy-payout-${period.monthYear}.xls`);
+  }
 
   // Sidebar mobile
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -260,7 +277,7 @@ export default function TeacherRevenuePage() {
       `}>
         <div className="p-6 flex items-center justify-between border-b border-outline-variant/20">
           <Link to="/teacher" className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-primary text-on-primary rounded-xl flex items-center justify-center font-extrabold text-lg shadow-md shadow-primary/20">B</div>
+            <BrandLogo size="sm" />
             <div>
               <p className="font-extrabold text-on-surface text-sm">Bee Academy</p>
               <p className="text-xs text-on-surface-variant font-medium">Cổng Giáo Viên</p>
@@ -648,6 +665,15 @@ export default function TeacherRevenuePage() {
                       Xem chi tiết {period.transactionCount} giao dịch
                       <ArrowRight className="w-4 h-4" />
                     </button>
+                    {period.status === 'PAID' && (
+                      <button
+                        onClick={() => handleExportPeriod(period)}
+                        className="ml-3 text-sm text-green-700 font-bold hover:underline inline-flex items-center gap-1"
+                      >
+                        <Download className="w-4 h-4" />
+                        Xuất Excel
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

@@ -17,6 +17,8 @@ public interface RevenueSplitRepository extends JpaRepository<RevenueSplit, UUID
 
     List<RevenueSplit> findByPayoutPeriodIdOrderByOccurredAtDesc(UUID payoutPeriodId);
 
+    List<RevenueSplit> findByTeacherIdAndPayoutPeriodIdOrderByOccurredAtDesc(UUID teacherId, UUID payoutPeriodId);
+
     boolean existsByOrderItemId(UUID orderItemId);
 
     @Query("SELECT COALESCE(SUM(s.teacherAmount), 0) FROM RevenueSplit s WHERE s.payoutPeriodId = :periodId")

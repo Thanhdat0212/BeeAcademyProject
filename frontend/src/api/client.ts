@@ -83,6 +83,8 @@ apiClient.interceptors.request.use(
 
 interface RetryableRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
+  networkRetryCount?: number;
+  _networkRetryAttempt?: number;
 }
 
 // Các request cùng nhận 401 sẽ dùng chung một lần refresh thay vì tự refresh/logout.
@@ -163,12 +165,24 @@ apiClient.interceptors.response.use(
   async (error: AxiosError<ApiErrorResponse>) => {
     // Trường hợp network (server down, CORS, timeout)
     if (!error.response) {
+      const retryableConfig = error.config as RetryableRequestConfig | undefined;
+      const retryLimit = retryableConfig?.networkRetryCount ?? 0;
+      const retryAttempt = retryableConfig?._networkRetryAttempt ?? 0;
+      if (retryableConfig && retryAttempt < retryLimit) {
+        retryableConfig._networkRetryAttempt = retryAttempt + 1;
+        await new Promise(resolve => window.setTimeout(resolve, 400 * (retryAttempt + 1)));
+        return apiClient(retryableConfig);
+      }
+
       const offline = !navigator.onLine;
       const msg = offline
         ? 'Mất kết nối Internet. Vui lòng kiểm tra mạng.'
         : 'Không thể kết nối tới máy chủ. Vui lòng thử lại sau.';
-      notify.error(msg);
-      return Promise.reject(new Error(msg));
+      const wrapped: ApiError = Object.assign(new Error(msg), {
+        code: offline ? 'OFFLINE' : 'NETWORK_ERROR',
+        status: 0,
+      });
+      return Promise.reject(wrapped);
     }
 
     const status = error.response.status;

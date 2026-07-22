@@ -7,7 +7,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -20,13 +19,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(
-        name = "exam_configs",
-        uniqueConstraints = @UniqueConstraint(
-                name = "uk_exam_configs_course_slot",
-                columnNames = {"course_id", "slot_index"}
-        )
-)
+@Table(name = "exam_configs")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ExamConfig {
@@ -42,6 +35,12 @@ public class ExamConfig {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "teacher_id", nullable = false)
     private Profile teacher;
+
+    @Column(name = "course_version_id")
+    private UUID courseVersionId;
+
+    @Column(name = "is_draft", nullable = false)
+    private boolean draft;
 
     @Column(name = "slot_index", nullable = false)
     private Integer slotIndex;
@@ -114,11 +113,46 @@ public class ExamConfig {
         config.course = course;
         config.teacher = teacher;
         config.slotIndex = slotIndex;
+        config.draft = true;
         config.update(scopeStartChapter, placementChapter, name, description,
                 durationMinutes, passScorePercent, maxAttempts,
                 shuffleQuestions, shuffleOptions, showAnswerAfterSubmit,
                 examType, requireFullscreen, blockCopyPaste, questionsJson);
         return config;
+    }
+
+    public void assignCourseVersion(UUID courseVersionId) {
+        this.courseVersionId = courseVersionId;
+        this.draft = false;
+    }
+
+    /**
+     * Creates an editable copy without mutating the configuration frozen in an
+     * older course version.
+     */
+    public static ExamConfig copyAsDraft(ExamConfig source) {
+        ExamConfig copy = new ExamConfig();
+        copy.id = UUID.randomUUID();
+        copy.course = source.course;
+        copy.teacher = source.teacher;
+        copy.courseVersionId = null;
+        copy.slotIndex = source.slotIndex;
+        copy.draft = true;
+        copy.scopeStartChapter = source.scopeStartChapter;
+        copy.placementChapter = source.placementChapter;
+        copy.examType = source.examType;
+        copy.name = source.name;
+        copy.description = source.description;
+        copy.durationMinutes = source.durationMinutes;
+        copy.passScorePercent = source.passScorePercent;
+        copy.maxAttempts = source.maxAttempts;
+        copy.shuffleQuestions = source.shuffleQuestions;
+        copy.shuffleOptions = source.shuffleOptions;
+        copy.showAnswerAfterSubmit = source.showAnswerAfterSubmit;
+        copy.requireFullscreen = source.requireFullscreen;
+        copy.blockCopyPaste = source.blockCopyPaste;
+        copy.questionsJson = source.questionsJson;
+        return copy;
     }
 
     public void update(Chapter scopeStartChapter, Chapter placementChapter,

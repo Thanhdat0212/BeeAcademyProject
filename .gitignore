@@ -62,6 +62,8 @@ File UseCase.txt
 GEMINI.md
 Thông tin trang web.txt
 *.png
+# Trừ ảnh thương hiệu: đây là asset của app, thiếu là logo vỡ khi build
+!frontend/public/*.png
 ChiaCode/
 .codegraph/
 

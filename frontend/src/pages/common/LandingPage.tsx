@@ -4,7 +4,8 @@ import { ArrowRight, BookOpen, Users, Award, Star, CheckCircle, Loader2 } from '
 import { Link } from 'react-router-dom';
 import { searchCourses } from '../../api/courseService';
 import { adaptCourseSummary } from '../../api/adapter';
-import type { Course as UiCourse } from '../../data/mockCourses';
+import type { Course as UiCourse } from '../../types/course';
+import BrandLogo from '../../components/BrandLogo';
 
 const FEATURED_LIMIT = 3;
 
@@ -53,9 +54,7 @@ export default function LandingPage() {
       <nav className="sticky top-0 z-50 bg-surface/80 backdrop-blur-md border-b border-outline-variant/50">
         <div className="max-w-7xl mx-auto px-4 md:px-10 h-20 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-primary text-on-primary rounded-xl flex items-center justify-center font-bold text-xl shadow-lg shadow-primary/20">
-              B
-            </div>
+            <BrandLogo size="md" />
             <span className="text-2xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
               Bee Academy
             </span>
