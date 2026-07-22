@@ -57,6 +57,7 @@ export default function QuestionFormPanel({ open, editing, categories, courses, 
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [uploadingChoiceIdx, setUploadingChoiceIdx] = useState<number | null>(null);
   const availableReadingPassages = useMemo(() => {
     const grouped = new Map<string, ReadingPassageOption>();
     const sourceQuestions = Array.isArray(questions) ? questions : [];
@@ -220,11 +221,46 @@ export default function QuestionFormPanel({ open, editing, categories, courses, 
     }));
   }
 
+  function setChoiceImage(idx: number, imageUrl: string) {
+    setForm(f => ({
+      ...f,
+      choices: f.choices.map((c, i) => i === idx ? { ...c, imageUrl } : c),
+    }));
+  }
+
   function addChoice() {
     setForm(f => ({
       ...f,
       choices: [...f.choices, { content: '', isCorrect: false }],
     }));
+  }
+
+  async function handleChoiceImageFileSelected(idx: number, file?: File | null) {
+    if (!file) return;
+    if (!isAllowedMediaFile(
+      file,
+      ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'],
+      ['.jpg', '.jpeg', '.png', '.webp'],
+    )) {
+      notify.error('Chỉ hỗ trợ ảnh JPG, PNG hoặc WEBP');
+      return;
+    }
+
+    setUploadingChoiceIdx(idx);
+    try {
+      const uploaded = await questionService.uploadQuestionImage(file);
+      if (!uploaded.publicUrl) {
+        notify.error('Không nhận được đường dẫn ảnh sau khi tải lên');
+        return;
+      }
+      setChoiceImage(idx, uploaded.publicUrl);
+      notify.success('Đã tải ảnh đáp án lên');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Không tải được ảnh đáp án lên';
+      notify.error(message);
+    } finally {
+      setUploadingChoiceIdx(null);
+    }
   }
 
   function setMatchingPair(idx: number, side: 'left' | 'right', value: string) {
@@ -419,7 +455,7 @@ export default function QuestionFormPanel({ open, editing, categories, courses, 
     if (form.type === 'true_false' && form.choices.filter(c => c.isCorrect).length !== 1) { notify.error('Câu đúng/sai phải có đúng 1 đáp án đúng'); return; }
     if (form.type === 'fill_in_blank' && !form.acceptedAnswersText.trim()) { notify.error('Vui lòng nhập ít nhất 1 đáp án chấp nhận cho câu điền chỗ trống'); return; }
     if (form.type === 'matching' && form.matchingPairs.filter(pair => pair.left.trim() && pair.right.trim()).length < 2) { notify.error('Vui lòng tạo ít nhất 2 cặp nối cột hợp lệ'); return; }
-    if (form.type === 'image_question' && !form.promptAssetUrl.trim()) { notify.error('Vui lòng tải ảnh lên cho câu hỏi'); return; }
+    if (form.type === 'image_question' && !form.promptAssetUrl.trim() && !form.choices.some(c => c.imageUrl?.trim())) { notify.error('Vui lòng tải ảnh cho đề bài hoặc ít nhất 1 đáp án'); return; }
     if (form.type === 'audio_question' && !form.promptAssetUrl.trim()) { notify.error('Vui lòng tải audio lên cho câu hỏi'); return; }
     if (form.useSharedPrompt && READING_SET_TYPES.includes(form.type) && form.readingMode === 'existing' && !form.readingSetId.trim()) { notify.error('Vui lòng chọn bài đọc'); return; }
     if (form.useSharedPrompt && READING_SET_TYPES.includes(form.type) && form.readingMode === 'new' && !form.sharedPromptTitle.trim()) { notify.error('Vui lòng nhập tiêu đề bài đọc'); return; }
@@ -446,7 +482,7 @@ export default function QuestionFormPanel({ open, editing, categories, courses, 
         .filter(Boolean),
       metadata,
       choices:     OBJECTIVE_TYPES.includes(form.type)
-        ? form.choices.map(c => ({ content: c.content.trim(), isCorrect: c.isCorrect }))
+        ? form.choices.map(c => ({ content: c.content.trim(), isCorrect: c.isCorrect, imageUrl: c.imageUrl?.trim() || undefined }))
         : [],
     };
 
@@ -825,45 +861,84 @@ export default function QuestionFormPanel({ open, editing, categories, courses, 
                   </label>
                   <div className="space-y-2">
                     {form.choices.map((choice, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setChoiceCorrect(idx)}
-                          className={`flex-shrink-0 w-6 h-6 border-2 flex items-center justify-center transition-colors ${
-                            form.type === 'multiple_choice' ? 'rounded-md' : 'rounded-full'
-                          } ${
-                            choice.isCorrect
-                              ? 'border-primary bg-primary text-on-primary'
-                              : 'border-outline-variant text-transparent hover:border-primary/50'
-                          }`}
-                        >
-                          {choice.isCorrect ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Circle className="w-3.5 h-3.5 opacity-0" />}
-                        </button>
-
-                        {form.type === 'true_false' ? (
-                          <div className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium border ${
-                            choice.isCorrect ? 'border-primary bg-primary/5 text-primary' : 'border-outline-variant bg-surface-container text-on-surface-variant'
-                          }`}>
-                            {choice.content}
-                          </div>
-                        ) : (
-                          <input
-                            type="text"
-                            value={choice.content}
-                            onChange={e => setChoiceContent(idx, e.target.value)}
-                            placeholder={`Đáp án ${String.fromCharCode(65 + idx)}`}
-                            className="flex-1 px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary"
-                          />
-                        )}
-
-                        {['multiple_choice', 'image_question', 'audio_question'].includes(form.type) && form.choices.length > 2 && (
+                      <div key={idx} className={form.type === 'image_question' ? 'rounded-xl border border-outline-variant p-2' : ''}>
+                        <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => removeChoice(idx)}
-                            className="flex-shrink-0 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            onClick={() => setChoiceCorrect(idx)}
+                            className={`flex-shrink-0 w-6 h-6 border-2 flex items-center justify-center transition-colors ${
+                              form.type === 'multiple_choice' ? 'rounded-md' : 'rounded-full'
+                            } ${
+                              choice.isCorrect
+                                ? 'border-primary bg-primary text-on-primary'
+                                : 'border-outline-variant text-transparent hover:border-primary/50'
+                            }`}
                           >
-                            <X className="w-4 h-4" />
+                            {choice.isCorrect ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Circle className="w-3.5 h-3.5 opacity-0" />}
                           </button>
+
+                          {form.type === 'true_false' ? (
+                            <div className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium border ${
+                              choice.isCorrect ? 'border-primary bg-primary/5 text-primary' : 'border-outline-variant bg-surface-container text-on-surface-variant'
+                            }`}>
+                              {choice.content}
+                            </div>
+                          ) : (
+                            <input
+                              type="text"
+                              value={choice.content}
+                              onChange={e => setChoiceContent(idx, e.target.value)}
+                              placeholder={`Đáp án ${String.fromCharCode(65 + idx)}`}
+                              className="flex-1 px-3 py-2 text-sm bg-surface-container border border-outline-variant rounded-xl text-on-surface focus:outline-none focus:border-primary"
+                            />
+                          )}
+
+                          {['multiple_choice', 'image_question', 'audio_question'].includes(form.type) && form.choices.length > 2 && (
+                            <button
+                              type="button"
+                              onClick={() => removeChoice(idx)}
+                              className="flex-shrink-0 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+
+                        {form.type === 'image_question' && (
+                          <div className="mt-2 ml-8 flex items-center gap-3">
+                            {choice.imageUrl ? (
+                              <div className="relative">
+                                <img
+                                  src={choice.imageUrl}
+                                  alt={`Ảnh đáp án ${String.fromCharCode(65 + idx)}`}
+                                  className="h-16 w-16 rounded-lg border border-outline-variant object-cover"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setChoiceImage(idx, '')}
+                                  className="absolute -right-1.5 -top-1.5 rounded-full bg-red-500 p-0.5 text-white hover:bg-red-600"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-outline-variant px-3 py-1.5 text-xs font-semibold text-on-surface-variant hover:border-primary hover:text-primary">
+                                {uploadingChoiceIdx === idx ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <ImageIcon className="w-3.5 h-3.5" />
+                                )}
+                                Tải ảnh đáp án
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp"
+                                  className="hidden"
+                                  disabled={uploadingChoiceIdx !== null}
+                                  onChange={e => handleChoiceImageFileSelected(idx, e.target.files?.[0])}
+                                />
+                              </label>
+                            )}
+                          </div>
                         )}
                       </div>
                     ))}

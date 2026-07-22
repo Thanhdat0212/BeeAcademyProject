@@ -29,10 +29,11 @@ type Difficulty = 'easy' | 'medium' | 'hard';
 
 interface ParsedQuestion {
   content: string;
-  type: 'multiple_choice' | 'true_false';
+  type: 'multiple_choice' | 'true_false' | 'image_question';
   difficulty: Difficulty;
-  choices: Array<{ content: string; isCorrect: boolean }>;
+  choices: Array<{ content: string; isCorrect: boolean; imageUrl?: string }>;
   explanation: string | null;
+  promptAssetUrl?: string;
   error?: string;
 }
 
@@ -48,6 +49,12 @@ function wasNetworkErrorAlreadyToasted(err: unknown): boolean {
   return message.startsWith('Không thể kết nối') || message.startsWith('Mất kết nối');
 }
 
+// Gemini đọc nguyên file PDF rồi backend còn trích + upload ảnh lên Supabase, nên
+// call này lâu hơn hẳn REST thường — timeout mặc định 15s của apiClient hủy request
+// giữa chừng và báo "Không thể kết nối tới máy chủ". Giá trị dưới đây phải LỚN HƠN
+// timeout Gemini phía backend (120s) để nhận lỗi tiếng Việt từ server.
+const SCAN_CONFIG = { timeout: 180_000 };
+
 /** Gọi backend proxy để upload PDF → Gemini, trả raw text. */
 async function callAiScanBackend(file: File): Promise<string> {
   const formData = new FormData();
@@ -55,7 +62,7 @@ async function callAiScanBackend(file: File): Promise<string> {
   const res = await apiClient.post<ApiResponse<string>>(
     '/api/teacher/ai/scan-pdf',
     formData,
-    { headers: { 'Content-Type': 'multipart/form-data' } },
+    { ...SCAN_CONFIG, headers: { 'Content-Type': 'multipart/form-data' } },
   );
   return unwrap(res.data);
 }
@@ -70,10 +77,11 @@ function parseGeminiResponse(raw: string): ParsedQuestion[] {
 
   return arr.map((item: any, i: number): ParsedQuestion => {
     try {
-      let choices: Array<{ content: string; isCorrect: boolean }> =
+      let choices: Array<{ content: string; isCorrect: boolean; imageUrl?: string }> =
         (item.choices ?? []).map((c: any) => ({
           content:   String(c.content ?? '').trim(),
           isCorrect: Boolean(c.isCorrect),
+          imageUrl:  c.imageUrl ? String(c.imageUrl).trim() : undefined,
         })).filter((c: { content: string; isCorrect: boolean }) => c.content);
 
       let error: string | undefined;
@@ -95,8 +103,9 @@ function parseGeminiResponse(raw: string): ParsedQuestion[] {
       const difficulty: Difficulty =
         item.difficulty === 'easy' ? 'easy' : item.difficulty === 'hard' ? 'hard' : 'medium';
 
-      const type: 'multiple_choice' | 'true_false' =
-        item.type === 'true_false' ? 'true_false' : 'multiple_choice';
+      const type: 'multiple_choice' | 'true_false' | 'image_question' =
+        item.type === 'image_question' ? 'image_question'
+        : item.type === 'true_false' ? 'true_false' : 'multiple_choice';
 
       return {
         content:     String(item.content ?? '').trim(),
@@ -104,6 +113,7 @@ function parseGeminiResponse(raw: string): ParsedQuestion[] {
         difficulty,
         choices,
         explanation: item.explanation ? String(item.explanation).trim() : null,
+        promptAssetUrl: item.promptAssetUrl ? String(item.promptAssetUrl).trim() : undefined,
         error,
       };
     } catch {
@@ -275,6 +285,7 @@ export default function AIScanModal({
       difficulty:  q.difficulty,
       type:        q.type,
       choices:     q.choices,
+      metadata:    q.promptAssetUrl ? { promptAssetUrl: q.promptAssetUrl } : undefined,
     }));
 
     setImporting(true);
@@ -341,6 +352,15 @@ export default function AIScanModal({
 
               {/* Form scan PDF — API key quản lý bởi backend */}
               <>
+                  {/* Ảnh nhúng trong PDF (nếu có) sẽ được thử tự động ghép vào đúng câu hỏi */}
+                  <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 flex items-start gap-3">
+                    <Sparkles className="w-4 h-4 text-violet-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-violet-700">
+                      Nếu PDF có ảnh minh họa, hệ thống sẽ tự động thử ghép ảnh vào đúng câu hỏi (dựa theo thứ tự xuất hiện).
+                      Đây là suy đoán tự động, không đảm bảo đúng 100% — hãy xem lại cột "Loại" và nội dung câu hỏi ở bảng preview trước khi nhập.
+                    </p>
+                  </div>
+
                   {/* Step 1 — Chọn khóa học + môn + chương */}
                   <div>
                     <p className="text-sm font-bold text-on-surface mb-2">
@@ -569,7 +589,8 @@ export default function AIScanModal({
                                     {q.explanation && <p className="text-on-surface-variant truncate mt-0.5">💡 {q.explanation}</p>}
                                   </td>
                                   <td className="px-3 py-2 whitespace-nowrap text-on-surface-variant">
-                                    {q.type === 'multiple_choice' ? 'Trắc nghiệm' : 'Đúng/Sai'}
+                                    {q.type === 'image_question' ? 'Hình ảnh (tự ghép)'
+                                      : q.type === 'multiple_choice' ? 'Trắc nghiệm' : 'Đúng/Sai'}
                                   </td>
                                   <td className="px-3 py-2"><DiffBadge d={q.difficulty} /></td>
                                   <td className="px-3 py-2 text-on-surface">

@@ -43,7 +43,7 @@ export function formatDate(iso: string) {
 
 // Question form panel
 
-export interface ChoiceRow { content: string; isCorrect: boolean }
+export interface ChoiceRow { content: string; isCorrect: boolean; imageUrl?: string }
 export type BankQuestionType = CreateQuestionRequest['type'];
 
 export const QUESTION_TYPE_OPTIONS: Array<{ value: BankQuestionType; label: string }> = [
@@ -209,7 +209,7 @@ export function formFromQuestion(q: QuestionResponse): FormState {
     tagsText: q.tags?.join(', ') ?? '',
     difficulty:  q.difficulty,
     type:        normalizeQuestionType(q.type),
-    choices:     q.choices.map(c => ({ content: c.content, isCorrect: !!c.isCorrect })),
+    choices:     q.choices.map(c => ({ content: c.content, isCorrect: !!c.isCorrect, imageUrl: c.imageUrl ?? undefined })),
     acceptedAnswersText: parseLines(metadata.acceptedAnswers),
     matchingPairs: metadata.matchingPairs?.length
       ? metadata.matchingPairs.map(pair => ({ left: pair.left, right: pair.right }))
