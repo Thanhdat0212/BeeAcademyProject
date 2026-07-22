@@ -376,6 +376,27 @@ public class ContentUploadService {
         return new UploadResponse(path, publicUrl, contentType, file.getSize());
     }
 
+    /**
+     * Upload ảnh PNG do hệ thống tự sinh (ảnh tách từ PDF khi AI Scan) — nhận {@code byte[]}
+     * thay vì {@link MultipartFile} vì nguồn là ảnh đã giải mã sẵn trong bộ nhớ, không phải
+     * file người dùng gửi lên qua HTTP.
+     */
+    @Transactional
+    public UploadResponse uploadGeneratedQuestionImage(UUID teacherId, byte[] pngBytes) {
+        if (pngBytes == null || pngBytes.length == 0) {
+            throw new BusinessException("FILE_REQUIRED", "Ảnh trống.");
+        }
+        if (pngBytes.length > MAX_QUESTION_IMAGE_BYTES) {
+            throw new BusinessException("FILE_TOO_LARGE", "Ảnh vượt quá 5MB.");
+        }
+
+        String path = "question-assets/" + teacherId + "/images/" + UUID.randomUUID() + ".png";
+        String publicUrl = storageClient.upload(QUESTION_ASSET_BUCKET, path, "image/png", pngBytes);
+
+        log.info("Upload anh tach tu PDF thanh cong: teacherId={} path={}", teacherId, path);
+        return new UploadResponse(path, publicUrl, "image/png", (long) pngBytes.length);
+    }
+
     @Transactional
     public UploadResponse uploadQuestionAudio(UUID teacherId, MultipartFile file) {
         validateFileByMimeOrExtension(file,
