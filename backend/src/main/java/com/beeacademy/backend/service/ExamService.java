@@ -46,6 +46,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -101,7 +102,7 @@ public class ExamService {
     private static final Set<String> MANUAL_EXAM_TYPES = Set.of(
             "essay", "essay_short", "essay_long", "file_upload");
     private static final List<String> RANDOM_SUPPORTED_OBJECTIVE_TYPES = List.of(
-            "multiple_choice", "true_false", "fill_in_blank");
+            "multiple_choice", "true_false", "fill_in_blank", "image_question");
     private static final List<String> RANDOM_SUPPORTED_ESSAY_TYPES = List.of(
             "essay", "essay_short", "essay_long");
     private final ExamConfigRepository examRepository;
@@ -1568,7 +1569,8 @@ public class ExamService {
         if (hasDetailedTypeSplit(chapterReq)) {
             return nullToZero(chapterReq.multipleChoiceCount())
                     + nullToZero(chapterReq.trueFalseCount())
-                    + nullToZero(chapterReq.fillInBlankCount());
+                    + nullToZero(chapterReq.fillInBlankCount())
+                    + nullToZero(chapterReq.imageQuestionCount());
         }
         return nullToZero(chapterReq.objectiveCount());
     }
@@ -1580,7 +1582,8 @@ public class ExamService {
     private boolean hasDetailedTypeSplit(ExamQuestionRandomRequest.ChapterQuestionRandomRequest chapterReq) {
         return chapterReq.multipleChoiceCount() != null
                 || chapterReq.trueFalseCount() != null
-                || chapterReq.fillInBlankCount() != null;
+                || chapterReq.fillInBlankCount() != null
+                || chapterReq.imageQuestionCount() != null;
     }
 
     private List<Question> pickRandomQuestions(UUID teacherId, UUID categoryId, List<Integer> grades,
@@ -1611,6 +1614,7 @@ public class ExamService {
         int multipleChoiceCount = nullToZero(chapterReq.multipleChoiceCount());
         int trueFalseCount = nullToZero(chapterReq.trueFalseCount());
         int fillInBlankCount = nullToZero(chapterReq.fillInBlankCount());
+        int imageQuestionCount = nullToZero(chapterReq.imageQuestionCount());
         int objectiveCount = chapterObjectiveCount(chapterReq);
         int essayCount = chapterEssayCount(chapterReq);
         if (hasDetailedTypeSplit(chapterReq)) {
@@ -1624,6 +1628,9 @@ public class ExamService {
             selected.addAll(pickRandomQuestionsByChapterAndTypes(
                     teacherId, chapterId, List.of("fill_in_blank"),
                     fillInBlankCount, "dien cho trong"));
+            selected.addAll(pickRandomQuestionsByChapterAndTypes(
+                    teacherId, chapterId, List.of("image_question"),
+                    imageQuestionCount, "cau hoi hinh anh"));
             selected.addAll(pickRandomQuestionsByChapterAndTypes(
                     teacherId, chapterId, RANDOM_SUPPORTED_ESSAY_TYPES,
                     essayCount, "tự luận"));
@@ -1694,11 +1701,31 @@ public class ExamService {
                 question.getType(),
                 options,
                 correctIndices,
-                QuestionResponse.forStudent(question, objectMapper).metadata(),
+                withOptionImages(QuestionResponse.forStudent(question, objectMapper).metadata(), choices),
                 question.getExplanation(),
                 pointsPerQuestion,
                 question.getDifficulty()
         );
+    }
+
+    /**
+     * Bài kiểm tra chỉ truyền đáp án dạng text (options), nên ảnh riêng của từng đáp án
+     * phải đi kèm trong metadata mới tới được học sinh — cùng thứ tự với options.
+     */
+    private JsonNode withOptionImages(JsonNode metadata, List<QuestionChoice> choices) {
+        boolean hasChoiceImage = choices.stream()
+                .anyMatch(choice -> choice.getImageUrl() != null && !choice.getImageUrl().isBlank());
+        if (!hasChoiceImage) {
+            return metadata;
+        }
+        List<String> optionImages = choices.stream()
+                .map(choice -> choice.getImageUrl() != null ? choice.getImageUrl() : "")
+                .toList();
+        ObjectNode node = metadata != null && metadata.isObject()
+                ? metadata.deepCopy()
+                : objectMapper.createObjectNode();
+        node.set("optionImages", objectMapper.valueToTree(optionImages));
+        return node;
     }
 
     private UUID currentQuestionVersionId(Question question) {

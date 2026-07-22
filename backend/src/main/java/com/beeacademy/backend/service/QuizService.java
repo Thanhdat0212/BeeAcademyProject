@@ -375,7 +375,7 @@ public class QuizService {
             List<SnapshotChoice> choices
     ) {}
 
-    private record SnapshotChoice(UUID id, String content, boolean isCorrect, int position) {}
+    private record SnapshotChoice(UUID id, String content, boolean isCorrect, int position, String imageUrl) {}
 
     private String choiceText(SnapshotQuestion question, List<UUID> choiceIds) {
         if (question == null || choiceIds == null || choiceIds.isEmpty() || question.choices() == null) {
@@ -433,6 +433,7 @@ public class QuizService {
                 m.put("content", c.getContent());
                 m.put("isCorrect", c.getIsCorrect());
                 m.put("position", c.getPosition());
+                m.put("imageUrl", c.getImageUrl());
                 return m;
             }).collect(Collectors.toList());
 
@@ -457,7 +458,7 @@ public class QuizService {
             List<QuestionChoice> choices = shuffledChoicesMap.get(q.getId());
             List<QuizAttemptStartResponse.ChoiceForStudent> choiceDtos = choices.stream()
                     .map(c -> new QuizAttemptStartResponse.ChoiceForStudent(
-                            c.getId(), c.getContent(), c.getPosition()))
+                            c.getId(), c.getContent(), c.getPosition(), c.getImageUrl()))
                     .toList();
             return new QuizAttemptStartResponse.QuestionForStudent(
                     q.getId(),
@@ -494,7 +495,8 @@ public class QuizService {
                                 UUID.fromString((String) choice.get("id")),
                                 (String) choice.get("content"),
                                 Boolean.TRUE.equals(choice.get("isCorrect")),
-                                choice.get("position") instanceof Number number ? number.intValue() : 0
+                                choice.get("position") instanceof Number number ? number.intValue() : 0,
+                                choice.get("imageUrl") instanceof String imageUrl ? imageUrl : null
                         ))
                         .toList();
                 result.put(qId, new SnapshotQuestion(

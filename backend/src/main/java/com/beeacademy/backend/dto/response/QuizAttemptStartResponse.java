@@ -26,5 +26,5 @@ public record QuizAttemptStartResponse(
             List<ChoiceForStudent> choices
     ) {}
 
-    public record ChoiceForStudent(UUID id, String content, Integer position) {}
+    public record ChoiceForStudent(UUID id, String content, Integer position, String imageUrl) {}
 }
