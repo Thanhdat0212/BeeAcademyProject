@@ -1,17 +1,17 @@
 ﻿/**
- * ExcelImportModal â€” Phase 2
- * GiÃ¡o viÃªn upload file .xlsx â†’ parse â†’ preview â†’ bulk import
+ * ExcelImportModal — Phase 2
+ * Giáo viên upload file .xlsx → parse → preview → bulk import
  *
- * Äá»‹nh dáº¡ng Excel (hÃ ng 1 = header, dá»¯ liá»‡u tá»« hÃ ng 2):
- *   A: Ná»™i dung cÃ¢u há»i
- *   B: Loáº¡i (TN/DS/DC/TL/TLN/TLD/HA/AU)
- *   C: Äá»™ khÃ³ (D/TB/K)
- *   D-G: ÄÃ¡p Ã¡n A-D (cho cÃ¢u tráº¯c nghiá»‡m)
- *   H: ÄÃ¡p Ã¡n Ä‘Ãºng
- *   I: Giáº£i thÃ­ch
- *   J: ÄÃ¡p Ã¡n cháº¥p nháº­n
- *   K: Cáº·p ná»‘i
- *   L-R: metadata má»Ÿ rá»™ng theo tá»«ng loáº¡i
+ * Định dạng Excel (hàng 1 = header, dữ liệu từ hàng 2):
+ *   A: Nội dung câu hỏi
+ *   B: Loại (TN/DS/DC/TL/TLN/TLD/HA/AU)
+ *   C: Độ khó (D/TB/K)
+ *   D-G: Đáp án A-D (cho câu trắc nghiệm)
+ *   H: Đáp án đúng
+ *   I: Giải thích
+ *   J: Đáp án chấp nhận
+ *   K: Cặp nối
+ *   L-R: metadata mở rộng theo từng loại
  */
 
 import { useState, useRef, useCallback } from 'react';
@@ -56,8 +56,8 @@ function token(value: unknown): string {
   return plain(value)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/Ä‘/g, 'd')
-    .replace(/Ä/g, 'D')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
     .toUpperCase();
 }
 

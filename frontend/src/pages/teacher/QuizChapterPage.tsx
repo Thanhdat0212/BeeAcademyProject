@@ -129,12 +129,12 @@ function isPlayableQuizQuestion(question: QuestionResponse) {
 function quizQuestionTypeLabel(question: QuestionResponse) {
   if (question.type === 'multiple_choice') {
     return correctChoiceCount(question.choices) > 1
-      ? 'Trac nghiem nhieu dap an'
-      : 'Trac nghiem 1 dap an';
+      ? 'Trắc nghiệm nhiều đáp án'
+      : 'Trắc nghiệm 1 đáp án';
   }
   if (question.type === 'true_false') return 'Dung/Sai';
-  if (question.type === 'image_question') return 'Cau hoi anh';
-  if (question.type === 'audio_question') return 'Cau hoi audio';
+  if (question.type === 'image_question') return 'Câu hỏi ảnh';
+  if (question.type === 'audio_question') return 'Câu hỏi audio';
   return question.type;
 }
 

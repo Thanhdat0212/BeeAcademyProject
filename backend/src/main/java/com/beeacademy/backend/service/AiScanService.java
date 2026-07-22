@@ -161,34 +161,34 @@ public class AiScanService {
                                         String difficulty) {
         if (geminiApiKey == null || geminiApiKey.isBlank()) {
             throw new BusinessException("GEMINI_NOT_CONFIGURED",
-                    "Tinh nang AI tao cau hoi chua duoc cau hinh tren server.",
+                    "Tính năng AI tạo câu hỏi chưa được cấu hình trên server.",
                     HttpStatus.SERVICE_UNAVAILABLE);
         }
         String safeMaterial = material == null || material.isBlank()
-                ? "(khong co tai lieu bo sung)"
+                ? "(không có tài liệu bổ sung)"
                 : material.trim();
         String examPrompt = """
-                Tao cau hoi cho bai kiem tra Bee Academy va chi tra ve JSON array thuan.
+                Tạo câu hỏi cho bài kiểm tra Bee Academy và chỉ trả về JSON array thuần.
                 Schema moi phan tu:
                 {
-                  "text": "noi dung cau hoi",
+                  "text": "nội dung câu hỏi",
                   "type": "%s",
                   "options": ["A", "B", "C", "D"],
                   "correctIndices": [0],
-                  "metadata": {"acceptedAnswers": ["dap an"]},
+                  "metadata": {"acceptedAnswers": ["đáp án"]},
                   "explanation": "giai thich ngan",
                   "difficulty": "%s",
-                  "sourceRefs": ["trich dan ngan tu tai lieu hoac prompt"]
+                  "sourceRefs": ["trích dẫn ngắn từ tài liệu hoặc prompt"]
                 }
                 Quy tac:
-                - Tao dung %d cau hoi.
-                - type phai dung "%s"; difficulty phai dung "%s".
-                - multiple_choice/true_false phai co options va correctIndices hop le.
-                - fill_in_blank phai co metadata.acceptedAnswers.
-                - essay phai co metadata.rubric hoac explanation lam barem cham.
-                - Moi cau phai co sourceRefs; neu khong co tai lieu, dung "teacher_prompt".
-                - Khong auto-publish; day la cau hoi DRAFT de giao vien review.
-                Yeu cau cua giao vien: %s
+                - Tạo đúng %d câu hỏi.
+                - type phải đúng "%s"; difficulty phải đúng "%s".
+                - multiple_choice/true_false phải có options và correctIndices hợp lệ.
+                - fill_in_blank phải có metadata.acceptedAnswers.
+                - essay phải có metadata.rubric hoặc explanation làm barem chấm.
+                - Mỗi câu phải có sourceRefs; nếu không có tài liệu, dung "teacher_prompt".
+                - Không auto-publish; đây là câu hỏi DRAFT để giáo viên review.
+                Yêu cầu của giáo viên: %s
                 Tai lieu/pham vi: %s
                 """.formatted(questionType, difficulty, questionCount, questionType, difficulty,
                 prompt.trim(), safeMaterial);
@@ -215,9 +215,9 @@ public class AiScanService {
             HttpResponse<String> response = HttpClient.newHttpClient().send(request,
                     HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
-                log.error("Gemini API tra loi {}: {}", response.statusCode(), response.body());
+                log.error("Gemini API trả lời {}: {}", response.statusCode(), response.body());
                 throw new BusinessException("AI_GENERATION_FAILED",
-                        "AI Engine tra ve loi " + response.statusCode() + ".",
+                        "AI Engine trả về lỗi " + response.statusCode() + ".",
                         HttpStatus.BAD_GATEWAY);
             }
             @SuppressWarnings("unchecked")
@@ -233,9 +233,9 @@ public class AiScanService {
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("Loi khi goi AI Engine", e);
+            log.error("Lỗi khi gọi AI Engine", e);
             throw new BusinessException("AI_GENERATION_FAILED",
-                    "Khong the tao cau hoi AI: " + e.getMessage(),
+                    "Không thể tạo câu hỏi AI: " + e.getMessage(),
                     HttpStatus.BAD_GATEWAY);
         }
     }

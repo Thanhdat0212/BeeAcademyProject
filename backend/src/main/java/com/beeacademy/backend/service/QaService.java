@@ -222,12 +222,12 @@ public class QaService {
         verifyTeacherOwner(duplicateOf, me.userId());
         if (!thread.getCourse().getId().equals(duplicateOf.getCourse().getId())) {
             throw new BusinessException("DUPLICATE_COURSE_MISMATCH",
-                    "Chi co the danh dau trung lap trong cung mot khoa hoc.",
+                    "Chỉ có thể đánh dấu trùng lặp trong cùng một khóa học.",
                     HttpStatus.BAD_REQUEST);
         }
         if (thread.getId().equals(duplicateOfThreadId)) {
             throw new BusinessException("DUPLICATE_SELF",
-                    "Khong the danh dau cau hoi trung voi chinh no.",
+                    "Không thể đánh dấu câu hỏi trùng với chính nó.",
                     HttpStatus.BAD_REQUEST);
         }
         thread.markDuplicate(duplicateOfThreadId);
@@ -389,8 +389,8 @@ public class QaService {
         notificationService.notify(
                 thread.getStudent().getId(),
                 "qa_teacher_reply",
-                "Giao vien da tra loi cau hoi",
-                displayName(teacher, "Giao vien") + " da tra loi cau hoi trong khoa "
+                "Giáo viên đã trả lời câu hỏi",
+                displayName(teacher, "Giáo viên") + " đã trả lời câu hỏi trong khóa "
                         + thread.getCourse().getTitle() + ".",
                 "/student/qa");
     }
@@ -436,7 +436,7 @@ public class QaService {
         String normalized = visibility.trim().toLowerCase();
         if (!"public".equals(normalized) && !"private".equals(normalized)) {
             throw new BusinessException("INVALID_QA_VISIBILITY",
-                    "Pham vi hien thi cau hoi chi chap nhan public hoac private.",
+                    "Phạm vi hiển thị câu hỏi chỉ chấp nhận public hoặc private.",
                     HttpStatus.BAD_REQUEST);
         }
         return normalized;

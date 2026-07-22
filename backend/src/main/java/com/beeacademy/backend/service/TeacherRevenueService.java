@@ -147,14 +147,14 @@ public class TeacherRevenueService {
 
         Map<UUID, String> studentNames = profileRepo.findAllById(studentIds).stream()
                 .collect(Collectors.toMap(Profile::getId,
-                        p -> p.getFullName() != null ? p.getFullName() : "Hoc vien"));
+                        p -> p.getFullName() != null ? p.getFullName() : "Học viên"));
         Map<UUID, String> courseTitles = courseRepo.findAllById(courseIds).stream()
                 .collect(Collectors.toMap(Course::getId, Course::getTitle));
 
         return splits.stream()
                 .map(s -> RevenueSplitResponse.from(s,
-                        studentNames.getOrDefault(s.getStudentId(), "Hoc vien"),
-                        courseTitles.getOrDefault(s.getCourseId(), "Khoa hoc")))
+                        studentNames.getOrDefault(s.getStudentId(), "Học viên"),
+                        courseTitles.getOrDefault(s.getCourseId(), "Khóa học")))
                 .toList();
     }
 
@@ -180,13 +180,13 @@ public class TeacherRevenueService {
                 .filter(Objects::nonNull).collect(Collectors.toSet());
         Map<UUID, String> studentNames = profileRepo.findAllById(studentIds).stream()
                 .collect(Collectors.toMap(Profile::getId,
-                        p -> p.getFullName() != null ? p.getFullName() : "Hoc vien"));
+                        p -> p.getFullName() != null ? p.getFullName() : "Học viên"));
         Map<UUID, String> courseTitles = courseRepo.findAllById(courseIds).stream()
                 .collect(Collectors.toMap(Course::getId, Course::getTitle));
         return splits.stream()
                 .map(s -> RevenueSplitResponse.from(s,
-                        studentNames.getOrDefault(s.getStudentId(), "Hoc vien"),
-                        courseTitles.getOrDefault(s.getCourseId(), "Khoa hoc")))
+                        studentNames.getOrDefault(s.getStudentId(), "Học viên"),
+                        courseTitles.getOrDefault(s.getCourseId(), "Khóa học")))
                 .toList();
     }
 
@@ -297,7 +297,7 @@ public class TeacherRevenueService {
         if (!period.getTeacherId().equals(teacherId) || period.getStatus() != PayoutStatus.PAID) {
             throw new com.beeacademy.backend.exception.BusinessException(
                     "PAYOUT_PERIOD_NOT_CONFIRMED",
-                    "Chi xem duoc ky thanh toan da duoc Admin xac nhan.");
+                    "Chỉ xem được kỳ thanh toán đã được Admin xác nhận.");
         }
         return period;
     }

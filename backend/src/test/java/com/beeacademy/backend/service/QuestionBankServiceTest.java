@@ -155,7 +155,7 @@ class QuestionBankServiceTest {
 
         when(teacherAccessService.requireApprovedTeacher(teacher(teacherId)))
                 .thenThrow(new BusinessException("TEACHER_NOT_APPROVED",
-                        "GiÃ¡o viÃªn chÆ°a Ä‘Æ°á»£c phÃª duyá»‡t vai trÃ² GV.",
+                        "Giáo viên chưa được phê duyệt vai trò GV.",
                         HttpStatus.FORBIDDEN));
 
         assertThatThrownBy(() -> service.createQuestionBank(

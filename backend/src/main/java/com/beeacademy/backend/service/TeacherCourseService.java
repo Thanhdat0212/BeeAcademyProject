@@ -67,22 +67,22 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Nghiá»‡p vá»¥ quáº£n lÃ½ khÃ³a há»c phÃ­a GiÃ¡o viÃªn (Phase 1 â€” CRUD, khÃ´ng upload).
+ * Nghiệp vụ quản lý khóa học phía Giáo viên (Phase 1 — CRUD, không upload).
  *
- * <p>Thiáº¿t káº¿: má»—i thao tÃ¡c thÃªm/sá»­a/xÃ³a Chapter vÃ  Lesson sá»­ dá»¥ng
- * {@link ChapterRepository} vÃ  {@link LessonRepository} trá»±c tiáº¿p thay vÃ¬
- * mutate collection cá»§a Course aggregate. LÃ½ do:
+ * <p>Thiết kế: mỗi thao tác thêm/sửa/xóa Chapter và Lesson sử dụng
+ * {@link ChapterRepository} và {@link LessonRepository} trực tiếp thay vì
+ * mutate collection của Course aggregate. Lý do:
  * <ul>
- *   <li>{@code Course.getChapters()} tráº£ unmodifiableList â†’ khÃ´ng thá»ƒ add/remove.</li>
- *   <li>Sá»­ dá»¥ng repository trá»±c tiáº¿p rÃµ rÃ ng hÆ¡n vÃ  trÃ¡nh N+1 khi khÃ´ng cáº§n
- *       load toÃ n bá»™ chapters.</li>
+ *   <li>{@code Course.getChapters()} trả unmodifiableList → không thể add/remove.</li>
+ *   <li>Sử dụng repository trực tiếp rõ ràng hơn và tránh N+1 khi không cần
+ *       load toàn bộ chapters.</li>
  * </ul>
  *
- * <p>NguyÃªn táº¯c phÃ¢n quyá»n:
+ * <p>Nguyên tắc phân quyền:
  * <ul>
- *   <li>GV chá»‰ thao tÃ¡c Ä‘Æ°á»£c khÃ³a há»c cá»§a chÃ­nh mÃ¬nh (verify teacherId).</li>
- *   <li>Chá»‰ sá»­a ná»™i dung khi status âˆˆ {DRAFT, NEEDS_REVISION}.</li>
- *   <li>Submit: DRAFT/NEEDS_REVISION â†’ PENDING_REVIEW.</li>
+ *   <li>GV chỉ thao tác được khóa học của chính mình (verify teacherId).</li>
+ *   <li>Chỉ sửa nội dung khi status ∈ {DRAFT, NEEDS_REVISION}.</li>
+ *   <li>Submit: DRAFT/NEEDS_REVISION → PENDING_REVIEW.</li>
  * </ul>
  */
 @Slf4j
@@ -113,8 +113,8 @@ public class TeacherCourseService {
     // ========================================================================
 
     /**
-     * Táº¡o khÃ³a há»c má»›i á»Ÿ tráº¡ng thÃ¡i DRAFT.
-     * Slug tá»± Ä‘á»™ng sinh tá»« title, Ä‘áº£m báº£o unique báº±ng suffix sá»‘.
+     * Tạo khóa học mới ở trạng thái DRAFT.
+     * Slug tự động sinh từ title, đảm bảo unique bằng suffix số.
      */
     @Transactional
     public TeacherCourseResponse createCourse(AuthenticatedUser me,
@@ -122,9 +122,9 @@ public class TeacherCourseService {
         Profile  teacher  = teacherAccessService.requireApprovedTeacher(me);
         Category category = loadCategory(req.categoryId());
 
-        // Validate: giÃ¡ gá»‘c trong khoáº£ng 99.000â€“1.000.000â‚« (UseCase v6.5)
+        // Validate: giá gốc trong khoảng 99.000–1.000.000₫ (UseCase v6.5)
         validatePrice(req.priceVnd());
-        // Validate: giÃ¡ khuyáº¿n mÃ£i pháº£i nhá» hÆ¡n giÃ¡ gá»‘c (cross-field validation)
+        // Validate: giá khuyến mãi phải nhỏ hơn giá gốc (cross-field validation)
         validateSalePrice(req.salePriceVnd(), req.priceVnd());
         validateThumbnailUrl(req.thumbnailUrl());
         validateIntroVideoUrl(req.introVideoUrl());
@@ -135,7 +135,7 @@ public class TeacherCourseService {
                                                trimToNull(req.audience()),
                                                category, grades, req.priceVnd());
 
-        // Äáº£m báº£o slug unique: thÃªm suffix -2, -3... náº¿u Ä‘Ã£ tá»“n táº¡i
+        // Đảm bảo slug unique: thêm suffix -2, -3... nếu đã tồn tại
         String baseSlug = course.getSlug();
         String slug = baseSlug;
         int suffix = 2;
@@ -143,10 +143,10 @@ public class TeacherCourseService {
             slug = baseSlug + "-" + suffix++;
         }
 
-        // GÃ¡n salePriceVnd náº¿u cÃ³ (factory khÃ´ng nháº­n field nÃ y).
-        // Truyá»n priceVnd=0 vÃ¬ Course.update() cÃ³ guard "if (priceVnd > 0)" â€”
-        // 0 sáº½ khÃ´ng ghi Ä‘Ã¨ priceVnd Ä‘Ã£ Ä‘Æ°á»£c set bá»Ÿi factory á»Ÿ trÃªn.
-        // KHÃ”NG truyá»n null vÃ¬ priceVnd lÃ  primitive int â€” sáº½ gÃ¢y NullPointerException khi unbox.
+        // Gán salePriceVnd nếu có (factory không nhận field này).
+        // Truyền priceVnd=0 vì Course.update() có guard "if (priceVnd > 0)" —
+        // 0 sẽ không ghi đè priceVnd đã được set bởi factory ở trên.
+        // KHÔNG truyền null vì priceVnd là primitive int — sẽ gây NullPointerException khi unbox.
         if (req.salePriceVnd() != null) {
             course.update(null, null, null, null, 0, req.salePriceVnd(), null,
                           null, null, null);
@@ -159,11 +159,11 @@ public class TeacherCourseService {
         }
 
         Course saved = courseRepository.save(course);
-        log.info("GV {} táº¡o khÃ³a há»c '{}' ({})", me.userId(), saved.getTitle(), saved.getId());
+        log.info("GV {} tạo khóa học '{}' ({})", me.userId(), saved.getTitle(), saved.getId());
         return TeacherCourseResponse.fromEntity(saved);
     }
 
-    /** Danh sÃ¡ch khÃ³a há»c cá»§a GV, sáº¯p xáº¿p theo updatedAt DESC. */
+    /** Danh sách khóa học của GV, sắp xếp theo updatedAt DESC. */
     @Transactional
     public PageResponse<TeacherCourseResponse> listMyCourses(AuthenticatedUser me,
                                                                Pageable pageable) {
@@ -193,7 +193,7 @@ public class TeacherCourseService {
                 page.hasNext());
     }
 
-    /** Chi tiáº¿t khÃ³a há»c + chapters + lessons + lá»‹ch sá»­ duyá»‡t. */
+    /** Chi tiết khóa học + chapters + lessons + lịch sử duyệt. */
     @Transactional
     public TeacherCourseDetailResponse getCourseDetail(UUID courseId, AuthenticatedUser me) {
         teacherAccessService.requireApprovedTeacher(me);
@@ -215,7 +215,7 @@ public class TeacherCourseService {
                 documentsByLessonId);
     }
 
-    /** Cáº­p nháº­t thÃ´ng tin cÆ¡ báº£n (chá»‰ khi DRAFT/NEEDS_REVISION). */
+    /** Cập nhật thông tin cơ bản (chỉ khi DRAFT/NEEDS_REVISION). */
     @Transactional
     public TeacherCourseResponse updateCourse(UUID courseId, AuthenticatedUser me,
                                                UpdateCourseRequest req) {
@@ -223,15 +223,15 @@ public class TeacherCourseService {
         Course   course   = loadAndVerifyOwner(courseId, me.userId());
         assertCourseInfoEditable(course);
 
-        // TÃ­nh giÃ¡ hiá»‡u dá»¥ng sau khi update Ä‘á»ƒ validate cross-field
+        // Tính giá hiệu dụng sau khi update để validate cross-field
         Integer effectivePrice     = req.priceVnd()     != null ? req.priceVnd()     : course.getPriceVnd();
-        // BUG FIX: null trong request = "giá»¯ nguyÃªn giÃ¡ KM cÅ©", KHÃ”NG pháº£i "xÃ³a giÃ¡ KM".
-        // Äá»ƒ xÃ³a giÃ¡ KM, frontend gá»­i clearSalePrice=true hoáº·c salePriceVnd=0.
+        // BUG FIX: null trong request = "giữ nguyên giá KM cũ", KHÔNG phải "xóa giá KM".
+        // Để xóa giá KM, frontend gửi clearSalePrice=true hoặc salePriceVnd=0.
         Integer effectiveSalePrice = req.salePriceVnd() != null ? req.salePriceVnd() : course.getSalePriceVnd();
 
-        // Validate: giÃ¡ gá»‘c trong khoáº£ng 99.000â€“1.000.000â‚« (UseCase v6.5)
+        // Validate: giá gốc trong khoảng 99.000–1.000.000₫ (UseCase v6.5)
         validatePrice(effectivePrice);
-        // Validate: giÃ¡ khuyáº¿n mÃ£i pháº£i nhá» hÆ¡n giÃ¡ gá»‘c (sau khi tÃ­nh giÃ¡ hiá»‡u dá»¥ng)
+        // Validate: giá khuyến mãi phải nhỏ hơn giá gốc (sau khi tính giá hiệu dụng)
         validateSalePrice(effectiveSalePrice, effectivePrice);
         validateThumbnailUrl(req.thumbnailUrl());
         validateIntroVideoUrl(req.introVideoUrl());
@@ -253,11 +253,11 @@ public class TeacherCourseService {
     }
 
     /**
-     * Äá»•i áº£nh bÃ¬a khÃ³a há»c â€” cho phÃ©p á»Ÿ Má»ŒI tráº¡ng thÃ¡i (ká»ƒ cáº£ PUBLISHED).
+     * Đổi ảnh bìa khóa học — cho phép ở MỌI trạng thái (kể cả PUBLISHED).
      *
-     * <p>KhÃ¡c {@link #updateCourse}: áº£nh bÃ¬a chá»‰ lÃ  yáº¿u tá»‘ trÃ¬nh bÃ y (cosmetic),
-     * khÃ´ng pháº£i ná»™i dung há»c cáº§n duyá»‡t láº¡i â†’ KHÃ”NG gá»i {@code assertCourseInfoEditable}.
-     * Upload file má»›i lÃªn Storage rá»“i gÃ¡n URL cÃ´ng khai vÃ o khÃ³a.
+     * <p>Khác {@link #updateCourse}: ảnh bìa chỉ là yếu tố trình bày (cosmetic),
+     * không phải nội dung học cần duyệt lại → KHÔNG gọi {@code assertCourseInfoEditable}.
+     * Upload file mới lên Storage rồi gán URL công khai vào khóa.
      */
     @Transactional
     public TeacherCourseResponse updateThumbnail(UUID courseId, AuthenticatedUser me,
@@ -267,18 +267,18 @@ public class TeacherCourseService {
         var uploaded = contentUploadService.uploadCourseThumbnail(me.userId(), file);
         course.setThumbnailUrl(uploaded.publicUrl());
         Course saved = courseRepository.save(course);
-        log.info("GV {} Ä‘á»•i áº£nh bÃ¬a khÃ³a '{}' ({})", me.userId(), saved.getTitle(), saved.getId());
+        log.info("GV {} đổi ảnh bìa khóa '{}' ({})", me.userId(), saved.getTitle(), saved.getId());
         return TeacherCourseResponse.fromEntity(saved, enrollmentRepository.countByCourseId(saved.getId()));
     }
 
-    /** XÃ³a khÃ³a há»c â€” chá»‰ khi DRAFT. */
+    /** Xóa khóa học — chỉ khi DRAFT. */
     @Transactional
     public void deleteCourse(UUID courseId, AuthenticatedUser me) {
         teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
         if (course.getStatus() != CourseStatus.DRAFT) {
             throw new BusinessException("CANNOT_DELETE",
-                    "Chá»‰ cÃ³ thá»ƒ xÃ³a khÃ³a há»c á»Ÿ tráº¡ng thÃ¡i Báº£n nhÃ¡p.");
+                    "Chỉ có thể xóa khóa học ở trạng thái Bản nháp.");
         }
         List<Chapter> chapters = chapterRepository.findWithLessonsByCourseId(courseId);
         List<Lesson> lessons = chapters.stream()
@@ -297,35 +297,35 @@ public class TeacherCourseService {
 
         courseRepository.delete(course);
         contentUploadService.deleteLessonFilesAfterCommit(lessons, documents);
-        log.info("GV {} xÃ³a khÃ³a há»c {}", me.userId(), courseId);
+        log.info("GV {} xóa khóa học {}", me.userId(), courseId);
     }
 
-    /** Ná»™p khÃ³a há»c Ä‘á»ƒ Admin duyá»‡t. */
+    /** Nộp khóa học để Admin duyệt. */
     @Transactional
     public TeacherCourseResponse submitForReview(UUID courseId, AuthenticatedUser me) {
         teacherAccessService.requireApprovedTeacher(me);
         Course course = loadAndVerifyOwner(courseId, me.userId());
 
-        // BUG FIX: load chapters má»™t láº§n duy nháº¥t â€” trÆ°á»›c Ä‘Ã¢y query 2 láº§n cÃ¹ng má»™t káº¿t quáº£
+        // BUG FIX: load chapters một lần duy nhất — trước đây query 2 lần cùng một kết quả
         List<Chapter> chapters = chapterRepository.findWithLessonsByCourseId(courseId);
 
-        // Validate: khÃ³a há»c pháº£i cÃ³ Ã­t nháº¥t 1 chÆ°Æ¡ng
+        // Validate: khóa học phải có ít nhất 1 chương
         if (chapters.size() < 4) {
             throw new BusinessException("COURSE_MIN_CHAPTERS_REQUIRED",
-                    "Khoa hoc phai co toi thieu 4 chuong truoc khi nop duyet.");
+                    "Khóa học phải có tối thiểu 4 chương trước khi nộp duyệt.");
         }
 
         if (chapters.isEmpty()) {
             throw new BusinessException("EMPTY_COURSE",
-                    "KhÃ³a há»c pháº£i cÃ³ Ã­t nháº¥t 1 chÆ°Æ¡ng trÆ°á»›c khi ná»™p duyá»‡t.");
+                    "Khóa học phải có ít nhất 1 chương trước khi nộp duyệt.");
         }
 
-        // Validate: má»—i chÆ°Æ¡ng pháº£i cÃ³ Ã­t nháº¥t 1 bÃ i giáº£ng
+        // Validate: mỗi chương phải có ít nhất 1 bài giảng
         boolean anyLessonless = chapters.stream()
                 .anyMatch(ch -> ch.getLessons().isEmpty());
         if (anyLessonless) {
             throw new BusinessException("EMPTY_CHAPTER",
-                    "Má»—i chÆ°Æ¡ng pháº£i cÃ³ Ã­t nháº¥t 1 bÃ i giáº£ng.");
+                    "Mỗi chương phải có ít nhất 1 bài giảng.");
         }
 
         chapters.stream()
@@ -343,13 +343,13 @@ public class TeacherCourseService {
                 buildCourseSnapshotJson(saved, chapters, submittedExams)));
         examConfigVersionService.publishDrafts(courseId, version.getId());
         notificationRepository.save(AdminNotification.courseSubmitted(saved, saved.getTeacher()));
-        log.info("GV {} ná»™p khÃ³a há»c {} Ä‘á»ƒ duyá»‡t", me.userId(), courseId);
+        log.info("GV {} nộp khóa học {} để duyệt", me.userId(), courseId);
         return TeacherCourseResponse.fromEntity(saved, enrollmentRepository.countByCourseId(saved.getId()));
     }
 
     // ========================================================================
     // Chapter CRUD
-    // DÃ¹ng ChapterRepository trá»±c tiáº¿p â€” KHÃ”NG mutate Course.chapters (unmodifiable).
+    // Dùng ChapterRepository trực tiếp — KHÔNG mutate Course.chapters (unmodifiable).
     // ========================================================================
 
     @Transactional
@@ -359,14 +359,14 @@ public class TeacherCourseService {
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
-        // TÃ­nh position tiáº¿p theo náº¿u khÃ´ng truyá»n
+        // Tính position tiếp theo nếu không truyền
         int nextPos = chapterRepository.findByCourseIdOrderByPositionAsc(courseId).size() + 1;
         int position = req.position() != null ? req.position() : nextPos;
 
         Chapter chapter = Chapter.createNew(course, req.title(), req.description(), position);
         Chapter saved   = chapterRepository.save(chapter);
         refreshCourseCounts(courseId);
-        log.info("ThÃªm chÆ°Æ¡ng '{}' vÃ o khÃ³a há»c {}", req.title(), courseId);
+        log.info("Thêm chương '{}' vào khóa học {}", req.title(), courseId);
         auditContentChange(courseId, "CHAPTER", saved.getId(), "CREATE", "MAJOR",
                 me.userId(), null, chapterAuditSnapshot(saved));
         return TeacherChapterResponse.fromEntity(saved);
@@ -377,12 +377,12 @@ public class TeacherCourseService {
                                                  AuthenticatedUser me,
                                                  UpdateChapterRequest req) {
         teacherAccessService.requireApprovedTeacher(me);
-        // loadAndVerifyOwner tráº£ Course Ä‘Ã£ load â€” dÃ¹ng láº¡i Ä‘á»ƒ assertEditable,
-        // khÃ´ng cáº§n courseRepository.findById() láº§n 2 (trÃ¡nh 1 DB round-trip thá»«a).
+        // loadAndVerifyOwner trả Course đã load — dùng lại để assertEditable,
+        // không cần courseRepository.findById() lần 2 (tránh 1 DB round-trip thừa).
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
-        // Verify chapter thuá»™c Ä‘Ãºng courseId (trÃ¡nh chá»‰nh sá»­a chapter cá»§a GV khÃ¡c)
+        // Verify chapter thuộc đúng courseId (tránh chỉnh sửa chapter của GV khác)
         Chapter chapter = chapterRepository.findByIdAndCourseId(chapterId, courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Chapter", chapterId));
 
@@ -400,7 +400,7 @@ public class TeacherCourseService {
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
-        // Verify chapter thuá»™c courseId trÆ°á»›c khi xÃ³a (trÃ¡nh xÃ³a nháº§m chapter cá»§a ngÆ°á»i khÃ¡c)
+        // Verify chapter thuộc courseId trước khi xóa (tránh xóa nhầm chapter của người khác)
         Chapter chapter = chapterRepository.findByIdAndCourseId(chapterId, courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Chapter", chapterId));
 
@@ -419,12 +419,12 @@ public class TeacherCourseService {
         refreshCourseCounts(courseId);
         auditContentChange(courseId, "CHAPTER", chapterId, "DELETE", "MAJOR",
                 me.userId(), before, null);
-        log.info("XÃ³a chÆ°Æ¡ng {} khá»i khÃ³a há»c {}", chapterId, courseId);
+        log.info("Xóa chương {} khỏi khóa học {}", chapterId, courseId);
     }
 
     // ========================================================================
     // Lesson CRUD
-    // DÃ¹ng LessonRepository trá»±c tiáº¿p â€” KHÃ”NG mutate Chapter.lessons (unmodifiable).
+    // Dùng LessonRepository trực tiếp — KHÔNG mutate Chapter.lessons (unmodifiable).
     // ========================================================================
 
     @Transactional
@@ -454,7 +454,7 @@ public class TeacherCourseService {
         refreshCourseCounts(courseId);
         auditContentChange(courseId, "LESSON", saved.getId(), "CREATE", "MAJOR",
                 me.userId(), null, lessonSnapshot(saved));
-        log.info("ThÃªm bÃ i giáº£ng '{}' vÃ o chÆ°Æ¡ng {}", req.title(), chapterId);
+        log.info("Thêm bài giảng '{}' vào chương {}", req.title(), chapterId);
         return TeacherLessonResponse.fromEntity(saved);
     }
 
@@ -466,7 +466,7 @@ public class TeacherCourseService {
         Course course = loadAndVerifyOwner(courseId, me.userId());
         assertEditable(course);
 
-        // Verify ownership chain: lesson â†’ chapter â†’ course â†’ teacher
+        // Verify ownership chain: lesson → chapter → course → teacher
         chapterRepository.findByIdAndCourseId(chapterId, courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Chapter", chapterId));
 
@@ -489,7 +489,7 @@ public class TeacherCourseService {
             String embedUrl = trimToNull(req.videoEmbedUrl());
             if (embedUrl == null) {
                 throw new BusinessException("INVALID_VIDEO_SOURCE",
-                        "Vui lÃ²ng nháº­p URL YouTube/Vimeo khi chá»n video nhÃºng.");
+                        "Vui lòng nhập URL YouTube/Vimeo khi chọn video nhúng.");
             }
             lesson.setVideoEmbedUrl(embedUrl);
             contentUploadService.deleteVideoAfterCommit(oldVideoPath);
@@ -532,7 +532,7 @@ public class TeacherCourseService {
         refreshCourseCounts(courseId);
         auditContentChange(courseId, "LESSON", lessonId, "DELETE", "MAJOR",
                 me.userId(), before, null);
-        log.info("XÃ³a bÃ i giáº£ng {} khá»i chÆ°Æ¡ng {}", lessonId, chapterId);
+        log.info("Xóa bài giảng {} khỏi chương {}", lessonId, chapterId);
     }
 
     @Transactional
@@ -547,7 +547,7 @@ public class TeacherCourseService {
         validateReorderIds(
                 chapters.stream().map(Chapter::getId).collect(java.util.stream.Collectors.toSet()),
                 req.chapters().stream().map(ReorderItemRequest::id).toList(),
-                "Danh sÃ¡ch chÆ°Æ¡ng khÃ´ng khá»›p vá»›i khÃ³a há»c hiá»‡n táº¡i.");
+                "Danh sách chương không khớp với khóa học hiện tại.");
 
         Map<UUID, Chapter> byId = chapters.stream()
                 .collect(java.util.stream.Collectors.toMap(Chapter::getId, ch -> ch));
@@ -580,7 +580,7 @@ public class TeacherCourseService {
         validateReorderIds(
                 lessons.stream().map(Lesson::getId).collect(java.util.stream.Collectors.toSet()),
                 req.lessons().stream().map(ReorderItemRequest::id).toList(),
-                "Danh sÃ¡ch bÃ i giáº£ng khÃ´ng khá»›p vá»›i chÆ°Æ¡ng hiá»‡n táº¡i.");
+                "Danh sách bài giảng không khớp với chương hiện tại.");
 
         Map<UUID, Lesson> byId = lessons.stream()
                 .collect(java.util.stream.Collectors.toMap(Lesson::getId, lesson -> lesson));
@@ -615,7 +615,7 @@ public class TeacherCourseService {
             return normalized;
         }
         throw new BusinessException("INVALID_VIDEO_SOURCE",
-                "Nguá»“n video khÃ´ng há»£p lá»‡. Chá»‰ cháº¥p nháº­n upload, embed hoáº·c none.");
+                "Nguồn video không hợp lệ. Chỉ chấp nhận upload, embed hoặc none.");
     }
 
     private void validateCompletionRuleForLesson(Lesson lesson, boolean allowPendingVideo) {
@@ -627,7 +627,7 @@ public class TeacherCourseService {
         if (rule == null || !Set.of("DOCUMENT_OPENED", "MARK_AS_COMPLETE",
                 "ASSIGNMENT_SUBMITTED", "ASSIGNMENT_PASSED").contains(rule)) {
             throw new BusinessException("COMPLETION_RULE_REQUIRED",
-                    "Bai hoc khong co video phai chon completion_rule hop le.");
+                    "Bài học không có video phải chọn completion_rule hợp lệ.");
         }
     }
 
@@ -706,7 +706,7 @@ public class TeacherCourseService {
         String lower = trimmed.toLowerCase();
         if (lower.matches(".*\\.(mp4|webm|mov)(\\?.*)?(#.*)?$")) {
             throw new BusinessException("INVALID_THUMBNAIL_URL",
-                    "áº¢nh bÃ¬a khÃ³a há»c pháº£i lÃ  áº£nh, khÃ´ng dÃ¹ng URL video giá»›i thiá»‡u.");
+                    "Ảnh bìa khóa học phải là ảnh, không dùng URL video giới thiệu.");
         }
     }
 
@@ -719,11 +719,11 @@ public class TeacherCourseService {
             String host = uri.getHost();
             if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
                 throw new BusinessException("INVALID_INTRO_VIDEO",
-                        "URL video giá»›i thiá»‡u pháº£i báº¯t Ä‘áº§u báº±ng http:// hoáº·c https://.");
+                        "URL video giới thiệu phải bắt đầu bằng http:// hoặc https://.");
             }
             if (host == null || host.isBlank()) {
                 throw new BusinessException("INVALID_INTRO_VIDEO",
-                        "URL video giá»›i thiá»‡u khÃ´ng há»£p lá»‡.");
+                        "URL video giới thiệu không hợp lệ.");
             }
             String lowerHost = host.toLowerCase();
             String lowerPath = uri.getPath() != null ? uri.getPath().toLowerCase() : "";
@@ -735,11 +735,11 @@ public class TeacherCourseService {
                     || lowerPath.endsWith(".mov");
             if (!accepted) {
                 throw new BusinessException("INVALID_INTRO_VIDEO",
-                        "Video giá»›i thiá»‡u chá»‰ há»— trá»£ YouTube, Vimeo hoáº·c file MP4/WebM/MOV cÃ´ng khai.");
+                        "Video giới thiệu chỉ hỗ trợ YouTube, Vimeo hoặc file MP4/WebM/MOV công khai.");
             }
         } catch (URISyntaxException e) {
             throw new BusinessException("INVALID_INTRO_VIDEO",
-                    "URL video giá»›i thiá»‡u khÃ´ng há»£p lá»‡.");
+                    "URL video giới thiệu không hợp lệ.");
         }
     }
 
@@ -782,7 +782,7 @@ public class TeacherCourseService {
             return objectMapper.writeValueAsString(snapshot);
         } catch (JsonProcessingException e) {
             throw new BusinessException("SNAPSHOT_FAILED",
-                    "KhÃ´ng thá»ƒ táº¡o phiÃªn báº£n khÃ³a há»c Ä‘á»ƒ ná»™p duyá»‡t.");
+                    "Không thể tạo phiên bản khóa học để nộp duyệt.");
         }
     }
 
@@ -838,7 +838,7 @@ public class TeacherCourseService {
             List<Chapter> chapters, List<ExamConfig> exams) {
         if (exams.size() != 4 || exams.stream().map(ExamConfig::getSlotIndex).collect(Collectors.toSet()).size() != 4) {
             throw new BusinessException("REQUIRED_EXAMS_MISSING",
-                    "Khoa hoc phai co dung 4 bai kiem tra bat buoc.");
+                    "Khóa học phải có đúng 4 bài kiểm tra bắt buộc.");
         }
         Map<Integer, ExamConfig> bySlot = exams.stream()
                 .collect(Collectors.toMap(ExamConfig::getSlotIndex, exam -> exam));
@@ -861,17 +861,17 @@ public class TeacherCourseService {
                     ? exam.getPlacementChapter().getId() : null);
             if (start < 0 || end < start) {
                 throw new BusinessException("INVALID_EXAM_SCOPE_COVERAGE",
-                        "Pham vi bai kiem tra khong hop le.");
+                        "Phạm vi bài kiểm tra không hợp lệ.");
             }
             if (start > coveredUntil + 1) {
                 throw new BusinessException("INVALID_EXAM_SCOPE_COVERAGE",
-                        "Pham vi 4 bai kiem tra khong duoc bo trong chuong.");
+                        "Phạm vi 4 bài kiểm tra không được bỏ trống chương.");
             }
             coveredUntil = Math.max(coveredUntil, end);
         }
         if (coveredUntil != ordered.size() - 1) {
             throw new BusinessException("INVALID_EXAM_SCOPE_COVERAGE",
-                    "Pham vi 4 bai kiem tra phai phu tu chuong dau den chuong cuoi.");
+                    "Phạm vi 4 bài kiểm tra phải phủ từ chương đầu đến chương cuối.");
         }
     }
 
@@ -897,11 +897,11 @@ public class TeacherCourseService {
                 second = Integer.parseInt(part.trim());
             } catch (NumberFormatException ex) {
                 throw new BusinessException("INVALID_SLIDE_CUES",
-                        "Moc dong bo slide phai la cac so giay, cach nhau bang dau phay.", HttpStatus.BAD_REQUEST);
+                        "Mốc đồng bộ slide phải là các số giây, cách nhau bằng dấu phẩy.", HttpStatus.BAD_REQUEST);
             }
             if (second < 0 || second <= previous) {
                 throw new BusinessException("INVALID_SLIDE_CUES",
-                        "Moc dong bo slide phai tang dan va khong am.", HttpStatus.BAD_REQUEST);
+                        "Mốc đồng bộ slide phải tăng dần và không âm.", HttpStatus.BAD_REQUEST);
             }
             if (result.length() > 0) result.append(',');
             result.append(second);
@@ -911,63 +911,63 @@ public class TeacherCourseService {
     }
 
     /**
-     * Load course vÃ  verify GV lÃ  owner.
-     * NÃ©m 404 náº¿u khÃ´ng tá»“n táº¡i, 403 náº¿u khÃ´ng pháº£i owner.
+     * Load course và verify GV là owner.
+     * Ném 404 nếu không tồn tại, 403 nếu không phải owner.
      */
     private Course loadAndVerifyOwner(UUID courseId, UUID teacherId) {
         Course course = courseRepository.findWithCategoryAndTeacherById(courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Course", courseId));
         if (!course.getTeacher().getId().equals(teacherId)) {
             throw new BusinessException("FORBIDDEN",
-                    "Báº¡n khÃ´ng cÃ³ quyá»n chá»‰nh sá»­a khÃ³a há»c nÃ y.", HttpStatus.FORBIDDEN);
+                    "Bạn không có quyền chỉnh sửa khóa học này.", HttpStatus.FORBIDDEN);
         }
         return course;
     }
 
     /**
-     * Chá»‰ cho phÃ©p edit khi status âˆˆ {DRAFT, NEEDS_REVISION, REJECTED}.
+     * Chỉ cho phép edit khi status ∈ {DRAFT, NEEDS_REVISION, REJECTED}.
      *
-     * <p>CÃ¡c tráº¡ng thÃ¡i cho phÃ©p sá»­a:
+     * <p>Các trạng thái cho phép sửa:
      * <ul>
-     *   <li>DRAFT â€” khÃ³a há»c má»›i táº¡o, chÆ°a ná»™p.</li>
-     *   <li>NEEDS_REVISION â€” Admin yÃªu cáº§u chá»‰nh sá»­a rá»“i ná»™p láº¡i.</li>
-     *   <li>REJECTED â€” Admin tá»« chá»‘i; GV cáº§n chá»‰nh sá»­a rá»“i ná»™p láº¡i qua draft má»›i.</li>
+     *   <li>DRAFT — khóa học mới tạo, chưa nộp.</li>
+     *   <li>NEEDS_REVISION — Admin yêu cầu chỉnh sửa rồi nộp lại.</li>
+     *   <li>REJECTED — Admin từ chối; GV cần chỉnh sửa rồi nộp lại qua draft mới.</li>
      * </ul>
      *
-     * <p>CÃ¡c tráº¡ng thÃ¡i Bá»Š CHáº¶N:
+     * <p>Các trạng thái BỊ CHẶN:
      * <ul>
-     *   <li>PENDING_REVIEW â€” Ä‘ang chá» Admin duyá»‡t, khÃ´ng Ä‘Æ°á»£c sá»­a.</li>
-     *   <li>APPROVED â€” Admin Ä‘Ã£ duyá»‡t, chá» publish.</li>
-     *   <li>PUBLISHED â€” Ä‘ang hiá»ƒn thá»‹ cho há»c sinh, khÃ´ng sá»­a khÃ´ng qua duyá»‡t.</li>
-     *   <li>ARCHIVED â€” Ä‘Ã£ lÆ°u trá»¯.</li>
+     *   <li>PENDING_REVIEW — đang chờ Admin duyệt, không được sửa.</li>
+     *   <li>APPROVED — Admin đã duyệt, chờ publish.</li>
+     *   <li>PUBLISHED — đang hiển thị cho học sinh, không sửa không qua duyệt.</li>
+     *   <li>ARCHIVED — đã lưu trữ.</li>
      * </ul>
      */
     private void assertEditable(Course course) {
         CourseStatus s = course.getStatus();
-        // Whitelist approach: chá»‰ cho phÃ©p khi status thuá»™c danh sÃ¡ch an toÃ n
+        // Whitelist approach: chỉ cho phép khi status thuộc danh sách an toàn
         boolean editable = s == CourseStatus.DRAFT
                         || s == CourseStatus.NEEDS_REVISION
-                        || s == CourseStatus.REJECTED;  // GV cáº§n sá»­a sau khi bá»‹ tá»« chá»‘i
+                        || s == CourseStatus.REJECTED;  // GV cần sửa sau khi bị từ chối
         if (!editable) {
             String statusLabel = switch (s) {
-                case PENDING_REVIEW -> "Äang chá» duyá»‡t";
-                case APPROVED       -> "ÄÃ£ duyá»‡t (chá» publish)";
-                case PUBLISHED      -> "ÄÃ£ phÃ¡t hÃ nh";
-                case ARCHIVED       -> "ÄÃ£ lÆ°u trá»¯";
+                case PENDING_REVIEW -> "Đang chờ duyệt";
+                case APPROVED       -> "Đã duyệt (chờ publish)";
+                case PUBLISHED      -> "Đã phát hành";
+                case ARCHIVED       -> "Đã lưu trữ";
                 default             -> s.toDbValue();
             };
             throw new BusinessException("NOT_EDITABLE",
-                    "KhÃ´ng thá»ƒ chá»‰nh sá»­a khi khÃ³a há»c Ä‘ang á»Ÿ tráº¡ng thÃ¡i '"
+                    "Không thể chỉnh sửa khi khóa học đang ở trạng thái '"
                     + statusLabel + "'.");
         }
     }
 
     /**
-     * Chá»‰ cho phÃ©p cáº­p nháº­t thÃ´ng tin cÆ¡ báº£n khi status âˆˆ {DRAFT, NEEDS_REVISION, REJECTED}.
+     * Chỉ cho phép cập nhật thông tin cơ bản khi status ∈ {DRAFT, NEEDS_REVISION, REJECTED}.
      *
-     * <p>PENDING_REVIEW vÃ  PUBLISHED bá»‹ cháº·n Ä‘á»ƒ Ä‘áº£m báº£o má»i thay Ä‘á»•i thÃ´ng tin
-     * (tiÃªu Ä‘á», giÃ¡, mÃ´ táº£) Ä‘á»u pháº£i qua workflow duyá»‡t cá»§a Admin (UC36).
-     * Náº¿u GV muá»‘n chá»‰nh sá»­a khÃ³a Ä‘ang duyá»‡t/Ä‘Ã£ phÃ¡t hÃ nh, pháº£i Ä‘áº·t vá» DRAFT trÆ°á»›c.
+     * <p>PENDING_REVIEW và PUBLISHED bị chặn để đảm bảo mọi thay đổi thông tin
+     * (tiêu đề, giá, mô tả) đều phải qua workflow duyệt của Admin (UC36).
+     * Nếu GV muốn chỉnh sửa khóa đang duyệt/đã phát hành, phải đặt về DRAFT trước.
      */
     private void assertCourseInfoEditable(Course course) {
         CourseStatus s = course.getStatus();
@@ -976,21 +976,21 @@ public class TeacherCourseService {
                         || s == CourseStatus.REJECTED;
         if (!editable) {
             String statusLabel = switch (s) {
-                case PENDING_REVIEW -> "Äang chá» duyá»‡t";
-                case APPROVED       -> "ÄÃ£ duyá»‡t (chá» publish)";
-                case PUBLISHED      -> "ÄÃ£ phÃ¡t hÃ nh";
-                case ARCHIVED       -> "ÄÃ£ lÆ°u trá»¯";
+                case PENDING_REVIEW -> "Đang chờ duyệt";
+                case APPROVED       -> "Đã duyệt (chờ publish)";
+                case PUBLISHED      -> "Đã phát hành";
+                case ARCHIVED       -> "Đã lưu trữ";
                 default             -> s.toDbValue();
             };
             throw new BusinessException("NOT_EDITABLE",
-                    "KhÃ´ng thá»ƒ cáº­p nháº­t thÃ´ng tin khi khÃ³a há»c Ä‘ang á»Ÿ tráº¡ng thÃ¡i '"
-                    + statusLabel + "'. LiÃªn há»‡ Admin Ä‘á»ƒ há»— trá»£.");
+                    "Không thể cập nhật thông tin khi khóa học đang ở trạng thái '"
+                    + statusLabel + "'. Liên hệ Admin để hỗ trợ.");
         }
     }
 
     /**
-     * Validate giÃ¡ khuyáº¿n mÃ£i pháº£i nhá» hÆ¡n giÃ¡ gá»‘c.
-     * Bá» qua náº¿u salePriceVnd = null (khÃ´ng Ã¡p dá»¥ng KM).
+     * Validate giá khuyến mãi phải nhỏ hơn giá gốc.
+     * Bỏ qua nếu salePriceVnd = null (không áp dụng KM).
      */
     private Map<UUID, Integer> loadChapterCounts(List<Course> courses) {
         if (courses.isEmpty()) return new HashMap<>();
@@ -1037,16 +1037,16 @@ public class TeacherCourseService {
     }
 
     /**
-     * Kiá»ƒm tra giÃ¡ gá»‘c theo quy Ä‘á»‹nh UseCase v6.5: 99.000â‚« â€“ 1.000.000â‚«.
+     * Kiểm tra giá gốc theo quy định UseCase v6.5: 99.000₫ – 1.000.000₫.
      */
     private void validatePrice(int priceVnd) {
         if (priceVnd < 99_000) {
             throw new BusinessException("INVALID_PRICE",
-                    "GiÃ¡ khÃ³a há»c tá»‘i thiá»ƒu lÃ  99,000 VND.");
+                    "Giá khóa học tối thiểu là 99,000 VND.");
         }
         if (priceVnd > 1_000_000) {
             throw new BusinessException("INVALID_PRICE",
-                    "GiÃ¡ khÃ³a há»c tá»‘i Ä‘a lÃ  1,000,000 VND.");
+                    "Giá khóa học tối đa là 1,000,000 VND.");
         }
     }
 
@@ -1054,21 +1054,21 @@ public class TeacherCourseService {
         if (salePriceVnd == null || priceVnd == null) return;
         if (salePriceVnd >= priceVnd) {
             throw new BusinessException("INVALID_SALE_PRICE",
-                    "GiÃ¡ khuyáº¿n mÃ£i (" + salePriceVnd + " VND) pháº£i nhá» hÆ¡n giÃ¡ gá»‘c ("
+                    "Giá khuyến mãi (" + salePriceVnd + " VND) phải nhỏ hơn giá gốc ("
                     + priceVnd + " VND).");
         }
         if (salePriceVnd < 1000) {
             throw new BusinessException("INVALID_SALE_PRICE",
-                    "GiÃ¡ khuyáº¿n mÃ£i tá»‘i thiá»ƒu 1,000 VND.");
+                    "Giá khuyến mãi tối thiểu 1,000 VND.");
         }
     }
 
     /**
-     * Äáº¿m láº¡i vÃ  cáº­p nháº­t totalChapters + totalLessons cho khÃ³a há»c.
+     * Đếm lại và cập nhật totalChapters + totalLessons cho khóa học.
      *
-     * <p>ÄÆ°á»£c gá»i sau má»—i thao tÃ¡c add/delete chapter hoáº·c lesson Ä‘á»ƒ Ä‘áº£m báº£o
-     * denormalized counter trong báº£ng courses luÃ´n chÃ­nh xÃ¡c.
-     * DÃ¹ng 2 query Ä‘Æ¡n giáº£n thay vÃ¬ trigger DB.
+     * <p>Được gọi sau mỗi thao tác add/delete chapter hoặc lesson để đảm bảo
+     * denormalized counter trong bảng courses luôn chính xác.
+     * Dùng 2 query đơn giản thay vì trigger DB.
      */
     private void refreshCourseCounts(UUID courseId) {
         int chapterCount = chapterRepository.countByCourseId(courseId);

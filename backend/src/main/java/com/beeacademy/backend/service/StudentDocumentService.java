@@ -69,7 +69,7 @@ public class StudentDocumentService {
         String storagePath = resolveStoragePath(document);
         if (storagePath == null || storagePath.isBlank()) {
             throw new BusinessException("DOCUMENT_UNAVAILABLE",
-                    "Tai lieu hien chua san sang de tai.", HttpStatus.NOT_FOUND);
+                    "Tài liệu hiện chưa sẵn sàng để tải.", HttpStatus.NOT_FOUND);
         }
 
         Instant now = Instant.now();
@@ -78,7 +78,7 @@ public class StudentDocumentService {
                         me.userId(), documentId, now.minusSeconds(60 * 60));
         if (downloadsLastHour >= MAX_DOWNLOADS_PER_HOUR) {
             throw new BusinessException("DOCUMENT_DOWNLOAD_RATE_LIMIT",
-                    "Ban da tai tai lieu qua 10 lan trong mot gio. Vui long thu lai sau.",
+                    "Bạn đã tải tài liệu quá 10 lần trong một giờ. Vui lòng thử lại sau.",
                     HttpStatus.TOO_MANY_REQUESTS);
         }
 
@@ -88,7 +88,7 @@ public class StudentDocumentService {
         storagePath = ensurePrivateStorage(document);
         if (storagePath == null || storagePath.isBlank()) {
             throw new BusinessException("DOCUMENT_UNAVAILABLE",
-                    "Tai lieu hien chua san sang de tai.", HttpStatus.NOT_FOUND);
+                    "Tài liệu hiện chưa sẵn sàng để tải.", HttpStatus.NOT_FOUND);
         }
 
         boolean watermarked = isPdf(document.getFileType());
@@ -121,16 +121,16 @@ public class StudentDocumentService {
         Instant now = Instant.now();
         if (downloadRepository.consumeActiveToken(tokenHash, now) != 1) {
             throw new BusinessException("DOCUMENT_DOWNLOAD_LINK_INVALID",
-                    "Lien ket tai da duoc dung hoac da het han. Vui long yeu cau lien ket moi.",
+                    "Liên kết tải đã được dùng hoặc đã hết hạn. Vui lòng yêu cầu liên kết mới.",
                     HttpStatus.GONE);
         }
 
         StudentDocumentDownload download = downloadRepository.findByTokenHash(tokenHash)
                 .orElseThrow(() -> new BusinessException("DOCUMENT_DOWNLOAD_LINK_INVALID",
-                        "Lien ket tai khong hop le.", HttpStatus.GONE));
+                        "Liên kết tải không hợp lệ.", HttpStatus.GONE));
         CourseDocument document = documentRepository.findById(download.getDocumentId())
                 .orElseThrow(() -> new BusinessException("DOCUMENT_UNAVAILABLE",
-                        "Tai lieu khong con kha dung.", HttpStatus.NOT_FOUND));
+                        "Tài liệu không còn khả dụng.", HttpStatus.NOT_FOUND));
         String bucket = download.getTemporaryStoragePath() != null
                 ? DOCUMENT_BUCKET
                 : resolveStorageBucket(document);
@@ -139,7 +139,7 @@ public class StudentDocumentService {
                 : resolveStoragePath(document);
         if (objectPath == null || objectPath.isBlank()) {
             throw new BusinessException("DOCUMENT_UNAVAILABLE",
-                    "Tai lieu hien chua san sang de tai.", HttpStatus.NOT_FOUND);
+                    "Tài liệu hiện chưa sẵn sàng để tải.", HttpStatus.NOT_FOUND);
         }
         byte[] bytes = storageClient.download(bucket, objectPath);
         return new DownloadedDocument(bytes, filename(document), contentType(document));
@@ -167,7 +167,7 @@ public class StudentDocumentService {
             try {
                 ensurePrivateStorage(document);
             } catch (Exception ex) {
-                log.warn("Chua the di tru tai lieu legacy {} sang private bucket: {}",
+                log.warn("Chưa thể di trú tài liệu legacy {} sang private bucket: {}",
                         document.getId(), ex.getMessage());
             }
         }
@@ -177,7 +177,7 @@ public class StudentDocumentService {
         if (me == null || me.userId() == null
                 || !enrollmentRepository.existsByStudentIdAndCourseId(me.userId(), courseId)) {
             throw new BusinessException("COURSE_NOT_ENROLLED",
-                    "Ban can mua khoa hoc truoc khi tai tai lieu.", HttpStatus.FORBIDDEN);
+                    "Bạn cần mua khóa học trước khi tải tài liệu.", HttpStatus.FORBIDDEN);
         }
     }
 
@@ -216,7 +216,7 @@ public class StudentDocumentService {
         document.moveToPrivateStorage(DOCUMENT_BUCKET, privatePath);
         documentRepository.save(document);
         scheduleLegacyDeletion(sourceBucket, storagePath);
-        log.info("Da di tru tai lieu {} tu {}/{} sang private bucket",
+        log.info("Đã di trú tài liệu {} tu {}/{} sang private bucket",
                 document.getId(), sourceBucket, storagePath);
         return privatePath;
     }
@@ -253,13 +253,13 @@ public class StudentDocumentService {
     private String hashToken(String token) {
         if (token == null || token.isBlank()) {
             throw new BusinessException("DOCUMENT_DOWNLOAD_LINK_INVALID",
-                    "Lien ket tai khong hop le.", HttpStatus.GONE);
+                    "Liên kết tải không hợp lệ.", HttpStatus.GONE);
         }
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(token.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 khong kha dung", ex);
+            throw new IllegalStateException("SHA-256 không khả dụng", ex);
         }
     }
 
@@ -284,7 +284,7 @@ public class StudentDocumentService {
                 .map(Profile::getFullName)
                 .filter(name -> name != null && !name.isBlank())
                 .map(String::trim)
-                .orElse("Hoc sinh");
+                .orElse("Học sinh");
     }
 
     private byte[] watermarkPdf(byte[] original, String studentName, String email) {
@@ -305,9 +305,9 @@ public class StudentDocumentService {
             reader.close();
             return output.toByteArray();
         } catch (Exception ex) {
-            log.error("Khong the dong dau tai lieu PDF", ex);
+            log.error("Không thể đóng dấu tài liệu PDF", ex);
             throw new BusinessException("DOCUMENT_WATERMARK_FAILED",
-                    "Khong the tao ban tai lieu ca nhan hoa.", HttpStatus.INTERNAL_SERVER_ERROR);
+                    "Không thể tạo bản tài liệu cá nhân hóa.", HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 

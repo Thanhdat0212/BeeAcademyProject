@@ -237,7 +237,7 @@ export default function DashboardHeader() {
     setNotificationLoading(true);
     try {
       const genericSummary = await listUserNotifications(false).catch(error => {
-        console.error('Khong the tai thong bao nguoi dung:', error);
+        console.error('Không thể tải thông báo người dùng:', error);
         return { unreadCount: 0, notifications: [] as UserNotification[] };
       });
 
@@ -251,7 +251,7 @@ export default function DashboardHeader() {
           setStudentInvitationNotifications(invitations);
           studentActionCount = invitations.length;
         } catch (error) {
-          console.error('Khong the tai thong bao lien ket phu huynh:', error);
+          console.error('Không thể tải thông báo liên kết phụ huynh:', error);
           setStudentInvitationNotifications([]);
         }
       } else {
@@ -415,7 +415,7 @@ export default function DashboardHeader() {
       try {
         await markUserNotificationRead(notification.id);
       } catch (error) {
-        console.error('Khong the danh dau thong bao da doc:', error);
+        console.error('Không thể đánh dấu thông báo đã đọc:', error);
       }
       setUserNotifications(items =>
         items.map(item => item.id === notification.id ? { ...item, read: true } : item)

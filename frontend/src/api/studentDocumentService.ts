@@ -8,7 +8,7 @@ export interface DocumentDownloadResponse {
   oneTime: boolean;
 }
 
-/** UC15: yeu cau signed URL tai tai lieu cua bai hoc da mua. */
+/** UC15: yêu cầu signed URL tải tài liệu của bài học đã mua. */
 export async function getStudentDocumentDownload(
   courseId: string,
   lessonId: string,

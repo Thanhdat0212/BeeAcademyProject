@@ -656,7 +656,7 @@ export default function StudentExamPage() {
   const isTimeUrgent = remainingSeconds != null && remainingSeconds <= 300;
   const displayTime = remainingSeconds == null
     ? exam
-      ? `${exam.durationMinutes} phut`
+      ? `${exam.durationMinutes} phút`
       : '--:--'
     : formatRemainingTime(remainingSeconds);
   const cooldownUntilMs = retakeRequest?.cooldownUntil

@@ -199,7 +199,7 @@ public class CertificateService {
         if (!enrollmentRepository.existsByStudentIdAndCourseId(studentId, courseId)) {
             throw new BusinessException(
                     "COURSE_NOT_ENROLLED",
-                    "Ban can ghi danh khoa hoc truoc khi nhan chung chi.",
+                    "Bạn cần ghi danh khóa học trước khi nhận chứng chỉ.",
                     HttpStatus.FORBIDDEN);
         }
     }
@@ -312,7 +312,7 @@ public class CertificateService {
             return watermarkPdf(output.toByteArray(), safeText(student.getFullName(), "Student"), issuedDate);
         } catch (Exception ex) {
             throw new BusinessException("CERTIFICATE_PDF_FAILED",
-                    "Khong the tao file chung chi.", HttpStatus.INTERNAL_SERVER_ERROR);
+                    "Không thể tạo file chứng chỉ.", HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -373,7 +373,7 @@ public class CertificateService {
             return output.toByteArray();
         } catch (Exception ex) {
             throw new BusinessException("CERTIFICATE_PDF_FAILED",
-                    "Khong the dong dau file chung chi.", HttpStatus.INTERNAL_SERVER_ERROR);
+                    "Không thể đóng dấu file chứng chỉ.", HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 

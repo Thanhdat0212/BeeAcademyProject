@@ -372,7 +372,7 @@ public class ParentProgressService {
                 0,
                 7,
                 "no_data",
-                "Chua co du lieu hoc tap trong khoang thoi gian nay.");
+                "Chưa có dữ liệu học tập trong khoảng thời gian này.");
     }
 
     private ChildProgressReportResponse.WeeklySummary buildWeeklySummary(
@@ -439,20 +439,20 @@ public class ParentProgressService {
         if (courseItems.isEmpty() && currentWeekCompletedItems == 0 && previousWeekCompletedItems == 0) {
             trend = "no_data";
             actionRule = "no_data";
-            suggestion = "Chua co du lieu hoc tap trong khoang thoi gian nay.";
+            suggestion = "Chưa có dữ liệu học tập trong khoảng thời gian này.";
         } else if (inactiveDays >= weeklyInactiveDaysThreshold
                 && averageProgress < weeklyLowProgressThreshold) {
             actionRule = "inactive";
-            suggestion = "Nen nhac hoc sinh quay lai hoc va hoan thanh cac bai danh gia con thieu.";
+            suggestion = "Nên nhắc học sinh quay lại học và hoàn thành các bài đánh giá còn thiếu.";
         } else if (averageScore != null && averageScore < weeklyLowScoreThreshold) {
             actionRule = "needs_support";
-            suggestion = "Nen trao doi voi giao vien de ho tro cac noi dung co diem thap.";
+            suggestion = "Nên trao đổi với giáo viên để hỗ trợ các nội dung có điểm thấp.";
         } else if ("decreasing".equals(trend)) {
             actionRule = "decreasing";
-            suggestion = "Tien do dang giam so voi tuan truoc; nen sap xep lai lich hoc deu hon.";
+            suggestion = "Tiến độ đang giảm so với tuần trước; nên sắp xếp lại lịch học đều hơn.";
         } else {
             actionRule = "on_track";
-            suggestion = "Tiep tuc duy tri tien do hoc tap hien tai.";
+            suggestion = "Tiếp tục duy trì tiến độ học tập hiện tại.";
         }
 
         return new ChildProgressReportResponse.WeeklySummary(
@@ -723,9 +723,9 @@ public class ParentProgressService {
         return new ChildProgressReportResponse.CertificateRecord(
                 certificate.getId(),
                 course != null ? course.getId() : null,
-                course != null ? course.getTitle() : "KhÃ³a há»c",
+                course != null ? course.getTitle() : "Khóa học",
                 course != null && course.getTeacher() != null
-                        ? displayName(course.getTeacher(), "GiÃ¡o viÃªn")
+                        ? displayName(course.getTeacher(), "Giáo viên")
                         : null,
                 certificate.getStatus() != null ? certificate.getStatus().name() : null,
                 certificate.getCertificateNo(),

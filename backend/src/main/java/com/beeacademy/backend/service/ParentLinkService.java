@@ -110,7 +110,7 @@ public class ParentLinkService {
                 || existingLink.getStatus() == ParentStudentLinkStatus.PENDING)) {
             throw new BusinessException(
                     "PARENT_LINK_ALREADY_EXISTS",
-                    "Da co loi moi hoac lien ket dang hoat dong voi hoc sinh nay.",
+                    "Đã có lời mời hoặc liên kết đang hoạt động với học sinh này.",
                     HttpStatus.CONFLICT);
         }
 
@@ -263,8 +263,8 @@ public class ParentLinkService {
         notificationService.notify(
                 link.getStudent().getId(),
                 "parent_link_revoked",
-                "Lien ket phu huynh da bi huy",
-                "Lien ket voi " + displayName(link.getParent(), "phu huynh") + " da bi huy.",
+                "Liên kết phụ huynh đã bị hủy",
+                "Liên kết với " + displayName(link.getParent(), "phu huynh") + " đã bị hủy.",
                 "/student/notifications");
     }
 

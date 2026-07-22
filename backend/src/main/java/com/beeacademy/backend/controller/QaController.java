@@ -104,7 +104,7 @@ public class QaController {
             @Valid @RequestBody CreateQaMessageRequest req) {
         return ApiResponse.ok(
                 qaService.editTeacherMessage(threadId, messageId, CurrentUser.required(), req),
-                "Da cap nhat cau tra loi");
+                "Đã cập nhật câu trả lời");
     }
 
     @PostMapping("/teacher/qa/{threadId}/duplicate")
@@ -114,7 +114,7 @@ public class QaController {
             @Valid @RequestBody MarkQaThreadDuplicateRequest req) {
         return ApiResponse.ok(
                 qaService.markDuplicate(threadId, req.duplicateOfThreadId(), CurrentUser.required()),
-                "Da danh dau cau hoi trung lap");
+                "Đã đánh dấu câu hỏi trùng lặp");
     }
 
     @GetMapping("/teacher/qa/report")

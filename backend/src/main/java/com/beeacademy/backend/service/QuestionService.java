@@ -220,7 +220,7 @@ public class QuestionService {
             if ("inactive".equals(question.getStatus())) {
                 throw new BusinessException(
                         "QUESTION_ALREADY_ARCHIVED",
-                        "Cau hoi da duoc luu tru truoc do.",
+                        "Câu hỏi đã được lưu trữ trước đó.",
                         HttpStatus.CONFLICT);
             }
             question.deactivate();
@@ -277,7 +277,7 @@ public class QuestionService {
         }
 
         if (requests.size() > 200) {
-            throw new BusinessException("BULK_LIMIT_EXCEEDED", "Moi lan chi duoc nhap toi da 200 cau hoi.");
+            throw new BusinessException("BULK_LIMIT_EXCEEDED", "Mỗi lần chỉ được nhập tối đa 200 câu hỏi.");
         }
 
         for (int i = 0; i < requests.size(); i++) {
@@ -365,7 +365,7 @@ public class QuestionService {
             return objectMapper.writeValueAsString(choices);
         } catch (Exception ex) {
             throw new BusinessException("QUESTION_VERSION_FAILED",
-                    "Khong the luu phien ban cau hoi cu.");
+                    "Không thể lưu phiên bản câu hỏi cũ.");
         }
     }
 
@@ -383,7 +383,7 @@ public class QuestionService {
             return objectMapper.writeValueAsString(normalized);
         } catch (Exception ex) {
             throw new BusinessException("QUESTION_TAGS_INVALID",
-                    "Khong the luu tag cau hoi.");
+                    "Không thể lưu tag câu hỏi.");
         }
     }
 
@@ -465,7 +465,7 @@ public class QuestionService {
         } catch (Exception ex) {
             throw new BusinessException(
                     "QUESTION_AUDIT_FAILED",
-                    "Khong the ghi nhat ky thay doi cau hoi.");
+                    "Không thể ghi nhật ký thay đổi câu hỏi.");
         }
     }
 
@@ -489,14 +489,14 @@ public class QuestionService {
             return response;
         }
         return response.withDuplicateWarning(
-                "Noi dung cau hoi trung voi mot cau hoi dang active trong ngan hang cua giao vien.");
+                "Nội dung câu hỏi trùng với một câu hỏi đang active trong ngân hàng của giáo viên.");
     }
 
     private Question loadAndVerifyOwner(UUID questionId, UUID teacherId) {
         Question q = questionRepository.findById(questionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Question", questionId));
         if (!q.getTeacher().getId().equals(teacherId)) {
-            throw new BusinessException("FORBIDDEN", "Ban khong co quyen chinh sua cau hoi nay.", HttpStatus.FORBIDDEN);
+            throw new BusinessException("FORBIDDEN", "Bạn không có quyền chỉnh sửa câu hỏi này.", HttpStatus.FORBIDDEN);
         }
         return q;
     }
@@ -507,7 +507,7 @@ public class QuestionService {
         if (!question.getTeacher().getId().equals(teacherId)) {
             throw new BusinessException(
                     "FORBIDDEN",
-                    "Ban khong co quyen chinh sua cau hoi nay.",
+                    "Bạn không có quyền chỉnh sửa câu hỏi này.",
                     HttpStatus.FORBIDDEN);
         }
         return question;
@@ -535,33 +535,33 @@ public class QuestionService {
         QuestionBank questionBank = questionBankService.getOwnedQuestionBank(questionBankId, teacherId);
         if (!questionBank.getCategory().getId().equals(categoryId)) {
             throw new BusinessException("QUESTION_BANK_CATEGORY_MISMATCH",
-                    "Mon hoc cua cau hoi phai khop voi ngan hang da chon.");
+                    "Môn học của câu hỏi phải khớp với ngân hàng đã chọn.");
         }
         if (!questionBank.getGrade().equals(grade)) {
             throw new BusinessException("QUESTION_BANK_GRADE_MISMATCH",
-                    "Lop cua cau hoi phai khop voi ngan hang da chon.");
+                    "Lớp của câu hỏi phải khớp với ngân hàng đã chọn.");
         }
         return questionBank;
     }
 
     private void validateQuestionRequest(CreateQuestionRequest req) {
         if (req == null) {
-            throw new BusinessException("INVALID_REQUEST", "Du lieu cau hoi khong hop le.");
+            throw new BusinessException("INVALID_REQUEST", "Dữ liệu câu hỏi không hợp lệ.");
         }
         if (req.categoryId() == null) {
-            throw new BusinessException("CATEGORY_REQUIRED", "Vui long chon mon hoc.");
+            throw new BusinessException("CATEGORY_REQUIRED", "Vui lòng chọn môn học.");
         }
         if (req.grade() == null || req.grade() < 1) {
-            throw new BusinessException("GRADE_REQUIRED", "Vui long chon lop.");
+            throw new BusinessException("GRADE_REQUIRED", "Vui lòng chọn lớp.");
         }
         if (req.content() == null || req.content().isBlank()) {
-            throw new BusinessException("CONTENT_REQUIRED", "Noi dung cau hoi khong duoc trong.");
+            throw new BusinessException("CONTENT_REQUIRED", "Nội dung câu hỏi không được trống.");
         }
         if (!List.of("easy", "medium", "hard").contains(req.difficulty())) {
-            throw new BusinessException("INVALID_DIFFICULTY", "Do kho phai la easy, medium hoac hard.");
+            throw new BusinessException("INVALID_DIFFICULTY", "Độ khó phải là easy, medium hoặc hard.");
         }
         if (!SUPPORTED_TYPES.contains(req.type())) {
-            throw new BusinessException("INVALID_TYPE", "Loai cau hoi khong hop le.");
+            throw new BusinessException("INVALID_TYPE", "Loại câu hỏi không hợp lệ.");
         }
 
         if (OBJECTIVE_TYPES.contains(req.type())) {
@@ -583,75 +583,75 @@ public class QuestionService {
 
     private void validateObjectiveQuestion(CreateQuestionRequest req) {
         if (req.choices() == null || req.choices().size() < 2 || req.choices().size() > 6) {
-            throw new BusinessException("INVALID_CHOICES", "Cau hoi objective phai co 2-6 dap an.");
+            throw new BusinessException("INVALID_CHOICES", "Câu hỏi objective phải có 2-6 đáp án.");
         }
         for (CreateQuestionRequest.ChoiceRequest choice : req.choices()) {
             if (choice == null || choice.content() == null || choice.content().isBlank()) {
-                throw new BusinessException("INVALID_CHOICES", "Dap an khong duoc trong.");
+                throw new BusinessException("INVALID_CHOICES", "Đáp án không được trống.");
             }
         }
         long correctCount = req.choices().stream()
                 .filter(CreateQuestionRequest.ChoiceRequest::isCorrect)
                 .count();
         if ("true_false".equals(req.type()) && correctCount != 1) {
-            throw new BusinessException("INVALID_CHOICES", "Cau dung/sai phai co dung 1 dap an dung.");
+            throw new BusinessException("INVALID_CHOICES", "Câu đúng/sai phải có đúng 1 đáp án đúng.");
         }
         if (!"true_false".equals(req.type()) && correctCount < 1) {
-            throw new BusinessException("INVALID_CHOICES", "Cau hoi objective phai co it nhat 1 dap an dung.");
+            throw new BusinessException("INVALID_CHOICES", "Câu hỏi objective phải có ít nhất 1 đáp án đúng.");
         }
 
         if ("image_question".equals(req.type())) {
-            requireMetadataText(req.metadata(), "promptAssetUrl", "Cau hoi hinh anh can co URL hinh.");
+            requireMetadataText(req.metadata(), "promptAssetUrl", "Câu hỏi hình ảnh can co URL hinh.");
         }
         if ("audio_question".equals(req.type())) {
-            requireMetadataText(req.metadata(), "promptAssetUrl", "Cau hoi audio can co URL audio.");
+            requireMetadataText(req.metadata(), "promptAssetUrl", "Câu hỏi audio can co URL audio.");
         }
     }
 
     private void validateFillInBlank(CreateQuestionRequest req) {
         if (hasChoices(req)) {
-            throw new BusinessException("INVALID_CHOICES", "Cau dien vao cho trong khong dung danh sach dap an objective.");
+            throw new BusinessException("INVALID_CHOICES", "Câu điền vào chỗ trống không dùng danh sách đáp án objective.");
         }
         List<String> acceptedAnswers = stringList(req.metadata(), "acceptedAnswers");
         if (acceptedAnswers.isEmpty()) {
-            throw new BusinessException("ACCEPTED_ANSWERS_REQUIRED", "Cau dien vao cho trong can it nhat 1 dap an hop le.");
+            throw new BusinessException("ACCEPTED_ANSWERS_REQUIRED", "Câu điền vào chỗ trống cần ít nhất 1 đáp án hợp lệ.");
         }
     }
 
     private void validateEssay(CreateQuestionRequest req) {
         if (hasChoices(req)) {
-            throw new BusinessException("INVALID_CHOICES", "Cau tu luan khong dung danh sach dap an objective.");
+            throw new BusinessException("INVALID_CHOICES", "Câu tự luận không dùng danh sách đáp án objective.");
         }
         Integer wordLimit = integerValue(req.metadata(), "wordLimit");
         if (wordLimit != null && wordLimit <= 0) {
-            throw new BusinessException("INVALID_WORD_LIMIT", "wordLimit phai lon hon 0.");
+            throw new BusinessException("INVALID_WORD_LIMIT", "wordLimit phải lớn hơn 0.");
         }
     }
 
     private void validateMatching(CreateQuestionRequest req) {
         if (hasChoices(req)) {
-            throw new BusinessException("INVALID_CHOICES", "Cau noi cot khong dung danh sach dap an objective.");
+            throw new BusinessException("INVALID_CHOICES", "Câu nối cột không dùng danh sách đáp án objective.");
         }
         JsonNode pairs = req.metadata() != null ? req.metadata().get("matchingPairs") : null;
         if (pairs == null || !pairs.isArray() || pairs.size() < 2) {
             throw new BusinessException("MATCHING_PAIRS_REQUIRED",
-                    "Cau noi cot can it nhat 2 cap hop le.");
+                    "Câu nối cột cần ít nhất 2 cặp hợp lệ.");
         }
     }
 
     private void validateFormulaQuestion(CreateQuestionRequest req) {
         requireMetadataText(req.metadata(), "formulaLatex",
-                "Cau hoi cong thuc can co noi dung cong thuc.");
+                "Câu hỏi công thức can co noi dung cong thuc.");
     }
 
     private void validateFileUpload(CreateQuestionRequest req) {
         if (hasChoices(req)) {
-            throw new BusinessException("INVALID_CHOICES", "Cau nop file khong dung danh sach dap an objective.");
+            throw new BusinessException("INVALID_CHOICES", "Câu nộp file không dùng danh sách đáp án objective.");
         }
         List<String> allowedUploadTypes = stringList(req.metadata(), "allowedUploadTypes");
         if (allowedUploadTypes.isEmpty()) {
             throw new BusinessException("UPLOAD_TYPES_REQUIRED",
-                    "Cau nop file can khai bao loai file duoc phep.");
+                    "Câu nộp file cần khai báo loại file được phép.");
         }
     }
 
@@ -705,13 +705,13 @@ public class QuestionService {
             return;
         }
         if (!hasReadingSetId) {
-            throw new BusinessException("READING_SET_REQUIRED", "Cau hoi bai doc can co readingSetId.");
+            throw new BusinessException("READING_SET_REQUIRED", "Câu hỏi bai doc can co readingSetId.");
         }
         if (!hasSharedPrompt) {
-            throw new BusinessException("SHARED_PROMPT_REQUIRED", "Cau hoi bai doc can co doan van chung.");
+            throw new BusinessException("SHARED_PROMPT_REQUIRED", "Câu hỏi bai doc can co doan van chung.");
         }
         if (questionOrderInSet != null && questionOrderInSet <= 0) {
-            throw new BusinessException("INVALID_READING_ORDER", "questionOrderInSet phai lon hon 0.");
+            throw new BusinessException("INVALID_READING_ORDER", "questionOrderInSet phải lớn hơn 0.");
         }
     }
 
@@ -722,7 +722,7 @@ public class QuestionService {
         try {
             return objectMapper.writeValueAsString(metadata);
         } catch (Exception ex) {
-            throw new BusinessException("INVALID_METADATA", "Khong the luu metadata cau hoi.");
+            throw new BusinessException("INVALID_METADATA", "Không thể lưu metadata câu hỏi.");
         }
     }
 
@@ -732,7 +732,7 @@ public class QuestionService {
         if (courseCategory == null) return;
         if (!courseCategory.getId().equals(requestedCategoryId)) {
             throw new BusinessException("CATEGORY_MISMATCH",
-                    "Mon hoc khong khop voi khoa hoc cua chuong da chon. Chuong nay thuoc mon: "
+                    "Môn học không khớp với khóa học của chương đã chọn. Chương này thuộc môn: "
                             + courseCategory.getName() + ".");
         }
     }
@@ -741,14 +741,14 @@ public class QuestionService {
         if (chapter == null || grade == null) return;
         validateCategoryMatchesChapter(requestedCategoryId, chapter);
         if (!courseGrades(chapter).contains(grade)) {
-            throw new BusinessException("GRADE_MISMATCH", "Lop khong khop voi khoa hoc cua chuong da chon.");
+            throw new BusinessException("GRADE_MISMATCH", "Lớp không khớp với khóa học của chương đã chọn.");
         }
     }
 
     private List<Integer> courseGrades(Chapter chapter) {
         int[] grades = chapter.getCourse().getGrades();
         if (grades == null || grades.length == 0) {
-            throw new BusinessException("COURSE_GRADE_MISSING", "Khoa hoc cua chuong chua co thong tin lop.");
+            throw new BusinessException("COURSE_GRADE_MISSING", "Khóa học của chương chưa có thông tin lớp.");
         }
         return Arrays.stream(grades).boxed().toList();
     }

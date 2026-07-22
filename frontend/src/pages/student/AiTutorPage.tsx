@@ -38,7 +38,7 @@ import {
 const SUGGESTED_QUESTIONS = [
   'Giải thích giúp mình định lý Pytago với ví dụ dễ hiểu',
   'Làm sao để học thuộc từ vựng tiếng Anh nhanh hơn?',
-  'Mẹo làm bài văn nghị luận xã hội cho lớp 9?',
+  'Meo làm bài văn nghị luận xã hội cho lớp 9?',
   'Cách cân bằng phương trình hóa học?',
 ];
 

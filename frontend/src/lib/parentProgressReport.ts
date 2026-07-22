@@ -31,23 +31,23 @@ function formatDateTime(value: string | null | undefined): string {
 }
 
 function courseStatusLabel(status: string): string {
-  return status === 'completed' ? 'Da hoan thanh' : 'Dang hoc';
+  return status === 'completed' ? 'Đã hoàn thành' : 'Đang học';
 }
 
 function requiredExamStatusLabel(status: ParentRequiredExamStatus): string {
   switch (status) {
     case 'not_configured':
-      return 'Chua cau hinh';
+      return 'Chưa cấu hình';
     case 'not_submitted':
-      return 'Chua nop';
+      return 'Chưa nộp';
     case 'in_progress':
-      return 'Dang lam';
+      return 'Đang làm';
     case 'pending_grading':
-      return 'Cho cham';
+      return 'Chờ chấm';
     case 'passed':
       return 'Dat';
     case 'failed':
-      return 'Chua dat';
+      return 'Chưa đạt';
     default:
       return status;
   }
@@ -56,7 +56,7 @@ function requiredExamStatusLabel(status: ParentRequiredExamStatus): string {
 function requiredExamSummary(course: ParentCourseProgressItem): string {
   const requiredExams = course.requiredExams ?? [];
   if (requiredExams.length === 0) {
-    return 'Chua co cau hinh';
+    return 'Chưa có cấu hình';
   }
   return requiredExams
     .map(exam => {
@@ -69,26 +69,26 @@ function requiredExamSummary(course: ParentCourseProgressItem): string {
 function certificateStatusLabel(status: ParentCertificateRecord['status']): string {
   switch (status) {
     case 'ISSUED':
-      return 'Da cap';
+      return 'Đã cấp';
     case 'REISSUED':
-      return 'Da cap lai';
+      return 'Đã cấp lại';
     case 'NEEDS_REVIEW':
-      return 'Can xem xet';
+      return 'Cần xem xét';
     case 'REVOKED':
-      return 'Da thu hoi';
+      return 'Đã thu hồi';
     default:
-      return 'Chua cap';
+      return 'Chưa cấp';
   }
 }
 
 function progressAccessReasonLabel(reason: string | null | undefined): string {
   switch (reason) {
     case 'DOB_MISSING_REQUIRE_CONSENT':
-      return 'Thieu ngay sinh hoc sinh, can xac nhan dong y de xem du lieu nhay cam.';
+      return 'Thiếu ngày sinh học sinh, cần xác nhận đồng ý để xem dữ liệu nhạy cảm.';
     case 'STUDENT_16_PLUS_PRIVACY_ENABLED_REQUIRE_CONSENT':
-      return 'Hoc sinh tu 16 tuoi dang bat quyen rieng tu, can dong y truoc khi hien thi chi tiet nhay cam.';
+      return 'Học sinh từ 16 tuổi đang bật quyền riêng tư, cần đồng ý trước khi hiển thị chi tiết nhạy cảm.';
     default:
-      return 'Mot so nhan xet va chi tiet bai lam dang duoc an theo thiet lap quyen rieng tu.';
+      return 'Một số nhận xét và chi tiết bài làm đang được ẩn theo thiết lập quyền riêng tư.';
   }
 }
 
@@ -118,13 +118,13 @@ function averageProgress(report: ChildProgressReportResponse): string {
 function weeklyTrendLabel(trend: string): string {
   switch (trend) {
     case 'increasing':
-      return 'Tang so voi tuan truoc';
+      return 'Tăng so với tuần trước';
     case 'decreasing':
-      return 'Giam so voi tuan truoc';
+      return 'Giảm so với tuần trước';
     case 'stable':
-      return 'On dinh so voi tuan truoc';
+      return 'Ổn định so với tuần trước';
     default:
-      return 'Chua du du lieu so sanh';
+      return 'Chưa đủ dữ liệu so sánh';
   }
 }
 
@@ -139,22 +139,22 @@ export function printParentProgressReport(
 
   const totalQuizCompleted = report.courses.reduce((sum, item) => sum + item.quizCompletedCount, 0);
   const totalQuizCount = report.courses.reduce((sum, item) => sum + item.quizTotalCount, 0);
-  const filterSummary = options.filterSummary?.trim() || 'Tat ca du lieu hien co';
+  const filterSummary = options.filterSummary?.trim() || 'Tất cả dữ liệu hiện có';
   const privacyNote = report.sensitiveDataMasked
-    ? `<section class="privacy-note"><strong>Du lieu nhay cam dang duoc an.</strong><br />${escapeHtml(progressAccessReasonLabel(report.detailAccessReason))}</section>`
+    ? `<section class="privacy-note"><strong>Dữ liệu nhạy cảm đang được ẩn.</strong><br />${escapeHtml(progressAccessReasonLabel(report.detailAccessReason))}</section>`
     : '';
 
   const courseRows = report.courses.length === 0
     ? `
       <tr>
-        <td colspan="7" class="empty">Khong co khoa hoc phu hop voi bo loc.</td>
+        <td colspan="7" class="empty">Không có khóa học phù hợp với bộ lọc.</td>
       </tr>
     `
     : report.courses.map(course => `
       <tr>
         <td>${escapeHtml(course.courseTitle)}</td>
         <td>${escapeHtml(course.teacherName ?? '—')}</td>
-        <td>${escapeHtml(course.grades.length > 0 ? `Lop ${course.grades.join(', ')}` : report.gradeLabel || '—')}</td>
+        <td>${escapeHtml(course.grades.length > 0 ? `Lớp ${course.grades.join(', ')}` : report.gradeLabel || '—')}</td>
         <td>${course.progressPct}%</td>
         <td>${course.quizCompletedCount}/${course.quizTotalCount}</td>
         <td>${escapeHtml(requiredExamSummary(course))}</td>
@@ -168,7 +168,7 @@ export function printParentProgressReport(
   const lessonRows = completedLessons.length === 0
     ? `
       <tr>
-        <td colspan="5" class="empty">Chua co bai hoc da hoan thanh.</td>
+        <td colspan="5" class="empty">Chưa có bài học đã hoàn thành.</td>
       </tr>
     `
     : completedLessons.map(({ course, lesson }) => `
@@ -176,7 +176,7 @@ export function printParentProgressReport(
         <td>${escapeHtml(course.courseTitle)}</td>
         <td>${escapeHtml(lesson.chapterTitle)}</td>
         <td>${escapeHtml(lesson.lessonTitle)}</td>
-        <td>${escapeHtml(lesson.durationSec != null ? `${Math.round(lesson.durationSec / 60)} phut` : '---')}</td>
+        <td>${escapeHtml(lesson.durationSec != null ? `${Math.round(lesson.durationSec / 60)} phút` : '---')}</td>
         <td>${escapeHtml(formatDateTime(lesson.completedAt))}</td>
       </tr>
     `).join('');
@@ -184,7 +184,7 @@ export function printParentProgressReport(
   const assessmentRows = report.assessments.length === 0
     ? `
       <tr>
-        <td colspan="6" class="empty">Khong co cot diem phu hop voi bo loc.</td>
+        <td colspan="6" class="empty">Không có cột điểm phù hợp với bộ lọc.</td>
       </tr>
     `
     : report.assessments.map(record => `
@@ -202,7 +202,7 @@ export function printParentProgressReport(
   const certificateRows = certificates.length === 0
     ? `
       <tr>
-        <td colspan="6" class="empty">Chua co chung chi nao.</td>
+        <td colspan="6" class="empty">Chưa có chứng chỉ nào.</td>
       </tr>
     `
     : certificates.map(certificate => `
@@ -220,7 +220,7 @@ export function printParentProgressReport(
   <html lang="vi">
     <head>
       <meta charset="utf-8" />
-      <title>Bao cao tien do hoc tap</title>
+      <title>Báo cáo tiến độ học tập</title>
       <style>
         :root {
           color-scheme: light;
@@ -361,45 +361,45 @@ export function printParentProgressReport(
       <div class="page">
         <section class="hero">
           <p class="eyebrow">Bee Academy Parent Report</p>
-          <h1>Bao cao tien do hoc tap</h1>
-          <p>Hoc sinh: ${escapeHtml(report.studentName)}${report.gradeLabel ? ` · ${escapeHtml(report.gradeLabel)}` : ''}</p>
-          <p>Bo loc: ${escapeHtml(filterSummary)}</p>
-          <p>Tao luc: ${escapeHtml(formatDateTime(report.generatedAt))}</p>
+          <h1>Báo cáo tiến độ học tập</h1>
+          <p>Học sinh: ${escapeHtml(report.studentName)}${report.gradeLabel ? ` · ${escapeHtml(report.gradeLabel)}` : ''}</p>
+          <p>Bộ lọc: ${escapeHtml(filterSummary)}</p>
+          <p>Tạo lúc: ${escapeHtml(formatDateTime(report.generatedAt))}</p>
         </section>
         ${privacyNote}
 
         <section class="meta">
           <div class="meta-card">
-            <span>Khoa hoc</span>
+            <span>Khóa học</span>
             <strong>${report.courses.length}</strong>
           </div>
           <div class="meta-card">
-            <span>Tien do TB</span>
+            <span>Tiến độ TB</span>
             <strong>${averageProgress(report)}%</strong>
           </div>
           <div class="meta-card">
-            <span>Diem TB</span>
+            <span>Điểm TB</span>
             <strong>${averageScore(report)}</strong>
           </div>
           <div class="meta-card">
-            <span>Quiz da lam</span>
+            <span>Quiz đã làm</span>
             <strong>${totalQuizCompleted}/${totalQuizCount}</strong>
           </div>
         </section>
 
         <section class="section">
-          <h2>Tien do theo khoa hoc</h2>
-          <p>Danh sach cac khoa hoc ma hoc sinh dang theo hoc va muc do hoan thanh hien tai.</p>
+          <h2>Tiến độ theo khóa học</h2>
+          <p>Danh sách các khóa học mà học sinh đang theo học và mức độ hoàn thành hiện tại.</p>
           <table>
             <thead>
               <tr>
-                <th>Khoa hoc</th>
-                <th>Giao vien</th>
-                <th>Khoi lop</th>
-                <th>Tien do</th>
+                <th>Khóa học</th>
+                <th>Giáo viên</th>
+                <th>Khối lớp</th>
+                <th>Tiến độ</th>
                 <th>Quiz</th>
                 <th>4 bai kiem tra</th>
-                <th>Trang thai</th>
+                <th>Trạng thái</th>
               </tr>
             </thead>
             <tbody>${courseRows}</tbody>
@@ -407,17 +407,17 @@ export function printParentProgressReport(
         </section>
 
         <section class="section">
-          <h2>Bao cao 7 ngay</h2>
-          <p>${escapeHtml(report.weeklySummary.periodStart)} den ${escapeHtml(report.weeklySummary.periodEnd)} · ${escapeHtml(weeklyTrendLabel(report.weeklySummary.progressTrend))}</p>
+          <h2>Báo cáo 7 ngày</h2>
+          <p>${escapeHtml(report.weeklySummary.periodStart)} đến ${escapeHtml(report.weeklySummary.periodEnd)} · ${escapeHtml(weeklyTrendLabel(report.weeklySummary.progressTrend))}</p>
           <table>
             <thead>
               <tr>
-                <th>Hoan thanh tuan nay</th>
-                <th>Tuan truoc</th>
-                <th>Diem trung binh</th>
-                <th>Bai chua hoan thanh</th>
-                <th>Ngay khong hoc</th>
-                <th>Khuyen nghi</th>
+                <th>Hoàn thành tuần này</th>
+                <th>Tuần trước</th>
+                <th>Điểm trung bình</th>
+                <th>Bài chưa hoàn thành</th>
+                <th>Ngày không học</th>
+                <th>Khuyến nghị</th>
               </tr>
             </thead>
             <tbody>
@@ -434,16 +434,16 @@ export function printParentProgressReport(
         </section>
 
         <section class="section">
-          <h2>Bai da hoc</h2>
-          <p>Cac bai hoc da duoc ghi nhan hoan thanh trong tung khoa hoc.</p>
+          <h2>Bài đã học</h2>
+          <p>Các bài học đã được ghi nhận hoàn thành trong từng khóa học.</p>
           <table>
             <thead>
               <tr>
-                <th>Khoa hoc</th>
-                <th>Chuong</th>
-                <th>Bai hoc</th>
-                <th>Thoi luong</th>
-                <th>Hoan thanh luc</th>
+                <th>Khóa học</th>
+                <th>Chương</th>
+                <th>Bài học</th>
+                <th>Thời lượng</th>
+                <th>Hoàn thành lúc</th>
               </tr>
             </thead>
             <tbody>${lessonRows}</tbody>
@@ -451,16 +451,16 @@ export function printParentProgressReport(
         </section>
 
         <section class="section">
-          <h2>Bang diem gan day</h2>
-          <p>Cac cot diem quiz, exam va assignment duoc ghi nhan theo thu tu moi nhat.</p>
+          <h2>Bảng điểm gần đây</h2>
+          <p>Các cột điểm quiz, exam và assignment được ghi nhận theo thứ tự mới nhất.</p>
           <table>
             <thead>
               <tr>
-                <th>Thoi gian</th>
-                <th>Khoa hoc</th>
-                <th>Bai danh gia</th>
-                <th>Loai</th>
-                <th>Diem goc</th>
+                <th>Thời gian</th>
+                <th>Khóa học</th>
+                <th>Bài đánh giá</th>
+                <th>Loại</th>
+                <th>Điểm gốc</th>
                 <th>Quy doi</th>
               </tr>
             </thead>
@@ -469,24 +469,24 @@ export function printParentProgressReport(
         </section>
 
         <section class="section">
-          <h2>Chung chi</h2>
-          <p>Trang thai chung chi cua hoc sinh theo tung khoa hoc.</p>
+          <h2>Chứng chỉ</h2>
+          <p>Trạng thái chứng chỉ của học sinh theo từng khóa học.</p>
           <table>
             <thead>
               <tr>
-                <th>Khoa hoc</th>
-                <th>Giao vien</th>
-                <th>Trang thai</th>
-                <th>So chung chi</th>
-                <th>Ma xac thuc</th>
-                <th>Ngay cap</th>
+                <th>Khóa học</th>
+                <th>Giáo viên</th>
+                <th>Trạng thái</th>
+                <th>Số chứng chỉ</th>
+                <th>Mã xác thực</th>
+                <th>Ngày cấp</th>
               </tr>
             </thead>
             <tbody>${certificateRows}</tbody>
           </table>
         </section>
 
-        <p class="footer">Bao cao duoc xuat tu Parent Portal cua Bee Academy.</p>
+        <p class="footer">Báo cáo được xuất từ Parent Portal của Bee Academy.</p>
       </div>
     </body>
   </html>`;

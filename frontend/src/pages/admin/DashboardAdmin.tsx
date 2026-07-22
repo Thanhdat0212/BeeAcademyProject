@@ -364,7 +364,7 @@ export default function DashboardAdmin() {
       const data = await listAdminComplaints();
       setComplaints(data.map(mapComplaintSummary));
     } catch (error) {
-      notify.error(error instanceof Error ? error.message : 'Khong tai duoc hop thu khieu nai');
+      notify.error(error instanceof Error ? error.message : 'Không tải được hộp thư khiếu nại');
     } finally {
       setLoadingComplaints(false);
     }
@@ -666,7 +666,7 @@ export default function DashboardAdmin() {
       setComplaintReply(mapped.responseNote || '');
       setComplaints(prev => prev.map(c => c.id === mapped.id ? mapped : c));
     } catch (error) {
-      notify.error(error instanceof Error ? error.message : 'Khong tai duoc chi tiet khieu nai');
+      notify.error(error instanceof Error ? error.message : 'Không tải được chi tiết khiếu nại');
     }
   }
 
@@ -689,7 +689,7 @@ export default function DashboardAdmin() {
       setComplaintFiles([]);
       notify.success('Đã gửi phản hồi');
     } catch (error) {
-      notify.error(error instanceof Error ? error.message : 'Khong the gui phan hoi');
+      notify.error(error instanceof Error ? error.message : 'Không thể gửi phản hồi');
     } finally {
       setUpdatingComplaint(false);
     }
@@ -709,13 +709,13 @@ export default function DashboardAdmin() {
       const updated = await updateAdminComplaintStatus(complaint.id, status);
       const mapped = mapComplaintThread(updated);
       setComplaints(prev => prev.map(c => c.id === mapped.id ? mapped : c));
-      notify.success(status === 'resolved' ? 'Da giai quyet khieu nai thanh cong!' : 'Da bac bo khieu nai!');
+      notify.success(status === 'resolved' ? 'Đã giải quyết khiếu nại thành công!' : 'Đã bác bỏ khiếu nại!');
       setComplaintModal({ isOpen: false, complaint: null });
       setComplaintReply('');
       setComplaintFiles([]);
       return;
     } catch (error) {
-      notify.error(error instanceof Error ? error.message : 'Khong the cap nhat khieu nai');
+      notify.error(error instanceof Error ? error.message : 'Không thể cập nhật khiếu nại');
       return;
     } finally {
       setUpdatingComplaint(false);
@@ -1679,7 +1679,7 @@ export default function DashboardAdmin() {
                         {loadingComplaints ? (
                           <tr>
                             <td colSpan={5} className="px-6 py-10 text-center text-on-surface-variant">
-                              Dang tai hop thu khieu nai...
+                              Đang tải hộp thư khiếu nại...
                             </td>
                           </tr>
                         ) : filteredComplaints.length === 0 ? (

@@ -186,7 +186,7 @@ public class QuizService {
                 .collect(Collectors.toCollection(ArrayList::new));
         if (selected.isEmpty()) {
             throw new BusinessException("QUIZ_HAS_NO_OBJECTIVE_QUESTIONS",
-                    "Quiz chua co cau hoi trac nghiem hop le de lam bai.",
+                    "Quiz chưa có câu hỏi trắc nghiệm hợp lệ để làm bài.",
                     HttpStatus.BAD_REQUEST);
         }
         if (config.getShuffleQuestions()) Collections.shuffle(selected);
@@ -591,7 +591,7 @@ public class QuizService {
         try {
             return objectMapper.readTree(metadataJson);
         } catch (Exception e) {
-            log.warn("Khong doc duoc metadata cau hoi quiz: {}", e.getMessage());
+            log.warn("Không đọc được metadata câu hỏi quiz: {}", e.getMessage());
             return null;
         }
     }
@@ -600,7 +600,7 @@ public class QuizService {
         List<Question> questions = questionRepository.findAllById(questionIds);
         if (questions.size() != questionIds.size()) {
             throw new BusinessException("INVALID_CONFIG",
-                    "Danh sach cau hoi chon thu cong co cau khong ton tai.");
+                    "Danh sách câu hỏi chọn thủ công có câu không tồn tại.");
         }
         boolean invalid = questions.stream().anyMatch(q ->
                 q.getTeacher() == null || !teacherId.equals(q.getTeacher().getId())
@@ -609,7 +609,7 @@ public class QuizService {
                         || !isPlayableQuizQuestion(q));
         if (invalid) {
             throw new BusinessException("INVALID_CONFIG",
-                    "Quiz chuong chi duoc chon cau trac nghiem active co dap an dung: trac nghiem, dung/sai, cau hoi anh hoac audio.");
+                    "Quiz chương chỉ được chọn câu trắc nghiệm active có đáp án đúng: trắc nghiệm, đúng/sai, câu hỏi ảnh hoặc audio.");
         }
     }
 

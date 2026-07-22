@@ -671,7 +671,7 @@ export default function TeacherRevenuePage() {
                         className="ml-3 text-sm text-green-700 font-bold hover:underline inline-flex items-center gap-1"
                       >
                         <Download className="w-4 h-4" />
-                        Xuáº¥t Excel
+                        Xuất Excel
                       </button>
                     )}
                   </div>

@@ -125,20 +125,20 @@ public class QaMessage {
         if (content == null || content.isBlank()) {
             throw new BusinessException(
                     "MESSAGE_CONTENT_REQUIRED",
-                    "Vui long nhap noi dung tin nhan.",
+                    "Vui lòng nhập nội dung tin nhắn.",
                     HttpStatus.BAD_REQUEST);
         }
         String trimmed = content.trim();
         if (trimmed.length() > maxLength) {
             throw new BusinessException(
                     "MESSAGE_TOO_LONG",
-                    "Tin nhan vuot qua gioi han ky tu cho phep.",
+                    "Tin nhắn vượt quá giới hạn ký tự cho phép.",
                     HttpStatus.BAD_REQUEST);
         }
         if (containsPolicyViolation(trimmed)) {
             throw new BusinessException(
                     "MESSAGE_POLICY_VIOLATION",
-                    "Tin nhan co noi dung vi pham chinh sach an toan nen khong the gui.",
+                    "Tin nhắn có nội dung vi phạm chính sách an toàn nên không thể gửi.",
                     HttpStatus.BAD_REQUEST);
         }
     }

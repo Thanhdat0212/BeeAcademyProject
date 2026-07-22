@@ -126,7 +126,7 @@ export default function CourseReviewsPanel({
       return;
     }
     if (effectiveProgressPct < 30 && !reviewSummary?.myReview) {
-      notify.error('Ban can hoan thanh it nhat 30% noi dung khoa hoc truoc khi danh gia.');
+      notify.error('Bạn cần hoàn thành ít nhất 30% nội dung khóa học trước khi đánh giá.');
       return;
     }
     if (draftRating < 1 || draftRating > 5) {
@@ -135,7 +135,7 @@ export default function CourseReviewsPanel({
     }
 
     if (draftComment.trim().length < 20) {
-      notify.error('Nhan xet can co it nhat 20 ky tu.');
+      notify.error('Nhận xét cần có ít nhất 20 ký tự.');
       return;
     }
 
@@ -235,7 +235,7 @@ export default function CourseReviewsPanel({
       {canSubmitReview && !canWriteReview && isOwnedCourse && (
         <section className="rounded-3xl border border-amber-400/30 bg-amber-50 p-5">
           <p className="text-sm text-amber-900">
-            Hoan thanh it nhat 30% noi dung khoa hoc de viet danh gia. Tien do hien tai: {Math.max(0, Math.round(effectiveProgressPct))}%.
+            Hoàn thành ít nhất 30% nội dung khóa học để viết đánh giá. Tiến độ hiện tại: {Math.max(0, Math.round(effectiveProgressPct))}%.
           </p>
         </section>
       )}

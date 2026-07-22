@@ -37,7 +37,7 @@ class LessonResponseTest {
 
     @Test
     void freeLessonDoesNotExposeDocumentStorageUrlForGuestPreview() {
-        Lesson lesson = Lesson.createNew(null, "Bai hoc thu", null, 1, true);
+        Lesson lesson = Lesson.createNew(null, "Bài học thu", null, 1, true);
         lesson.setVideoEmbedUrl("https://video.example.com/embed/free");
         CourseDocument document = CourseDocument.create(
                 lesson,

@@ -12,20 +12,20 @@ import jakarta.validation.constraints.DecimalMin;
 import java.util.List;
 import java.util.UUID;
 
-/** Tao cau hoi moi vao ngan hang cau hoi. */
+/** Tạo câu hỏi mới vào ngân hàng câu hỏi. */
 public record CreateQuestionRequest(
 
-        @NotNull(message = "Vui long chon mon hoc")
+        @NotNull(message = "Vui lòng chọn môn học")
         UUID categoryId,
 
-        @NotNull(message = "Vui long chon lop")
+        @NotNull(message = "Vui lòng chọn lớp")
         Integer grade,
 
         UUID questionBankId,
 
         UUID chapterId,
 
-        @NotBlank(message = "Noi dung cau hoi khong duoc trong")
+        @NotBlank(message = "Nội dung câu hỏi không được trống")
         @Size(max = 5000)
         String content,
 
@@ -33,25 +33,25 @@ public record CreateQuestionRequest(
         String explanation,
 
         @NotNull
-        @Pattern(regexp = "easy|medium|hard", message = "Do kho phai la: easy, medium, hard")
+        @Pattern(regexp = "easy|medium|hard", message = "Độ khó phải là: easy, medium, hard")
         String difficulty,
 
         @NotNull
         @Pattern(
                 regexp = "multiple_choice|true_false|fill_in_blank|matching|essay|essay_short|essay_long|image_question|formula_question|audio_question|file_upload",
-                message = "Loai cau hoi khong hop le")
+                message = "Loại câu hỏi không hợp lệ")
         String type,
 
-        @Size(max = 6, message = "Cau hoi trac nghiem co toi da 6 dap an")
+        @Size(max = 6, message = "Câu hỏi trắc nghiệm có tối đa 6 đáp án")
         @Valid
         List<ChoiceRequest> choices,
 
-        @DecimalMin(value = "0.01", message = "Diem cau hoi phai lon hon 0")
-        @DecimalMax(value = "100", message = "Diem cau hoi toi da la 100")
+        @DecimalMin(value = "0.01", message = "Điểm câu hỏi phải lớn hơn 0")
+        @DecimalMax(value = "100", message = "Điểm câu hỏi tối đa là 100")
         Double defaultPoints,
 
-        @Size(max = 20, message = "Moi cau hoi co toi da 20 tag")
-        List<@Size(max = 50, message = "Tag toi da 50 ky tu") String> tags,
+        @Size(max = 20, message = "Mỗi câu hỏi có tối đa 20 tag")
+        List<@Size(max = 50, message = "Tag tối đa 50 ký tự") String> tags,
 
         JsonNode metadata
 ) {

@@ -47,6 +47,6 @@ public class CertificateController {
             @PathVariable UUID courseId) {
         return ApiResponse.ok(
                 certificateService.requestIssue(courseId, CurrentUser.required()),
-                "Da cap chung chi khoa hoc");
+                "Đã cấp chứng chỉ khóa học");
     }
 }

@@ -68,7 +68,7 @@ public class CourseReviewService {
         if (course.getTeacher() == null || !course.getTeacher().getId().equals(me.userId())) {
             throw new BusinessException(
                     "TEACHER_COURSE_REVIEW_FORBIDDEN",
-                    "Ban khong co quyen xem danh gia cua khoa hoc nay.",
+                    "Bạn không có quyền xem đánh giá của khóa học này.",
                     HttpStatus.FORBIDDEN
             );
         }
@@ -109,7 +109,7 @@ public class CourseReviewService {
         if (progressPct < 30) {
             throw new BusinessException(
                     "COURSE_REVIEW_PROGRESS_NOT_ELIGIBLE",
-                    "Ban can hoan thanh it nhat 30% noi dung khoa hoc truoc khi danh gia.",
+                    "Bạn cần hoàn thành ít nhất 30% nội dung khóa học trước khi đánh giá.",
                     HttpStatus.FORBIDDEN
             );
         }
@@ -154,7 +154,7 @@ public class CourseReviewService {
                 .orElseThrow(() -> new ResourceNotFoundException("CourseReview", reviewId));
         if (review.getModerationStatus() != CourseReviewModerationStatus.PENDING_MODERATION) {
             throw new BusinessException("COURSE_REVIEW_NOT_PENDING_MODERATION",
-                    "Danh gia nay khong cho Admin duyet.", HttpStatus.BAD_REQUEST);
+                    "Đánh giá này không cho Admin duyệt.", HttpStatus.BAD_REQUEST);
         }
 
         CourseReviewModerationStatus nextStatus = request.decision()
@@ -174,11 +174,11 @@ public class CourseReviewService {
                 saved.getStudent().getId(),
                 "course_review_moderated",
                 nextStatus == CourseReviewModerationStatus.PUBLISHED
-                        ? "Danh gia khoa hoc da duoc hien thi"
-                        : "Danh gia khoa hoc chua duoc phe duyet",
+                        ? "Đánh giá khóa học đã được hiển thị"
+                        : "Đánh giá khóa học chưa được phê duyệt",
                 nextStatus == CourseReviewModerationStatus.PUBLISHED
-                        ? "Danh gia cua ban da duoc phe duyet va hien thi cong khai."
-                        : "Danh gia cua ban khong duoc hien thi cong khai."
+                        ? "Đánh giá của bạn đã được phê duyệt và hiển thị công khai."
+                        : "Đánh giá của bạn không được hiển thị công khai."
                         + (saved.getModerationReason() == null ? "" : " Ly do: " + saved.getModerationReason()),
                 "/courses/" + saved.getCourse().getId());
         return CourseReviewResponse.fromEntity(saved);
@@ -215,7 +215,7 @@ public class CourseReviewService {
     private void ensureAdminRole(AuthenticatedUser me) {
         if (me == null || !"admin".equalsIgnoreCase(me.role())) {
             throw new BusinessException("COURSE_REVIEW_MODERATION_FORBIDDEN",
-                    "Chi Admin moi co quyen duyet danh gia.", HttpStatus.FORBIDDEN);
+                    "Chỉ Admin mới có quyền duyệt đánh giá.", HttpStatus.FORBIDDEN);
         }
     }
 
@@ -226,9 +226,9 @@ public class CourseReviewService {
         userNotificationService.notify(
                 course.getTeacher().getId(),
                 pending ? "course_review_pending_moderation" : "course_review_received",
-                pending ? "Co danh gia can kiem duyet" : "Co danh gia khoa hoc moi",
-                (student.getFullName() == null ? "Hoc sinh" : student.getFullName())
-                        + (pending ? " vua gui danh gia dang cho Admin duyet." : " vua danh gia khoa hoc cua ban."),
+                pending ? "Có đánh giá cần kiểm duyệt" : "Có đánh giá khóa học mới",
+                (student.getFullName() == null ? "Học sinh" : student.getFullName())
+                        + (pending ? " vừa gửi đánh giá đang chờ Admin duyệt." : " vừa đánh giá khóa học của bạn."),
                 "/teacher/courses/" + course.getId() + "/reviews");
     }
 

@@ -163,7 +163,7 @@ public class ExamService {
         ExamConfig config = examConfigVersionService.forEnrollment(enrollment, slotIndex)
                 .filter(candidate -> isExamUnlockedForStudent(candidate, me.userId()))
                 .orElseThrow(() -> new BusinessException("EXAM_NOT_FOUND",
-                        "Bai kiem tra chua duoc mo. Hay hoan thanh 100% noi dung trong pham vi.",
+                        "Bài kiểm tra chưa được mở. Hãy hoàn thành 100% nội dung trong phạm vi.",
                         HttpStatus.FORBIDDEN));
         examRetakeService.enforceAttemptAllowed(enrollment, config);
         return StudentExamResponse.fromEntity(config, objectMapper, me.userId());
@@ -179,13 +179,13 @@ public class ExamService {
         Enrollment enrollment = requireStudentEnrollment(courseId, me.userId());
         if (request == null || request.answers() == null) {
             throw new BusinessException("INVALID_SUBMISSION",
-                    "Thieu danh sach cau tra loi.");
+                    "Thiếu danh sách câu trả lời.");
         }
         validateAnswerImages(me.userId(), request.answers());
 
         ExamConfig config = examConfigVersionService.forEnrollment(enrollment, slotIndex)
                 .orElseThrow(() -> new BusinessException("EXAM_NOT_FOUND",
-                        "Chua co bai kiem tra cho vi tri nay.", HttpStatus.NOT_FOUND));
+                        "Chưa có bài kiểm tra cho vị trí này.", HttpStatus.NOT_FOUND));
         requireExamUnlockedForStudent(config, me.userId());
 
         int submittedCount = examRetakeService.enforceAttemptAllowed(enrollment, config);
@@ -297,13 +297,13 @@ public class ExamService {
         validateSlot(slotIndex);
         Enrollment enrollment = requireStudentEnrollment(courseId, me.userId());
         if (request == null || request.answers() == null) {
-            throw new BusinessException("INVALID_DRAFT", "Thieu danh sach cau tra loi.");
+            throw new BusinessException("INVALID_DRAFT", "Thiếu danh sách câu trả lời.");
         }
         validateAnswerImages(me.userId(), request.answers());
 
         ExamConfig config = examConfigVersionService.forEnrollment(enrollment, slotIndex)
                 .orElseThrow(() -> new BusinessException("EXAM_NOT_FOUND",
-                        "Chua co bai kiem tra cho vi tri nay.", HttpStatus.NOT_FOUND));
+                        "Chưa có bài kiểm tra cho vị trí này.", HttpStatus.NOT_FOUND));
         requireExamUnlockedForStudent(config, me.userId());
 
         int submittedCount = examRetakeService.enforceAttemptAllowed(enrollment, config);
@@ -363,13 +363,13 @@ public class ExamService {
             return;
         }
         String studentName = student.getFullName() == null || student.getFullName().isBlank()
-                ? "Hoc sinh"
+                ? "Học sinh"
                 : student.getFullName().trim();
         userNotificationService.notify(
                 config.getCourse().getTeacher().getId(),
                 "exam_essay_submission",
-                "Co bai tu luan moi can cham",
-                "%s vua nop bai kiem tra \"%s\" va co phan tu luan can giao vien cham."
+                "Có bài tự luận mới cần chấm",
+                "%s vừa nộp bài kiểm tra \"%s\" và có phần tự luận cần giáo viên chấm."
                         .formatted(studentName, config.getName()),
                 "/teacher/grades"
         );
@@ -383,10 +383,10 @@ public class ExamService {
             MultipartFile file) {
         requireStudentEnrollment(courseId, me.userId());
         if (file == null || file.isEmpty()) {
-            throw new BusinessException("FILE_REQUIRED", "Vui long chon anh.");
+            throw new BusinessException("FILE_REQUIRED", "Vui lòng chọn ảnh.");
         }
         if (file.getSize() > MAX_EXAM_ANSWER_IMAGE_BYTES) {
-            throw new BusinessException("FILE_TOO_LARGE", "Anh dap an toi da 5 MB.");
+            throw new BusinessException("FILE_TOO_LARGE", "Ảnh đáp án toi da 5 MB.");
         }
         String contentType = file.getContentType();
         if (contentType == null || !ALLOWED_EXAM_ANSWER_IMAGE_MIME.contains(contentType)) {
@@ -606,7 +606,7 @@ public class ExamService {
         Double oldScore = attempt.getEffectiveScorePercent() != null
                 ? attempt.getEffectiveScorePercent().doubleValue()
                 : null;
-        validateGradeRevision("exam_attempt", attempt.getGradedAt(), request.revisionReason());
+        validateGradeRevision("bài kiểm tra", attempt.getGradedAt(), request.revisionReason());
 
         attempt.grade(request.scorePercent(), request.feedback());
         ExamAttempt saved = examAttemptRepository.save(attempt);
@@ -657,12 +657,12 @@ public class ExamService {
         }
         if (gradedAt.isBefore(Instant.now().minus(24, ChronoUnit.HOURS))) {
             throw new BusinessException("GRADE_REVISION_WINDOW_EXPIRED",
-                    "Chi duoc sua diem trong vong 24 gio sau khi cham.",
+                    "Chỉ được sửa điểm trong vòng 24 giờ sau khi chấm.",
                     HttpStatus.CONFLICT);
         }
         if (reason == null || reason.isBlank()) {
             throw new BusinessException("GRADE_REVISION_REASON_REQUIRED",
-                    "Can nhap ly do khi sua diem " + targetType + ".",
+                    "Cần nhập lý do khi sửa điểm " + targetType + ".",
                     HttpStatus.BAD_REQUEST);
         }
     }
@@ -836,7 +836,7 @@ public class ExamService {
                 + "/qa-images/" + studentId + "/";
         if (!url.contains(examImagePath) && !url.contains(qaImagePath)) {
             throw new BusinessException("INVALID_ATTACHMENT",
-                    "Anh dap an khong hop le.", HttpStatus.BAD_REQUEST);
+                    "Ảnh đáp án không hợp lệ.", HttpStatus.BAD_REQUEST);
         }
     }
 
@@ -1036,7 +1036,7 @@ public class ExamService {
             throw e;
         } catch (Exception e) {
             throw new BusinessException("AI_SCHEMA_INVALID",
-                    "AI Engine tra ve cau hoi khong dung schema, chua them vao bai kiem tra.",
+                    "AI Engine trả về câu hỏi không đúng schema, chưa thêm vào bài kiểm tra.",
                     HttpStatus.BAD_GATEWAY);
         }
     }
@@ -1151,7 +1151,7 @@ public class ExamService {
         return enrollmentRepository.findByStudentIdAndCourseId(studentId, courseId)
                 .orElseThrow(() -> new BusinessException(
                         "COURSE_NOT_ENROLLED",
-                        "Ban can ghi danh khoa hoc truoc khi lam bai kiem tra.",
+                        "Bạn cần ghi danh khóa học trước khi làm bài kiểm tra.",
                         HttpStatus.FORBIDDEN));
     }
 
@@ -1177,18 +1177,18 @@ public class ExamService {
             UUID questionId = UUID.fromString(q.id());
             Question question = questionRepository.findById(questionId)
                     .orElseThrow(() -> new BusinessException("QUESTION_NOT_FROM_BANK",
-                            "Tat ca cau hoi bai kiem tra phai lay tu ngan hang cau hoi."));
+                            "Tất cả câu hỏi bài kiểm tra phải lấy từ ngân hàng câu hỏi."));
             if (!"active".equals(question.getStatus())) {
                 throw new BusinessException("QUESTION_INACTIVE",
-                        "Cau hoi da bi an khong the dua vao bai kiem tra.");
+                        "Câu hỏi đã bị ẩn không thể đưa vào bài kiểm tra.");
             }
             if (question.getTeacher() == null || !teacherId.equals(question.getTeacher().getId())) {
                 throw new BusinessException("QUESTION_NOT_FROM_BANK",
-                        "Tat ca cau hoi bai kiem tra phai lay tu ngan hang cau hoi cua giao vien.");
+                        "Tất cả câu hỏi bài kiểm tra phải lấy từ ngân hàng câu hỏi của giáo viên.");
             }
         } catch (IllegalArgumentException ex) {
             throw new BusinessException("QUESTION_NOT_FROM_BANK",
-                    "Tat ca cau hoi bai kiem tra phai lay tu ngan hang cau hoi.");
+                    "Tất cả câu hỏi bài kiểm tra phải lấy từ ngân hàng câu hỏi.");
         }
     }
 
@@ -1222,7 +1222,7 @@ public class ExamService {
         }
         if (req.questions().size() < 10 && !req.confirmUnderTenQuestions()) {
             throw new BusinessException("EXAM_UNDER_MIN_QUESTIONS",
-                    "Bai kiem tra co duoi 10 cau. Giao vien can xac nhan truoc khi luu.",
+                    "Bài kiểm tra có dưới 10 câu. Giáo viên cần xác nhận trước khi lưu.",
                     HttpStatus.BAD_REQUEST);
         }
         for (int i = 0; i < req.questions().size(); i++) {
@@ -1236,7 +1236,7 @@ public class ExamService {
             if (MANUAL_EXAM_TYPES.contains(q.type())) {
                 if (!hasManualRubric(q)) {
                     throw new BusinessException("ESSAY_RUBRIC_REQUIRED",
-                            "Cau " + (i + 1) + " tu luan phai co barem cham.",
+                            "Câu " + (i + 1) + " tự luận phải có barem chấm.",
                             HttpStatus.BAD_REQUEST);
                 }
                 continue;
@@ -1245,17 +1245,17 @@ public class ExamService {
                 if (q.options() == null || q.options().size() < 2
                         || q.correctIndices() == null || q.correctIndices().isEmpty()) {
                     throw new BusinessException("INVALID_QUESTIONS",
-                            "Cau " + (i + 1) + " trac nghiem phai co lua chon va dap an dung.");
+                            "Câu " + (i + 1) + " trắc nghiệm phải có lựa chọn và đáp án đúng.");
                 }
                 if ("true_false".equals(q.type()) && q.correctIndices().size() != 1) {
                     throw new BusinessException("INVALID_QUESTIONS",
-                            "Cau " + (i + 1) + " dung sai phai co dung 1 dap an dung.");
+                            "Câu " + (i + 1) + " đúng/sai phải có đúng 1 đáp án đúng.");
                 }
                 int optionCount = q.options().size();
                 for (Integer correctIndex : q.correctIndices()) {
                     if (correctIndex == null || correctIndex < 0 || correctIndex >= optionCount) {
                         throw new BusinessException("INVALID_QUESTIONS",
-                                "Cau " + (i + 1) + " co dap an dung khong hop le.");
+                                "Câu " + (i + 1) + " có đáp án đúng không hợp lệ.");
                     }
                 }
                 continue;
@@ -1265,7 +1265,7 @@ public class ExamService {
                         || !q.metadata().get("acceptedAnswers").isArray()
                         || q.metadata().get("acceptedAnswers").isEmpty()) {
                     throw new BusinessException("INVALID_QUESTIONS",
-                            "Cau " + (i + 1) + " dien cho trong phai co dap an chap nhan.");
+                            "Câu " + (i + 1) + " điền chỗ trống phải có đáp án chấp nhận.");
                 }
                 continue;
             }
@@ -1274,12 +1274,12 @@ public class ExamService {
                         || !q.metadata().get("matchingPairs").isArray()
                         || q.metadata().get("matchingPairs").size() < 2) {
                     throw new BusinessException("INVALID_QUESTIONS",
-                            "Cau " + (i + 1) + " noi cot phai co it nhat 2 cap dap an.");
+                            "Câu " + (i + 1) + " nối cột phải có ít nhất 2 cặp đáp án.");
                 }
                 continue;
             }
             throw new BusinessException("INVALID_QUESTIONS",
-                    "Cau " + (i + 1) + " co loai cau hoi khong duoc ho tro.");
+                    "Câu " + (i + 1) + " có loại câu hỏi không được hỗ trợ.");
         }
         validateExamPointsAndSections(req);
     }
@@ -1291,17 +1291,17 @@ public class ExamService {
         String aiStatus = q.metadata().path("aiStatus").asText("");
         if ("rejected".equals(aiStatus)) {
             throw new BusinessException("AI_QUESTION_REJECTED",
-                    "Cau " + position + " da bi tu choi, khong the luu vao bai kiem tra.",
+                    "Câu " + position + " đã bị từ chối, không thể lưu vào bài kiểm tra.",
                     HttpStatus.BAD_REQUEST);
         }
         if (!AI_STATUS_APPROVED.equals(aiStatus)) {
             throw new BusinessException("AI_QUESTION_NOT_APPROVED",
-                    "Cau " + position + " do AI tao phai duoc giao vien approve truoc khi luu.",
+                    "Câu " + position + " do AI tạo phải được giáo viên approve trước khi lưu.",
                     HttpStatus.BAD_REQUEST);
         }
         if (!q.metadata().path("sourceRefs").isArray() || q.metadata().path("sourceRefs").isEmpty()) {
             throw new BusinessException("AI_SOURCE_REFS_REQUIRED",
-                    "Cau " + position + " do AI tao phai co source_refs.",
+                    "Câu " + position + " do AI tạo phải có source_refs.",
                     HttpStatus.BAD_REQUEST);
         }
     }
@@ -1341,7 +1341,7 @@ public class ExamService {
                 .count();
         if (objectiveCount == 0 || manualCount == 0) {
             throw new BusinessException("INVALID_QUESTIONS",
-                    "Bai kiem tra phai co ca phan tu dong cham va phan can giao vien cham.");
+                    "Bài kiểm tra phải có cả phần tự động chấm và phần cần giáo viên chấm.");
         }
         double totalPoints = req.questions().stream()
                 .map(ExamConfigRequest.ExamQuestionRequest::points)
@@ -1350,7 +1350,7 @@ public class ExamService {
                 .sum();
         if (Math.abs(totalPoints - EXAM_TOTAL_POINTS) > 0.001) {
             throw new BusinessException("INVALID_POINTS",
-                    "Tong diem phan trac nghiem va tu luan phai bang 10 diem.");
+                    "Tổng điểm phần trắc nghiệm và tự luận phải bằng 10 điểm.");
         }
     }
 
@@ -1360,7 +1360,7 @@ public class ExamService {
         int endIndex = indexOfChapter(chapters, placementChapter.getId());
         if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
             throw new BusinessException("INVALID_EXAM_SCOPE",
-                    "Chuong bat dau phai dung truoc hoac bang chuong ket thuc.");
+                    "Chương bắt đầu phải đứng trước hoặc bằng chương kết thúc.");
         }
     }
 
@@ -1386,25 +1386,25 @@ public class ExamService {
         ChapterRange current = ranges.get(slotIndex);
         if (slotIndex == 0 && current.start() != 0) {
             throw new BusinessException("INVALID_EXAM_SCOPE_COVERAGE",
-                    "Bai kiem tra dau tien phai bat dau tu chuong dau tien.",
+                    "Bài kiểm tra đầu tiên phải bắt đầu từ chương đầu tiên.",
                     HttpStatus.BAD_REQUEST);
         }
         if (slotIndex == FINAL_EXAM_SLOT_INDEX && current.end() != chapters.size() - 1) {
             throw new BusinessException("INVALID_EXAM_SCOPE_COVERAGE",
-                    "Bai kiem tra cuoi ky 2 phai ket thuc o chuong cuoi cung.",
+                    "Bài kiểm tra cuối kỳ 2 phải kết thúc ở chương cuối cùng.",
                     HttpStatus.BAD_REQUEST);
         }
 
         ChapterRange previous = ranges.get(slotIndex - 1);
         if (previous != null && current.start() > previous.end() + 1) {
             throw new BusinessException("INVALID_EXAM_SCOPE_COVERAGE",
-                    "Pham vi bai kiem tra khong duoc bo trong chuong giua slot truoc va slot hien tai.",
+                    "Phạm vi bài kiểm tra không được bỏ trống chương giữa slot trước và slot hiện tại.",
                     HttpStatus.BAD_REQUEST);
         }
         ChapterRange next = ranges.get(slotIndex + 1);
         if (next != null && next.start() > current.end() + 1) {
             throw new BusinessException("INVALID_EXAM_SCOPE_COVERAGE",
-                    "Pham vi bai kiem tra khong duoc bo trong chuong giua slot hien tai va slot sau.",
+                    "Phạm vi bài kiểm tra không được bỏ trống chương giữa slot hiện tại và slot sau.",
                     HttpStatus.BAD_REQUEST);
         }
     }
@@ -1423,20 +1423,20 @@ public class ExamService {
                                           Chapter placementChapter, String examType) {
         if (chapters.size() < 4) {
             throw new BusinessException("COURSE_MIN_CHAPTERS_REQUIRED",
-                    "Khoa hoc phai co toi thieu 4 chuong truoc khi tao bai kiem tra.",
+                    "Khóa học phải có tối thiểu 4 chương trước khi tạo bài kiểm tra.",
                     HttpStatus.BAD_REQUEST);
         }
         List<Chapter> scopedChapters = scopedChapters(chapters,
                 scopeStartChapter.getId(), placementChapter.getId());
         if (scopedChapters.isEmpty()) {
             throw new BusinessException("INVALID_EXAM_SCOPE",
-                    "Pham vi bai kiem tra khong hop le.",
+                    "Phạm vi bài kiểm tra không hợp lệ.",
                     HttpStatus.BAD_REQUEST);
         }
         for (Chapter chapter : scopedChapters) {
             if (chapter.getLessons().isEmpty()) {
                 throw new BusinessException("CHAPTER_LESSON_REQUIRED",
-                        "Moi chuong trong pham vi bai kiem tra phai co it nhat 1 bai hoc.",
+                        "Mỗi chương trong phạm vi bài kiểm tra phải có ít nhất 1 bài học.",
                         HttpStatus.BAD_REQUEST);
             }
         }
@@ -1445,7 +1445,7 @@ public class ExamService {
     private void requireExamUnlockedForStudent(ExamConfig config, UUID studentId) {
         if (!isExamUnlockedForStudent(config, studentId)) {
             throw new BusinessException("EXAM_LOCKED",
-                    "Bai kiem tra chi mo khi ban hoan thanh 100% noi dung trong pham vi.",
+                    "Bài kiểm tra chỉ mở khi bạn hoàn thành 100% nội dung trong phạm vi.",
                     HttpStatus.FORBIDDEN);
         }
     }
@@ -1540,18 +1540,18 @@ public class ExamService {
             int typedTotal = chapterObjectiveCount(chapterReq) + chapterEssayCount(chapterReq);
             if (typedTotal > 0 && typedTotal != chapterReq.totalCount()) {
                 throw new BusinessException("INVALID_RANDOM_CONFIG",
-                        "Tong so cau trac nghiem va tu luan phai bang so cau cua chuong.");
+                        "Tổng số câu trắc nghiệm và tự luận phải bằng số câu của chương.");
             }
             objectiveTotal += chapterObjectiveCount(chapterReq);
             manualTotal += chapterEssayCount(chapterReq);
         }
         if (objectiveTotal <= 0 || manualTotal <= 0) {
             throw new BusinessException("INVALID_RANDOM_CONFIG",
-                    "Bai kiem tra phai co ca phan tu dong cham va phan can giao vien cham.");
+                    "Bài kiểm tra phải có cả phần tự động chấm và phần cần giáo viên chấm.");
         }
         if (Math.abs(req.objectivePoints() + req.essayPoints() - EXAM_TOTAL_POINTS) > 0.001) {
             throw new BusinessException("INVALID_POINTS",
-                    "Tong diem phan trac nghiem va tu luan phai bang 10 diem.");
+                    "Tổng điểm phần trắc nghiệm và tự luận phải bằng 10 điểm.");
         }
         if (total <= 0) {
             throw new BusinessException("INVALID_RANDOM_CONFIG",
@@ -1620,7 +1620,7 @@ public class ExamService {
             List<Question> selected = new ArrayList<>();
             selected.addAll(pickRandomQuestionsByChapterAndTypes(
                     teacherId, chapterId, List.of("multiple_choice"),
-                    multipleChoiceCount, "trac nghiem"));
+                    multipleChoiceCount, "trắc nghiệm"));
             selected.addAll(pickRandomQuestionsByChapterAndTypes(
                     teacherId, chapterId, List.of("true_false"),
                     trueFalseCount, "dung sai"));
@@ -1629,7 +1629,7 @@ public class ExamService {
                     fillInBlankCount, "dien cho trong"));
             selected.addAll(pickRandomQuestionsByChapterAndTypes(
                     teacherId, chapterId, RANDOM_SUPPORTED_ESSAY_TYPES,
-                    essayCount, "tu luan"));
+                    essayCount, "tự luận"));
             Collections.shuffle(selected);
             return selected;
         }
@@ -1637,10 +1637,10 @@ public class ExamService {
             List<Question> selected = new ArrayList<>();
             selected.addAll(pickRandomQuestionsByChapterAndTypes(
                     teacherId, chapterId, RANDOM_SUPPORTED_OBJECTIVE_TYPES,
-                    objectiveCount, "trac nghiem"));
+                    objectiveCount, "trắc nghiệm"));
             selected.addAll(pickRandomQuestionsByChapterAndTypes(
                     teacherId, chapterId, RANDOM_SUPPORTED_ESSAY_TYPES,
-                    essayCount, "tu luan"));
+                    essayCount, "tự luận"));
             Collections.shuffle(selected);
             return selected;
         }
@@ -1662,7 +1662,7 @@ public class ExamService {
                 questionRepository.findActiveByTeacherAndChapterAndTypes(teacherId, chapterId, types));
         if (pool.size() < count) {
             throw new BusinessException("QUESTION_BANK_NOT_ENOUGH",
-                    "Ngan hang cau hoi chua du cau " + label + ": can " + count
+                    "Ngân hàng câu hỏi chưa đủ câu " + label + ": cần " + count
                             + ", hien co " + pool.size() + ".");
         }
         Collections.shuffle(pool);

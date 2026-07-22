@@ -137,7 +137,7 @@ function printInvoice(history: ParentPaymentHistoryResponse, transaction: Parent
   const sellerName = invoice?.sellerName || 'Bee Academy';
   const sellerTaxCode = invoice?.sellerTaxCode || 'N/A';
   const buyerName = invoice?.buyerName || payerLabel(transaction);
-  const legalDescription = invoice?.legalDescription || `Hoc phi khoa hoc ${transaction.courseTitle}`;
+  const legalDescription = invoice?.legalDescription || `Học phí khóa học ${transaction.courseTitle}`;
   const currency = invoice?.currency || 'VND';
   const invoiceIssuedAt = invoice?.issuedAt || transaction.paidAt || transaction.createdAt;
   const html = `<!doctype html>
@@ -282,7 +282,7 @@ function printInvoice(history: ParentPaymentHistoryResponse, transaction: Parent
           <div>
             <p class="brand">Bee Academy</p>
             <h1>Hoa don dien tu</h1>
-            <p class="muted">Lich su thanh toan khoa hoc cua hoc sinh</p>
+            <p class="muted">Lịch sử thanh toán khóa học của học sinh</p>
           </div>
           <div class="invoice-code">
             <strong>${escapeHtml(transaction.invoiceCode)}</strong><br />
@@ -302,7 +302,7 @@ function printInvoice(history: ParentPaymentHistoryResponse, transaction: Parent
             <p class="muted">${escapeHtml(payerLabel(transaction))}</p>
           </div>
           <div class="box">
-            <span>Hoc sinh</span>
+            <span>Học sinh</span>
             <strong>${escapeHtml(history.studentName)}</strong>
             <p class="muted">${escapeHtml(history.gradeLabel || formatGrades(transaction.grades, ''))}</p>
           </div>
@@ -312,15 +312,15 @@ function printInvoice(history: ParentPaymentHistoryResponse, transaction: Parent
             <p class="muted">Ma don: ${escapeHtml(transaction.paymentRef)}</p>
           </div>
           <div class="box">
-            <span>Ngay giao dich</span>
+            <span>Ngày giao dịch</span>
             <strong>${escapeHtml(formatDateTime(transactionDate(transaction)))}</strong>
           </div>
           <div class="box">
-            <span>Trang thai</span>
+            <span>Trạng thái</span>
             <strong>${escapeHtml(status)}</strong>
           </div>
           <div class="box">
-            <span>Noi dung hoa don</span>
+            <span>Nội dung hóa đơn</span>
             <strong>${escapeHtml(legalDescription)}</strong>
             <p class="muted">Tien te: ${escapeHtml(currency)}</p>
           </div>
@@ -329,9 +329,9 @@ function printInvoice(history: ParentPaymentHistoryResponse, transaction: Parent
         <table>
           <thead>
             <tr>
-              <th>Khoa hoc</th>
-              <th>Giao vien</th>
-              <th>Tien do hien tai</th>
+              <th>Khóa học</th>
+              <th>Giáo viên</th>
+              <th>Tiến độ hien tai</th>
               <th class="right">So tien</th>
             </tr>
           </thead>
@@ -356,8 +356,8 @@ function printInvoice(history: ParentPaymentHistoryResponse, transaction: Parent
         </div>
 
         <p class="footer">
-          Chung tu nay duoc tao tu Bee Academy voi thong tin hoa don tra ve tu he thong thanh toan va lich su giao dich cua phu huynh.
-          Vui long doi chieu voi ma don PayOS ${escapeHtml(transaction.orderCode)} khi can ho tro.
+          Chứng từ này được tạo từ Bee Academy với thông tin hóa đơn trả về từ hệ thống thanh toán và lịch sử giao dịch của phụ huynh.
+          Vui lòng đối chiếu với mã đơn PayOS ${escapeHtml(transaction.orderCode)} khi cần hỗ trợ.
         </p>
       </main>
       <script>

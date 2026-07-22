@@ -67,7 +67,7 @@ public class Question {
     @JoinColumn(name = "category_id")
     private Category category;
 
-    /** Lop hoc cua ngan hang cau hoi, vi du 6, 7, 8, 9. */
+    /** Lớp học của ngân hàng câu hỏi, ví dụ 6, 7, 8, 9. */
     @Column(name = "grade", nullable = false)
     private Integer grade;
 

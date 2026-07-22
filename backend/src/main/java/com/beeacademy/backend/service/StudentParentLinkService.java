@@ -164,7 +164,7 @@ public class StudentParentLinkService {
             auditStatusChange(savedLink, studentId, "expire_invitation", oldStatus, savedLink.getStatus());
             throw new BusinessException(
                     "PARENT_LINK_INVITATION_EXPIRED",
-                    "Yeu cau lien ket da het han. Vui long nho phu huynh gui lai loi moi.",
+                    "Yêu cầu liên kết đã hết hạn. Vui lòng nhờ phụ huynh gửi lại lời mời.",
                     HttpStatus.GONE);
         }
 
@@ -205,11 +205,11 @@ public class StudentParentLinkService {
         Profile student = link.getStudent();
         String studentName = studentDisplayName(student);
         String title = accepted
-                ? "Hoc sinh da chap nhan lien ket"
-                : "Hoc sinh da tu choi lien ket";
+                ? "Học sinh đã chấp nhận liên kết"
+                : "Học sinh đã từ chối liên kết";
         String body = accepted
-                ? "%s da chap nhan loi moi lien ket phu huynh.".formatted(studentName)
-                : "%s da tu choi loi moi lien ket phu huynh.".formatted(studentName);
+                ? "%s đã chấp nhận lời mời liên kết phụ huynh.".formatted(studentName)
+                : "%s đã từ chối lời mời liên kết phụ huynh.".formatted(studentName);
 
         notificationService.notify(
                 parent.getId(),
@@ -223,8 +223,8 @@ public class StudentParentLinkService {
         notificationService.notify(
                 link.getParent().getId(),
                 "parent_link_revoked",
-                "Lien ket da bi huy",
-                "Lien ket voi " + studentDisplayName(link.getStudent()) + " da bi huy.",
+                "Liên kết đã bị hủy",
+                "Liên kết với " + studentDisplayName(link.getStudent()) + " đã bị hủy.",
                 "/parent/link");
     }
 
@@ -320,7 +320,7 @@ public class StudentParentLinkService {
 
     private String studentDisplayName(Profile profile) {
         if (profile == null || profile.getFullName() == null || profile.getFullName().isBlank()) {
-            return "Hoc sinh";
+            return "Học sinh";
         }
         return profile.getFullName();
     }

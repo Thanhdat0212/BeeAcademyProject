@@ -122,7 +122,7 @@ public class UploadController {
     }
 
     /**
-     * Upload anh bia khoa hoc.
+     * Upload ảnh bìa khóa học.
      * Path: /api/upload/course-thumbnail
      */
     @PostMapping("/course-thumbnail")
@@ -170,7 +170,7 @@ public class UploadController {
         teacherAccessService.requireApprovedTeacher(me);
         UploadResponse result = uploadService.uploadQuestionImage(
                 me.userId(), file);
-        return ApiResponse.ok(result, "Upload anh cau hoi thanh cong");
+        return ApiResponse.ok(result, "Upload ảnh câu hỏi thành công");
     }
 
     @PostMapping("/question-audio")
@@ -180,6 +180,6 @@ public class UploadController {
         teacherAccessService.requireApprovedTeacher(me);
         UploadResponse result = uploadService.uploadQuestionAudio(
                 me.userId(), file);
-        return ApiResponse.ok(result, "Upload audio cau hoi thanh cong");
+        return ApiResponse.ok(result, "Upload audio câu hỏi thành công");
     }
 }

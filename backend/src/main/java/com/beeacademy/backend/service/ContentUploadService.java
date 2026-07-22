@@ -661,7 +661,7 @@ public class ContentUploadService {
                                                long maxBytes, String typeDesc,
                                                String sizeDesc) {
         if (file == null || file.isEmpty()) {
-            throw new BusinessException("FILE_REQUIRED", "Vui lÃ²ng chá»n file Ä‘á»ƒ upload.");
+            throw new BusinessException("FILE_REQUIRED", "Vui lòng chọn file để upload.");
         }
         String mime = file.getContentType() == null ? "" : file.getContentType().trim().toLowerCase();
         String ext = getExtension(file.getOriginalFilename(), "").toLowerCase();
@@ -669,11 +669,11 @@ public class ContentUploadService {
         boolean extAllowed = !ext.isBlank() && allowedExtensions.contains(ext);
         if (!mimeAllowed && !extAllowed) {
             throw new BusinessException("INVALID_FILE_TYPE",
-                    "Chá»‰ cháº¥p nháº­n " + typeDesc + ".");
+                    "Chỉ chấp nhận " + typeDesc + ".");
         }
         if (file.getSize() > maxBytes) {
             throw new BusinessException("FILE_TOO_LARGE",
-                    "File khÃ´ng Ä‘Æ°á»£c vÆ°á»£t quÃ¡ " + sizeDesc + ".");
+                    "File không được vượt quá " + sizeDesc + ".");
         }
     }
 

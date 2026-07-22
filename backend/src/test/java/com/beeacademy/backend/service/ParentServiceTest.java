@@ -316,8 +316,8 @@ class ParentServiceTest {
         verify(notificationService).notify(
                 studentId,
                 "parent_link_revoked",
-                "Lien ket phu huynh da bi huy",
-                "Lien ket voi Parent One da bi huy.",
+                "Liên kết phụ huynh đã bị hủy",
+                "Liên kết với Parent One đã bị hủy.",
                 "/student/notifications");
 
         when(linkRepository.findByIdParentIdAndIdStudentId(parentId, studentId)).thenReturn(Optional.of(link));

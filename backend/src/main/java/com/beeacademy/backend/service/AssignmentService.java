@@ -472,8 +472,8 @@ public class AssignmentService {
         userNotificationService.notify(
                 saved.getStudent().getId(),
                 "assignment_graded",
-                "Bai tap da duoc cham diem",
-                "Bai tap \"" + saved.getAssignment().getTitle() + "\" da co diem.",
+                "Bài tập đã được chấm điểm",
+                "Bài tập \"" + saved.getAssignment().getTitle() + "\" đã có điểm.",
                 "/student/courses");
         if (saved.getScore() != null
                 && saved.getAssignment().getMaxScore() != null
@@ -491,12 +491,12 @@ public class AssignmentService {
         }
         if (gradedAt.isBefore(Instant.now().minus(24, ChronoUnit.HOURS))) {
             throw new BusinessException("GRADE_REVISION_WINDOW_EXPIRED",
-                    "Chi duoc sua diem trong vong 24 gio sau khi cham.",
+                    "Chỉ được sửa điểm trong vòng 24 giờ sau khi chấm.",
                     HttpStatus.CONFLICT);
         }
         if (reason == null || reason.isBlank()) {
             throw new BusinessException("GRADE_REVISION_REASON_REQUIRED",
-                    "Can nhap ly do khi sua diem bai tap.",
+                    "Cần nhập lý do khi sửa điểm bài tập.",
                     HttpStatus.BAD_REQUEST);
         }
     }

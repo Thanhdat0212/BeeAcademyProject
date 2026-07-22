@@ -175,8 +175,8 @@ public class ParentPaymentService {
                 new ParentPaymentHistoryResponse.InvoiceInfo(
                         INVOICE_SELLER_NAME,
                         INVOICE_SELLER_TAX_CODE,
-                        displayName(payer, "parent".equals(payerRole) ? "Phu huynh" : "Hoc sinh"),
-                        "Hoc phi khoa hoc " + (course != null ? course.getTitle() : courseSuffix),
+                        displayName(payer, "parent".equals(payerRole) ? "Phụ huynh" : "Học sinh"),
+                        "Học phí khóa học " + (course != null ? course.getTitle() : courseSuffix),
                         "VND",
                         order.getPaidAt() != null ? order.getPaidAt() : order.getCreatedAt()));
     }

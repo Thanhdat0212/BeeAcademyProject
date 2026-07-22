@@ -639,7 +639,7 @@ export default function TeacherContentPage() {
     }
 
     if (lessonForm.videoSource === 'none' && !lessonForm.completionRule) {
-      notify.error('Vui long chon completion rule cho bai hoc khong co video');
+      notify.error('Vui lòng chọn completion rule cho bài học không có video');
       return;
     }
 

@@ -623,7 +623,7 @@ export default function LearningView({ course, rawChapters, courseId, initialLes
     window.setTimeout(() => {
       isResettingSeekRef.current = false;
     }, 0);
-    notify.error('KhÃ´ng thá»ƒ tua tá»›i pháº§n chÆ°a xem.');
+    notify.error('Không thể tua tới phần chưa xem.');
     return true;
   }
 
@@ -724,7 +724,7 @@ export default function LearningView({ course, rawChapters, courseId, initialLes
       link.rel = 'noopener noreferrer';
       link.click();
     } catch (error) {
-      notify.error(error instanceof Error ? error.message : 'Khong the tai tai lieu.');
+      notify.error(error instanceof Error ? error.message : 'Không thể tải tài liệu.');
     } finally {
       setDownloadingDocumentId(null);
     }

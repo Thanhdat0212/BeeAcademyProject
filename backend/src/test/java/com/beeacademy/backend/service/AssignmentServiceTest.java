@@ -210,7 +210,7 @@ class AssignmentServiceTest {
         verify(userNotificationService).notify(
                 eq(studentId),
                 eq("assignment_graded"),
-                eq("Bai tap da duoc cham diem"),
+                eq("Bài tập đã được chấm điểm"),
                 anyString(),
                 eq("/student/courses"));
     }

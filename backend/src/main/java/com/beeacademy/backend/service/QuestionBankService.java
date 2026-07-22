@@ -32,14 +32,14 @@ public class QuestionBankService {
     @Transactional
     public QuestionBankResponse createQuestionBank(AuthenticatedUser me, CreateQuestionBankRequest req) {
         if (req == null) {
-            throw new BusinessException("INVALID_REQUEST", "Du lieu ngan hang cau hoi khong hop le.");
+            throw new BusinessException("INVALID_REQUEST", "Dữ liệu ngân hàng câu hỏi không hợp lệ.");
         }
         String title = normalizeTitle(req.title());
         if (title == null) {
-            throw new BusinessException("QUESTION_BANK_TITLE_REQUIRED", "Ten ngan hang khong duoc trong.");
+            throw new BusinessException("QUESTION_BANK_TITLE_REQUIRED", "Tên ngân hàng không được trống.");
         }
         if (req.grade() == null || req.grade() < 1) {
-            throw new BusinessException("GRADE_REQUIRED", "Vui long chon lop.");
+            throw new BusinessException("GRADE_REQUIRED", "Vui lòng chọn lớp.");
         }
 
         Profile teacher = teacherAccessService.requireApprovedTeacher(me);
@@ -76,16 +76,16 @@ public class QuestionBankService {
     public QuestionBankResponse updateQuestionBank(
             AuthenticatedUser me, UUID questionBankId, CreateQuestionBankRequest req) {
         if (req == null) {
-            throw new BusinessException("INVALID_REQUEST", "Du lieu ngan hang cau hoi khong hop le.");
+            throw new BusinessException("INVALID_REQUEST", "Dữ liệu ngân hàng câu hỏi không hợp lệ.");
         }
         teacherAccessService.requireApprovedTeacher(me);
         QuestionBank bank = getOwnedQuestionBank(questionBankId, me.userId());
         String title = normalizeTitle(req.title());
         if (title == null) {
-            throw new BusinessException("QUESTION_BANK_TITLE_REQUIRED", "Ten ngan hang khong duoc trong.");
+            throw new BusinessException("QUESTION_BANK_TITLE_REQUIRED", "Tên ngân hàng không được trống.");
         }
         if (req.grade() == null || req.grade() < 1) {
-            throw new BusinessException("GRADE_REQUIRED", "Vui long chon lop.");
+            throw new BusinessException("GRADE_REQUIRED", "Vui lòng chọn lớp.");
         }
         if (questionBankRepository.existsByTeacherIdAndTitleIgnoreCase(me.userId(), title, questionBankId)) {
             throw duplicateTitle();

@@ -242,7 +242,7 @@ export default function TeacherComplaintsPage() {
         }
       } catch (error) {
         if (!cancelled) {
-          notify.error(error instanceof Error ? error.message : 'Khong the tai danh sach khieu nai');
+          notify.error(error instanceof Error ? error.message : 'Không thể tải danh sách khiếu nại');
         }
       } finally {
         if (!cancelled) {
@@ -571,7 +571,7 @@ export default function TeacherComplaintsPage() {
 
               {isLoading ? (
                 <p className="text-sm text-on-surface-variant text-center py-8">
-                  Dang tai danh sach khieu nai...
+                  Đang tải danh sách khiếu nại...
                 </p>
               ) : filteredComplaints.length === 0 ? (
                 <p className="text-sm text-on-surface-variant text-center py-8">

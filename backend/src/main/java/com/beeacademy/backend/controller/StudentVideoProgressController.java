@@ -47,7 +47,7 @@ public class StudentVideoProgressController {
             @Valid @RequestBody SaveStudentVideoProgressRequest request) {
         return ApiResponse.ok(
                 progressService.saveProgress(courseId, lessonId, CurrentUser.required(), request),
-                "Da luu vi tri xem video"
+                "Đã lưu vị trí xem video"
         );
     }
 }

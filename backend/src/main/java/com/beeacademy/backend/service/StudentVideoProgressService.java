@@ -99,7 +99,7 @@ public class StudentVideoProgressService {
         if (!lesson.getChapter().getCourse().getId().equals(courseId)) {
             throw new BusinessException(
                     "STUDENT_VIDEO_PROGRESS_INVALID_LESSON",
-                    "Bai hoc khong thuoc khoa hoc da chon.",
+                    "Bài học không thuộc khóa học đã chọn.",
                     HttpStatus.BAD_REQUEST
             );
         }
@@ -110,14 +110,14 @@ public class StudentVideoProgressService {
         if (me == null || !"student".equalsIgnoreCase(me.role())) {
             throw new BusinessException(
                     "STUDENT_VIDEO_PROGRESS_ROLE_FORBIDDEN",
-                    "Chi hoc sinh moi co the luu tien do xem video.",
+                    "Chỉ học sinh mới có thể lưu tiến độ xem video.",
                     HttpStatus.FORBIDDEN
             );
         }
         if (!enrollmentRepository.existsByStudentIdAndCourseId(me.userId(), courseId)) {
             throw new BusinessException(
                     "STUDENT_VIDEO_PROGRESS_COURSE_FORBIDDEN",
-                    "Ban can tham gia khoa hoc de luu tien do xem video.",
+                    "Bạn cần tham gia khóa học để lưu tiến độ xem video.",
                     HttpStatus.FORBIDDEN
             );
         }

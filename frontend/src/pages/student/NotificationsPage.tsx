@@ -312,7 +312,7 @@ export default function NotificationsPage() {
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-on-surface-variant">
                           <span>{invitation.parentEmail}</span>
                           <span>{relationshipLabels[invitation.relationship]}</span>
-                          <span>Het han: {formatDateTime(invitation.expiresAt)}</span>
+                          <span>Hết hạn: {formatDateTime(invitation.expiresAt)}</span>
                           <span className="inline-flex items-center gap-1">
                             <Clock3 className="w-3.5 h-3.5" />
                             Gửi lúc: {formatDateTime(invitation.invitedAt)}

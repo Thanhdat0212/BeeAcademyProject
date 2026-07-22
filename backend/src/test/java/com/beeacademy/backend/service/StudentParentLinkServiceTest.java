@@ -125,8 +125,8 @@ class StudentParentLinkServiceTest {
         verify(notificationService).notify(
                 parentId,
                 "parent_link_accepted",
-                "Hoc sinh da chap nhan lien ket",
-                "Student One da chap nhan loi moi lien ket phu huynh.",
+                "Học sinh đã chấp nhận liên kết",
+                "Student One đã chấp nhận lời mời liên kết phụ huynh.",
                 "/parent/link");
         assertThat(Duration.between(decisionStartedAt, Instant.now()))
                 .isLessThanOrEqualTo(Duration.ofSeconds(30));
@@ -154,8 +154,8 @@ class StudentParentLinkServiceTest {
         verify(notificationService).notify(
                 parentId,
                 "parent_link_rejected",
-                "Hoc sinh da tu choi lien ket",
-                "Student One da tu choi loi moi lien ket phu huynh.",
+                "Học sinh đã từ chối liên kết",
+                "Student One đã từ chối lời mời liên kết phụ huynh.",
                 "/parent/link");
         assertThat(Duration.between(decisionStartedAt, Instant.now()))
                 .isLessThanOrEqualTo(Duration.ofSeconds(30));
@@ -187,8 +187,8 @@ class StudentParentLinkServiceTest {
         verify(notificationService).notify(
                 parentId,
                 "parent_link_revoked",
-                "Lien ket da bi huy",
-                "Lien ket voi Student One da bi huy.",
+                "Liên kết đã bị hủy",
+                "Liên kết với Student One đã bị hủy.",
                 "/parent/link");
     }
 

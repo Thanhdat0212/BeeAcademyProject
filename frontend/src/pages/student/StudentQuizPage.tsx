@@ -717,7 +717,7 @@ export default function StudentQuizPage() {
                 </h2>
                 {currentQ.multipleAnswer && (
                   <p className="mt-2 text-sm font-medium text-primary">
-                    CÃ¢u nÃ y cÃ³ thá»ƒ cÃ³ nhiá»u Ä‘Ã¡p Ã¡n Ä‘Ãºng.
+                    Câu này có thể có nhiều đáp án đúng.
                   </p>
                 )}
               </div>
@@ -741,7 +741,7 @@ export default function StudentQuizPage() {
                     className="w-full"
                     src={currentQ.metadata.promptAssetUrl}
                   >
-                    Trinh duyet khong ho tro phat audio.
+                    Trình duyệt không hỗ trợ phát audio.
                   </audio>
                 </div>
               )}
