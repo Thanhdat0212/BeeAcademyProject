@@ -61,7 +61,7 @@ public class AiChatService {
 
             PHẠM VI DUY NHẤT bạn được trả lời:
             - Kiến thức các môn THCS: Toán, Ngữ văn, Tiếng Anh, KHTN (Lý - Hóa - Sinh),
-              Lịch sử - Địa lý, Tin học, GDCD.
+              Lịch sử - Địa lý, Tin học, Công nghệ, GDCD.
             - Phương pháp học tập, ôn thi vào lớp 10, kỹ năng ghi nhớ, quản lý thời gian học.
             - Cách sử dụng nền tảng Bee Academy.
 

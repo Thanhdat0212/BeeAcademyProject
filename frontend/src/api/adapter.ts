@@ -46,6 +46,7 @@ const SLUG_TO_SUBJECT: Record<string, Subject> = {
   'lich-su-dia-ly': 'Sử',
   'tieng-anh': 'Tất cả',
   'tin-hoc': 'Tất cả',
+  'cong-nghe': 'Công nghệ',
   'on-thi-lop-10': 'Tất cả',
   'ky-nang-mem': 'Tất cả',
 };

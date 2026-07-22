@@ -39,12 +39,11 @@ public class RewardService {
     }
 
     @Transactional
-    public int recordAssessmentScore(
+    public int recordExamScore(
             UUID studentId,
-            RewardAssessmentType assessmentType,
-            UUID assessmentId,
+            UUID examConfigId,
             double scorePercent) {
-        if (studentId == null || assessmentType == null || assessmentId == null) {
+        if (studentId == null || examConfigId == null) {
             return 0;
         }
         int points = toRewardPoints(scorePercent);
@@ -52,13 +51,14 @@ public class RewardService {
 
         StudentRewardBalance balance = getOrCreateBalance(studentId);
         StudentRewardSource source = sourceRepository
-                .findByStudentIdAndAssessmentTypeAndAssessmentId(studentId, assessmentType, assessmentId)
+                .findByStudentIdAndAssessmentTypeAndAssessmentId(
+                        studentId, RewardAssessmentType.EXAM, examConfigId)
                 .orElse(null);
 
         int delta;
         if (source == null) {
             source = StudentRewardSource.create(
-                    studentId, assessmentType, assessmentId, normalizedScore, points);
+                    studentId, RewardAssessmentType.EXAM, examConfigId, normalizedScore, points);
             sourceRepository.save(source);
             delta = points;
         } else {
@@ -68,8 +68,8 @@ public class RewardService {
         if (delta > 0) {
             balance.addPoints(delta);
             balanceRepository.save(balance);
-            log.info("Reward points +{} for student={} assessment={} {}",
-                    delta, studentId, assessmentType, assessmentId);
+            log.info("Reward points +{} for student={} exam={}",
+                    delta, studentId, examConfigId);
         }
         return delta;
     }

@@ -1,4 +1,4 @@
-export type Subject = 'Toán' | 'Lý' | 'Hóa' | 'Văn' | 'Sử' | 'Địa' | 'Tất cả';
+export type Subject = 'Toán' | 'Lý' | 'Hóa' | 'Văn' | 'Sử' | 'Địa' | 'Công nghệ' | 'Tất cả';
 export type Grade = 'Lớp 6' | 'Lớp 7' | 'Lớp 8' | 'Lớp 9' | 'Tất cả';
 
 export interface QuizQuestion {

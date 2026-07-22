@@ -12,7 +12,6 @@ import com.beeacademy.backend.model.Question;
 import com.beeacademy.backend.model.QuestionChoice;
 import com.beeacademy.backend.model.QuizAttempt;
 import com.beeacademy.backend.model.QuizConfig;
-import com.beeacademy.backend.model.RewardAssessmentType;
 import com.beeacademy.backend.repository.ChapterRepository;
 import com.beeacademy.backend.repository.EnrollmentRepository;
 import com.beeacademy.backend.repository.ProfileRepository;
@@ -69,7 +68,6 @@ public class QuizService {
     private final EnrollmentRepository  enrollmentRepository;
     private final ProfileRepository     profileRepository;
     private final ObjectMapper          objectMapper;
-    private final RewardService         rewardService;
 
     // ========================================================================
     // GV: quản lý config
@@ -280,12 +278,6 @@ public class QuizService {
 
         // Tăng usage_count cho các câu đã dùng
         questionRepository.incrementUsageCount(usedQuestionIds);
-        rewardService.recordAssessmentScore(
-                me.userId(),
-                RewardAssessmentType.QUIZ,
-                attempt.getQuizConfig().getId(),
-                score * 10.0);
-
         log.info("Student {} nộp quiz {} — score={}/10 passed={}",
                  me.userId(), attemptId, score, passed);
 

@@ -110,7 +110,7 @@ export async function upsertCourseReview(
 //  Categories - cho dropdown filter
 // ---------------------------------------------------------------------------
 
-/** GET /api/categories - 8 danh mục, đã sort theo display_order. */
+/** GET /api/categories - danh mục động, đã sort theo display_order. */
 export async function listCategories(): Promise<Category[]> {
   const res = await apiClient.get<ApiResponse<Category[]>>('/api/categories');
   return unwrap(res.data);

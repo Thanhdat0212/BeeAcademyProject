@@ -29,7 +29,6 @@ import com.beeacademy.backend.model.Lesson;
 import com.beeacademy.backend.model.Profile;
 import com.beeacademy.backend.model.Question;
 import com.beeacademy.backend.model.QuestionChoice;
-import com.beeacademy.backend.model.RewardAssessmentType;
 import com.beeacademy.backend.repository.ChapterRepository;
 import com.beeacademy.backend.repository.CourseRepository;
 import com.beeacademy.backend.repository.CourseProgressItemRepository;
@@ -209,9 +208,8 @@ public class ExamService {
                 log.warn("Could not notify teacher about essay exam attempt {}", saved.getId(), ex);
             }
         } else {
-            rewardService.recordAssessmentScore(
+            rewardService.recordExamScore(
                     me.userId(),
-                    RewardAssessmentType.EXAM,
                     config.getId(),
                     scoringSummary.autoScorePercent());
             certificateService.tryIssueAfterProgress(me.userId(), courseId);
@@ -618,9 +616,8 @@ public class ExamService {
                 oldScore,
                 request.scorePercent(),
                 request.revisionReason()));
-        rewardService.recordAssessmentScore(
+        rewardService.recordExamScore(
                 saved.getStudent().getId(),
-                RewardAssessmentType.EXAM,
                 saved.getExamConfig().getId(),
                 request.scorePercent());
         certificateService.handleRequiredExamGradeChanged(saved);
