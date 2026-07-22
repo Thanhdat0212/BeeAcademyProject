@@ -321,6 +321,7 @@ public class QuestionService {
         int multipleChoiceCount = 0;
         int trueFalseCount = 0;
         int fillInBlankCount = 0;
+        int imageQuestionCount = 0;
         int essayCount = 0;
         for (Object[] row : typeRows) {
             String type = (String) row[0];
@@ -329,12 +330,14 @@ public class QuestionService {
                 case "multiple_choice" -> multipleChoiceCount = (int) count;
                 case "true_false" -> trueFalseCount = (int) count;
                 case "fill_in_blank" -> fillInBlankCount = (int) count;
+                case "image_question" -> imageQuestionCount = (int) count;
                 case "essay", "essay_short", "essay_long" -> essayCount += (int) count;
                 default -> {
                 }
             }
         }
-        int totalExamSupported = multipleChoiceCount + trueFalseCount + fillInBlankCount + essayCount;
+        int totalExamSupported = multipleChoiceCount + trueFalseCount + fillInBlankCount
+                + imageQuestionCount + essayCount;
         return new QuestionStatsResponse(
                 easy,
                 medium,
@@ -343,6 +346,7 @@ public class QuestionService {
                 multipleChoiceCount,
                 trueFalseCount,
                 fillInBlankCount,
+                imageQuestionCount,
                 essayCount,
                 totalExamSupported);
     }
@@ -351,7 +355,8 @@ public class QuestionService {
         List<CreateQuestionRequest.ChoiceRequest> safeChoices = choiceReqs != null ? choiceReqs : List.of();
         for (int i = 0; i < safeChoices.size(); i++) {
             CreateQuestionRequest.ChoiceRequest choiceRequest = safeChoices.get(i);
-            QuestionChoice choice = QuestionChoice.create(question, choiceRequest.content(), choiceRequest.isCorrect(), i + 1);
+            QuestionChoice choice = QuestionChoice.create(
+                    question, choiceRequest.content(), choiceRequest.isCorrect(), i + 1, choiceRequest.imageUrl());
             question.addChoice(choice);
         }
     }
@@ -360,7 +365,7 @@ public class QuestionService {
         try {
             List<QuestionResponse.ChoiceResponse> choices = question.getChoices().stream()
                     .map(c -> new QuestionResponse.ChoiceResponse(
-                            c.getId(), c.getContent(), c.getIsCorrect(), c.getPosition()))
+                            c.getId(), c.getContent(), c.getIsCorrect(), c.getPosition(), c.getImageUrl()))
                     .toList();
             return objectMapper.writeValueAsString(choices);
         } catch (Exception ex) {
@@ -460,6 +465,8 @@ public class QuestionService {
                 choiceState.put("content", choice.getContent());
                 choiceState.put("isCorrect", Boolean.TRUE.equals(choice.getIsCorrect()));
                 choiceState.put("position", choice.getPosition());
+                if (choice.getImageUrl() != null) choiceState.put("imageUrl", choice.getImageUrl());
+                else choiceState.putNull("imageUrl");
             });
             return objectMapper.writeValueAsString(state);
         } catch (Exception ex) {
@@ -601,7 +608,13 @@ public class QuestionService {
         }
 
         if ("image_question".equals(req.type())) {
-            requireMetadataText(req.metadata(), "promptAssetUrl", "Câu hỏi hình ảnh can co URL hinh.");
+            boolean hasPromptAsset = hasMetadataText(req.metadata(), "promptAssetUrl");
+            boolean hasChoiceImage = req.choices().stream()
+                    .anyMatch(choice -> choice.imageUrl() != null && !choice.imageUrl().isBlank());
+            if (!hasPromptAsset && !hasChoiceImage) {
+                throw new BusinessException("METADATA_REQUIRED",
+                        "Câu hỏi hình ảnh cần có ảnh: ở đề bài hoặc ở ít nhất 1 đáp án.");
+            }
         }
         if ("audio_question".equals(req.type())) {
             requireMetadataText(req.metadata(), "promptAssetUrl", "Câu hỏi audio can co URL audio.");

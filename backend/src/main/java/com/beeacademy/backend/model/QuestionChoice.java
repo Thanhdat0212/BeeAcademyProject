@@ -50,19 +50,25 @@ public class QuestionChoice {
     @Column(name = "position", nullable = false)
     private Integer position;
 
+    /** Ảnh minh họa cho đáp án — dùng khi câu hỏi có đáp án là hình (VD: chọn hình tam giác vuông). */
+    @Column(name = "image_url")
+    private String imageUrl;
+
     public static QuestionChoice create(Question question, String content,
-                                         boolean isCorrect, int position) {
+                                         boolean isCorrect, int position, String imageUrl) {
         QuestionChoice c = new QuestionChoice();
         c.id        = UUID.randomUUID();
         c.question  = question;
         c.content   = content;
         c.isCorrect = isCorrect;
         c.position  = position;
+        c.imageUrl  = imageUrl;
         return c;
     }
 
-    public void update(String content, boolean isCorrect) {
+    public void update(String content, boolean isCorrect, String imageUrl) {
         this.content   = content;
         this.isCorrect = isCorrect;
+        this.imageUrl  = imageUrl;
     }
 }

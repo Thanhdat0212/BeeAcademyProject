@@ -57,6 +57,7 @@ public record CreateQuestionRequest(
 ) {
     public record ChoiceRequest(
             @NotBlank String content,
-            boolean isCorrect
+            boolean isCorrect,
+            @Size(max = 2000) String imageUrl
     ) {}
 }

@@ -205,8 +205,8 @@ class QuestionServiceTest {
         Question question = Question.create(
                 fixture.teacher(), null, fixture.category(), 8, null,
                 content, "Explanation", 1.0, "[\"algebra\"]", null, "medium", "multiple_choice");
-        question.addChoice(QuestionChoice.create(question, "A", true, 1));
-        question.addChoice(QuestionChoice.create(question, "B", false, 2));
+        question.addChoice(QuestionChoice.create(question, "A", true, 1, null));
+        question.addChoice(QuestionChoice.create(question, "B", false, 2, null));
         ReflectionTestUtils.setField(question, "usageCount", usageCount);
         return question;
     }
@@ -214,7 +214,7 @@ class QuestionServiceTest {
     private QuestionVersion currentVersion(Question question, int versionNo) throws Exception {
         List<QuestionResponse.ChoiceResponse> choices = question.getChoices().stream()
                 .map(choice -> new QuestionResponse.ChoiceResponse(
-                        choice.getId(), choice.getContent(), choice.getIsCorrect(), choice.getPosition()))
+                        choice.getId(), choice.getContent(), choice.getIsCorrect(), choice.getPosition(), choice.getImageUrl()))
                 .toList();
         return QuestionVersion.snapshot(
                 question,
@@ -234,8 +234,8 @@ class QuestionServiceTest {
                 "medium",
                 "multiple_choice",
                 List.of(
-                        new CreateQuestionRequest.ChoiceRequest("A", true),
-                        new CreateQuestionRequest.ChoiceRequest("B", false)),
+                        new CreateQuestionRequest.ChoiceRequest("A", true, null),
+                        new CreateQuestionRequest.ChoiceRequest("B", false, null)),
                 1.0,
                 List.of("algebra"),
                 (JsonNode) null);

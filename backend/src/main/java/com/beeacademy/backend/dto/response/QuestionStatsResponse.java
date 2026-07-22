@@ -12,11 +12,12 @@ public record QuestionStatsResponse(
         int multipleChoiceCount,
         int trueFalseCount,
         int fillInBlankCount,
+        int imageQuestionCount,
         int essayCount,
         int totalExamSupported
 ) {
     public QuestionStatsResponse(int easyCount, int mediumCount, int hardCount, int totalActive) {
-        this(easyCount, mediumCount, hardCount, totalActive, 0, 0, 0, 0, 0);
+        this(easyCount, mediumCount, hardCount, totalActive, 0, 0, 0, 0, 0, 0);
     }
 
     public int total() { return easyCount + mediumCount + hardCount; }

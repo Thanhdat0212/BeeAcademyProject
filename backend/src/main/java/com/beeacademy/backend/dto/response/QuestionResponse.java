@@ -30,11 +30,11 @@ public record QuestionResponse(
         String duplicateWarning,
         List<ChoiceResponse> choices
 ) {
-    public record ChoiceResponse(UUID id, String content, Boolean isCorrect, Integer position) {}
+    public record ChoiceResponse(UUID id, String content, Boolean isCorrect, Integer position, String imageUrl) {}
 
     public static QuestionResponse fromEntity(Question q, ObjectMapper mapper) {
         List<ChoiceResponse> choices = q.getChoices().stream()
-                .map(c -> new ChoiceResponse(c.getId(), c.getContent(), c.getIsCorrect(), c.getPosition()))
+                .map(c -> new ChoiceResponse(c.getId(), c.getContent(), c.getIsCorrect(), c.getPosition(), c.getImageUrl()))
                 .toList();
         return new QuestionResponse(
                 q.getId(),
@@ -86,7 +86,7 @@ public record QuestionResponse(
 
     public static QuestionResponse forStudent(Question q, ObjectMapper mapper) {
         List<ChoiceResponse> choices = q.getChoices().stream()
-                .map(c -> new ChoiceResponse(c.getId(), c.getContent(), null, c.getPosition()))
+                .map(c -> new ChoiceResponse(c.getId(), c.getContent(), null, c.getPosition(), c.getImageUrl()))
                 .toList();
         return new QuestionResponse(
                 q.getId(),
