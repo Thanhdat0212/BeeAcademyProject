@@ -784,6 +784,13 @@ export default function StudentQuizPage() {
                       }`}>
                         {letter}
                       </div>
+                      {choice.imageUrl && (
+                        <img
+                          src={choice.imageUrl}
+                          alt={`Đáp án ${letter}`}
+                          className="h-16 w-16 flex-shrink-0 rounded-lg border border-outline-variant/40 object-cover"
+                        />
+                      )}
                       <span className={`font-medium text-sm leading-snug flex-1 ${
                         isSelected ? 'text-on-surface' : 'text-on-surface-variant'
                       }`}>

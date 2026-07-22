@@ -331,7 +331,15 @@ export default function ExamQuestionCard({ question, index, onChange, onDelete, 
                   <p className="text-xs font-bold uppercase tracking-wide text-on-surface-variant">
                     Tài nguyên đính kèm
                   </p>
-                  <p className="mt-2 text-sm break-all text-on-surface">{question.metadata.promptAssetUrl}</p>
+                  {question.type === 'image_question' ? (
+                    <img
+                      src={question.metadata.promptAssetUrl}
+                      alt="Ảnh đề bài"
+                      className="mt-2 max-h-64 w-full rounded-lg border border-outline-variant/40 object-contain"
+                    />
+                  ) : (
+                    <p className="mt-2 text-sm break-all text-on-surface">{question.metadata.promptAssetUrl}</p>
+                  )}
                   {question.type === 'audio_question' && question.metadata?.transcript && (
                     <p className="mt-2 text-sm whitespace-pre-wrap text-on-surface">{question.metadata.transcript}</p>
                   )}
@@ -444,6 +452,14 @@ export default function ExamQuestionCard({ question, index, onChange, onDelete, 
                         <span className="text-sm font-bold text-on-surface-variant w-5 flex-shrink-0">
                           {String.fromCharCode(65 + optIdx)}.
                         </span>
+
+                        {question.metadata?.optionImages?.[optIdx] && (
+                          <img
+                            src={question.metadata.optionImages[optIdx]}
+                            alt={`Ảnh đáp án ${String.fromCharCode(65 + optIdx)}`}
+                            className="h-10 w-10 flex-shrink-0 rounded-lg border border-outline-variant object-cover"
+                          />
+                        )}
 
                         <input
                           type="text"

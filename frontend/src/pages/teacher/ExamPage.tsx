@@ -146,8 +146,10 @@ export default function TeacherExamPage() {
   const formMultipleChoiceCount = formQuestionCounts.multipleChoice;
   const formTrueFalseCount = formQuestionCounts.trueFalse;
   const formFillInBlankCount = formQuestionCounts.fillInBlank;
+  const formImageQuestionCount = formQuestionCounts.imageQuestion;
   const formEssayCount = formQuestionCounts.essay;
-  const formObjectiveCount = formMultipleChoiceCount + formTrueFalseCount + formFillInBlankCount;
+  const formObjectiveCount = formMultipleChoiceCount + formTrueFalseCount + formFillInBlankCount
+    + formImageQuestionCount;
   const pointBalanceValid = Math.abs(totalPoints - 10) <= 0.001;
   const selectedScopeChapters = currentCourse && currentSlot
     ? chaptersForExamSlot(
@@ -172,6 +174,8 @@ export default function TeacherExamPage() {
     sum + item.config.trueFalseCount, 0);
   const fillInBlankRandomTotal = activeChapterConfigs.reduce((sum, item) =>
     sum + item.config.fillInBlankCount, 0);
+  const imageQuestionRandomTotal = activeChapterConfigs.reduce((sum, item) =>
+    sum + item.config.imageQuestionCount, 0);
   const objectiveRandomTotal = activeChapterConfigs.reduce((sum, item) =>
     sum + chapterObjectiveCount(item.config), 0);
   const essayRandomTotal = activeChapterConfigs.reduce((sum, item) =>
@@ -218,6 +222,15 @@ export default function TeacherExamPage() {
         typeLabel: 'điền chỗ trống',
         need: item.config.fillInBlankCount,
         have: item.stats.fillInBlankCount,
+      });
+    }
+    if (item.config.imageQuestionCount > item.stats.imageQuestionCount) {
+      warnings.push({
+        key: `${item.chapter.id}-image_question`,
+        chapterTitle: item.chapter.title,
+        typeLabel: 'câu hỏi hình ảnh',
+        need: item.config.imageQuestionCount,
+        have: item.stats.imageQuestionCount,
       });
     }
     if (item.config.essayCount > item.stats.essayCount) {
@@ -272,6 +285,7 @@ export default function TeacherExamPage() {
           multipleChoiceCount: stats.multipleChoiceCount,
           trueFalseCount: stats.trueFalseCount,
           fillInBlankCount: stats.fillInBlankCount,
+          imageQuestionCount: stats.imageQuestionCount,
           essayCount: stats.essayCount,
         }] as const;
       }),
@@ -478,6 +492,7 @@ export default function TeacherExamPage() {
             multipleChoiceCount: item.config.multipleChoiceCount,
             trueFalseCount: item.config.trueFalseCount,
             fillInBlankCount: item.config.fillInBlankCount,
+            imageQuestionCount: item.config.imageQuestionCount,
           })),
         },
       );
@@ -486,6 +501,7 @@ export default function TeacherExamPage() {
         randomizedCounts.multipleChoice !== multipleChoiceRandomTotal
         || randomizedCounts.trueFalse !== trueFalseRandomTotal
         || randomizedCounts.fillInBlank !== fillInBlankRandomTotal
+        || randomizedCounts.imageQuestion !== imageQuestionRandomTotal
         || randomizedCounts.essay !== essayRandomTotal
       ) {
         notify.error(
@@ -1287,7 +1303,7 @@ export default function TeacherExamPage() {
                           Theo dõi nhanh cơ cấu đề để tránh lệch điểm và lệch loại câu.
                         </p>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
                         <div className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-3 py-2">
                           <p className="text-[11px] font-bold uppercase tracking-wide text-on-surface-variant">Trắc nghiệm</p>
                           <p className="mt-1 text-lg font-extrabold text-on-surface">{formMultipleChoiceCount}</p>
@@ -1312,6 +1328,15 @@ export default function TeacherExamPage() {
                           {chapterRandomTotal > 0 && (
                             <p className="mt-0.5 text-[11px] font-medium text-on-surface-variant">
                               Dự kiến random: {fillInBlankRandomTotal}
+                            </p>
+                          )}
+                        </div>
+                        <div className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-3 py-2">
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-on-surface-variant">Câu hỏi ảnh</p>
+                          <p className="mt-1 text-lg font-extrabold text-on-surface">{formImageQuestionCount}</p>
+                          {chapterRandomTotal > 0 && (
+                            <p className="mt-0.5 text-[11px] font-medium text-on-surface-variant">
+                              Dự kiến random: {imageQuestionRandomTotal}
                             </p>
                           )}
                         </div>
@@ -1404,7 +1429,7 @@ export default function TeacherExamPage() {
                                 </p>
                               </div>
 
-                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
                                 <label className="block rounded-xl border border-outline-variant/30 bg-surface-container/50 p-3">
                                   <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1 block">
                                     Trắc nghiệm
@@ -1476,6 +1501,29 @@ export default function TeacherExamPage() {
                                 </label>
                                 <label className="block rounded-xl border border-outline-variant/30 bg-surface-container/50 p-3">
                                   <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1 block">
+                                    Câu hỏi ảnh
+                                  </span>
+                                  <span className="mb-1.5 block text-[11px] text-on-surface-variant">
+                                    Có {stats?.imageQuestionCount ?? 0} câu
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={config.imageQuestionCount}
+                                    onChange={e => updateChapterRandomConfig(
+                                      chapter.id,
+                                      'imageQuestionCount',
+                                      parseInt(e.target.value) || 0,
+                                    )}
+                                    className={`w-full px-3 py-2 text-sm rounded-lg focus:outline-none focus:border-primary ${
+                                      config.imageQuestionCount > (stats?.imageQuestionCount ?? Number.MAX_SAFE_INTEGER)
+                                        ? 'border border-red-300 bg-red-50 text-red-700'
+                                        : 'bg-surface-container border border-outline-variant text-on-surface'
+                                    }`}
+                                  />
+                                </label>
+                                <label className="block rounded-xl border border-outline-variant/30 bg-surface-container/50 p-3">
+                                  <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wide mb-1 block">
                                     Tự luận
                                   </span>
                                   <span className="mb-1.5 block text-[11px] text-on-surface-variant">
@@ -1511,6 +1559,9 @@ export default function TeacherExamPage() {
                                     Điền chỗ trống: {stats.fillInBlankCount}
                                   </span>
                                   <span className="inline-flex items-center rounded-full bg-surface-container px-3 py-1.5 text-xs font-medium text-on-surface-variant">
+                                    Câu hỏi ảnh: {stats.imageQuestionCount}
+                                  </span>
+                                  <span className="inline-flex items-center rounded-full bg-surface-container px-3 py-1.5 text-xs font-medium text-on-surface-variant">
                                     Tự luận: {stats.essayCount}
                                   </span>
                                 </div>
@@ -1543,7 +1594,7 @@ export default function TeacherExamPage() {
                             <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
                               <p className="font-semibold">Cấu hình random hiện tại hợp lệ</p>
                               <p className="mt-1">
-                                Sẽ random {objectiveRandomTotal} câu tự động chấm ({formatPoints(objectivePointPerQuestion)} điểm/câu), gồm {multipleChoiceRandomTotal} trắc nghiệm, {trueFalseRandomTotal} đúng/sai, {fillInBlankRandomTotal} điền chỗ trống; và {essayRandomTotal} câu tự luận ({formatPoints(essayPointPerQuestion)} điểm/câu).
+                                Sẽ random {objectiveRandomTotal} câu tự động chấm ({formatPoints(objectivePointPerQuestion)} điểm/câu), gồm {multipleChoiceRandomTotal} trắc nghiệm, {trueFalseRandomTotal} đúng/sai, {fillInBlankRandomTotal} điền chỗ trống, {imageQuestionRandomTotal} câu hỏi ảnh; và {essayRandomTotal} câu tự luận ({formatPoints(essayPointPerQuestion)} điểm/câu).
                               </p>
                             </div>
                           )}

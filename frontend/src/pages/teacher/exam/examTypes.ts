@@ -72,6 +72,7 @@ export interface ChapterRandomConfig {
   multipleChoiceCount: number;
   trueFalseCount: number;
   fillInBlankCount: number;
+  imageQuestionCount: number;
   essayCount: number;
 }
 
@@ -80,5 +81,6 @@ export interface ChapterQuestionCount {
   multipleChoiceCount: number;
   trueFalseCount: number;
   fillInBlankCount: number;
+  imageQuestionCount: number;
   essayCount: number;
 }

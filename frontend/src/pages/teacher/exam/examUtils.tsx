@@ -40,6 +40,7 @@ export function defaultChapterRandomConfig(totalCount = 10): ChapterRandomConfig
     multipleChoiceCount,
     trueFalseCount,
     fillInBlankCount,
+    imageQuestionCount: 0,
     essayCount,
   };
 }
@@ -166,12 +167,14 @@ export function countExamQuestionsByType(questions: ExamQuestion[]) {
     multipleChoice: questions.filter(q => q.type === 'multiple_choice').length,
     trueFalse: questions.filter(q => q.type === 'true_false').length,
     fillInBlank: questions.filter(q => q.type === 'fill_in_blank').length,
+    imageQuestion: questions.filter(q => q.type === 'image_question').length,
     essay: questions.filter(q => isManualExamType(q.type)).length,
   };
 }
 
 export function chapterObjectiveCount(config: ChapterRandomConfig) {
-  return config.multipleChoiceCount + config.trueFalseCount + config.fillInBlankCount;
+  return config.multipleChoiceCount + config.trueFalseCount + config.fillInBlankCount
+    + config.imageQuestionCount;
 }
 
 export function chapterTotalCount(config: ChapterRandomConfig) {

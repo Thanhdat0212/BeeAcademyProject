@@ -69,6 +69,7 @@ export interface ExamQuestionRandomRequest {
     multipleChoiceCount?: number;
     trueFalseCount?: number;
     fillInBlankCount?: number;
+    imageQuestionCount?: number;
   }>;
 }
 
@@ -204,6 +205,10 @@ export async function randomizeCourseExamQuestions(
   return unwrap(res.data);
 }
 
+// Cùng lý do với AI Scan: Gemini sinh đề lâu hơn timeout mặc định 15s của apiClient,
+// và phải lớn hơn timeout Gemini phía backend (60s) để nhận lỗi tiếng Việt từ server.
+const AI_DRAFT_CONFIG = { timeout: 90_000 };
+
 export async function generateCourseExamAiDraft(
     courseId: string,
     req: ExamAiDraftRequest,
@@ -211,6 +216,7 @@ export async function generateCourseExamAiDraft(
   const res = await apiClient.post<ApiResponse<ExamAiDraftResponse>>(
     `/api/teacher/courses/${courseId}/exams/ai-draft`,
     req,
+    AI_DRAFT_CONFIG,
   );
   return unwrap(res.data);
 }

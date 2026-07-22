@@ -43,6 +43,9 @@ const MAX_ANSWER_IMAGE_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_ANSWER_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const DEFAULT_FILE_UPLOAD_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'];
 const MAX_ANSWER_IMAGE_COUNT = 10;
+// Hộp thoại chọn file của hệ điều hành làm cửa sổ trình duyệt mất focus (và có thể
+// rớt fullscreen) — trong khoảng ân hạn này các tín hiệu đó không tính là gian lận.
+const FILE_PICKER_GRACE_MS = 120000;
 
 function formatPoints(value: number | null | undefined) {
   if (value == null) return '0';
@@ -216,10 +219,12 @@ export default function StudentExamPage() {
   const [retakeClockMs, setRetakeClockMs] = useState(() => Date.now());
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [integrityViolations, setIntegrityViolations] = useState(0);
+  const [fullscreenActive, setFullscreenActive] = useState(() => Boolean(document.fullscreenElement));
   const autoSubmittingRef = useRef(false);
   const submitLatestRef = useRef<(forceSubmit?: boolean) => Promise<void>>(async () => {});
   const integrityEventQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lastIntegritySignalAtRef = useRef(0);
+  const filePickerGraceUntilRef = useRef(0);
   const orderedQuestions = useMemo(
     () => orderQuestionsObjectiveFirst(exam?.questions ?? []),
     [exam],
@@ -255,6 +260,7 @@ export default function StudentExamPage() {
         autoSubmittingRef.current = false;
         integrityEventQueueRef.current = Promise.resolve();
         lastIntegritySignalAtRef.current = 0;
+        filePickerGraceUntilRef.current = 0;
         setRemainingSeconds(persisted?.remainingSeconds ?? Math.max(0, data.durationMinutes * 60));
         if (persisted) {
           notify.success('Đã khôi phục bài làm nháp trên thiết bị này.');
@@ -386,6 +392,26 @@ export default function StudentExamPage() {
       notify.error(isApiError(err) ? err.message : 'Không thể tải tệp đính kèm.');
     } finally {
       setUploadingImages(prev => ({ ...prev, [questionId]: false }));
+    }
+  }
+
+  function beginFilePickerGrace() {
+    filePickerGraceUntilRef.current = Date.now() + FILE_PICKER_GRACE_MS;
+    const closeGrace = () => {
+      window.removeEventListener('focus', closeGrace);
+      // Blur/fullscreenchange của hộp thoại có thể tới ngay sau khi cửa sổ nhận lại focus.
+      window.setTimeout(() => {
+        filePickerGraceUntilRef.current = 0;
+      }, 1500);
+    };
+    window.addEventListener('focus', closeGrace);
+  }
+
+  async function restoreFullscreen() {
+    try {
+      await document.documentElement.requestFullscreen?.();
+    } catch {
+      notify.error('Trình duyệt chặn bật fullscreen. Nhấn F11 để bật thủ công.');
     }
   }
 
@@ -562,6 +588,10 @@ export default function StudentExamPage() {
     const recordViolation = (eventType: ExamIntegrityEventType) => {
       if (!courseId || autoSubmittingRef.current || submission || submitting) return;
 
+      // Hộp thoại chọn file luôn kéo theo blur (và đôi khi thoát fullscreen) dù học sinh
+      // vẫn ở nguyên trang. Chỉ TAB_HIDDEN mới chứng minh được là đã rời tab thật.
+      if (eventType !== 'TAB_HIDDEN' && Date.now() < filePickerGraceUntilRef.current) return;
+
       // A single tab switch often fires blur + visibility/fullscreen together.
       // Coalesce those browser signals into one audited violation.
       const now = Date.now();
@@ -611,6 +641,7 @@ export default function StudentExamPage() {
       if (document.hidden) recordViolation('TAB_HIDDEN');
     };
     const handleFullscreen = () => {
+      setFullscreenActive(Boolean(document.fullscreenElement));
       if (!document.fullscreenElement) recordViolation('FULLSCREEN_EXIT');
     };
     const handleBlur = () => recordViolation('WINDOW_BLUR');
@@ -910,6 +941,7 @@ export default function StudentExamPage() {
                                   multiple
                                   disabled={Boolean(submission) || isUploading}
                                   className="hidden"
+                                  onClick={beginFilePickerGrace}
                                   onChange={event => {
                                     handleAddEssayImage(question, event.target.files);
                                     event.target.value = '';
@@ -1014,6 +1046,7 @@ export default function StudentExamPage() {
                         <div className="space-y-2">
                           {question.options.map((option, optionIndex) => {
                             const checked = selected.includes(optionIndex);
+                            const optionImage = question.metadata?.optionImages?.[optionIndex];
                             return (
                               <button
                                 key={`${question.id}-${optionIndex}`}
@@ -1035,8 +1068,15 @@ export default function StudentExamPage() {
                                   <span className="mt-1 flex-shrink-0 text-primary">
                                     {checked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                                   </span>
-                                  <span className="min-w-0 text-sm font-medium leading-relaxed text-on-surface">
+                                  <span className="min-w-0 flex-1 text-sm font-medium leading-relaxed text-on-surface">
                                     <LatexText content={option} />
+                                    {optionImage && (
+                                      <img
+                                        src={optionImage}
+                                        alt={`Đáp án ${OPTION_LABELS[optionIndex] ?? optionIndex + 1}`}
+                                        className="mt-2 max-h-40 rounded-xl border border-outline-variant/40 object-contain"
+                                      />
+                                    )}
                                   </span>
                                 </div>
                               </button>
@@ -1080,6 +1120,15 @@ export default function StudentExamPage() {
                     <p className="font-bold text-amber-600">Đang tải ảnh đáp án, vui lòng đợi một chút.</p>
                   )}
                 </div>
+                {exam.requireFullscreen && !fullscreenActive && !submission && (
+                  <button
+                    type="button"
+                    onClick={restoreFullscreen}
+                    className="mt-3 w-full rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-extrabold text-amber-800 hover:bg-amber-100"
+                  >
+                    Bật lại toàn màn hình
+                  </button>
+                )}
                 {submitError && (
                   <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
                     {submitError}

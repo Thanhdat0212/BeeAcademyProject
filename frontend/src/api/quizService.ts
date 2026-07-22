@@ -43,6 +43,7 @@ export interface ChoiceForStudent {
   id: string;
   content: string;
   position: number;
+  imageUrl?: string | null;
 }
 
 export interface QuestionForStudent {
