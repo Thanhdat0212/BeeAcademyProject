@@ -1,0 +1,8 @@
+target/
+*.log
+.env
+.env.*
+postman/
+scripts/
+db/
+*.sql
